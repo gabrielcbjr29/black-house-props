@@ -2,6 +2,19 @@
 
 Painel de análise de props da NBA feito para **tipster**, no celular e no computador. Para cada jogador do dia, calcula a projeção de 20 mercados, mistura com o consenso sem margem das casas, dá a chance de bater, o valor (EV), a **stake sugerida em unidades** e uma nota de A+ a C. Registra as suas tips, **liquida sozinho** pelos boxscores, mede ROI, yield e **CLV**, e gera o **post pronto** (imagem para feed/story e texto para Telegram/WhatsApp).
 
+## Coleta no seu computador (runner próprio)
+
+A NBA bloqueia servidores de nuvem (o GitHub Actions inclusive), mas não a internet de casa. Por isso a coleta roda no seu computador, como "runner próprio" do GitHub, e só a publicação do site fica na nuvem.
+
+1. No repositório: Settings → Actions → Runners → **New self-hosted runner**. Escolha o sistema (Windows, macOS ou Linux) e copie os comandos das seções *Download* e *Configure*, na ordem. Aceite as respostas padrão.
+2. Deixe o runner como serviço, para ligar sozinho com o computador:
+   - Windows: rode o PowerShell como administrador e, no `config.cmd`, responda **Y** quando ele perguntar se quer rodar como serviço.
+   - macOS/Linux: `sudo ./svc.sh install && sudo ./svc.sh start` dentro da pasta do runner.
+3. Precisa ter o **Git** instalado (Windows: git-scm.com, que já traz o Git Bash). O Node é baixado sozinho pela coleta. Python é opcional (lê o PDF oficial de lesões).
+4. Deixe o computador ligado e sem hibernar nos horários de coleta (10h, 15h, 18h30, 20h30 e 22h de Brasília). Se estiver desligado, a coleta espera na fila por até 24 h e roda quando ele ligar.
+
+Para voltar a coletar na nuvem (com a ESPN como fonte), crie a variável `COLETOR` = `nuvem` em Settings → Secrets and variables → Actions → Variables.
+
 ## Novidades da versão 10 (painel escuro preto, verde e dourado)
 
 - Visual de painel escuro: barra lateral de ícones no computador, cartões arredondados, fonte Manrope (licença OFL) e degradê verde → dourado.

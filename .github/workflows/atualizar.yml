@@ -1,4 +1,9 @@
 # Coleta os dados do dia e publica o app no GitHub Pages.
+# A COLETA roda no seu computador (runner próprio, internet de casa): a NBA bloqueia servidores
+# de nuvem, mas não conexões residenciais. Se o computador estiver desligado, a coleta fica na
+# fila e roda quando ele ligar (o GitHub guarda por até 24 h). Para voltar a coletar na nuvem
+# (com a ESPN como fonte), crie a variável COLETOR = nuvem em Settings → Secrets and variables
+# → Actions → Variables. A PUBLICAÇÃO do site sempre roda na nuvem.
 # Horários (Brasília): 10h (abertura), 15h, 18h30, 20h30 (quintetos e linhas mais perto do fechamento)
 # e 22h (jogos da costa oeste). Também roda quando você clica em "Run workflow".
 name: Atualizar dados e publicar
@@ -26,8 +31,11 @@ concurrency:
 
 jobs:
   coletar:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.COLETOR == 'nuvem' && 'ubuntu-latest' || 'self-hosted' }}
     timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,11 +71,8 @@ jobs:
           git config user.email "garrafao-bot@users.noreply.github.com"
           git add data public/data
           git diff --cached --quiet || git commit -m "dados: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase --autostash origin main || true
           git push
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: public
 
   publicar:
     needs: coletar
@@ -76,5 +81,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      # pega a versão mais nova (com os dados que a coleta acabou de salvar)
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
       - id: deploy
         uses: actions/deploy-pages@v4
