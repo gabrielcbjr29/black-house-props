@@ -1,0 +1,15 @@
+{
+  "name": "garrafao-props",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Análise de props da NBA: projeções, chance, valor e tendências do dia",
+  "scripts": {
+    "update": "node collector/build.js",
+    "demo": "node collector/demo.js",
+    "serve": "node scripts/serve.js",
+    "backtest": "node collector/backtest.js",
+    "test": "node --test --test-concurrency=1"
+  },
+  "engines": { "node": ">=20" }
+}

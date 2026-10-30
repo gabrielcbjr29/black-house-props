@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Black House Props</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Análise de props da NBA para tipster: valor contra o mercado, stake, registro de tips e posts.">
+<meta name="theme-color" content="#050605">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Black House">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preload" href="fonts/manrope.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#props" aria-label="Início">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="8" fill="#2DB46E"/><path d="M17 5.5 28 13.5V28H6V13.5Z" fill="#000"/><path d="M12.6 28v-7.6h8.8V28M12.6 20.4a4.4 4.4 0 0 1 8.8 0" fill="none" stroke="#fff" stroke-width="2"/></svg>
+      <div><b id="brandName">Black House</b><small>props NBA</small></div>
+    </a>
+    <nav class="topnav" aria-label="Seções">
+      <a href="#props" title="Props"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg><span>Props</span></a><a href="#tendencias" title="Tendências"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span>Tendências</span></a><a href="#jogos" title="Jogos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18M5.6 5.6c3.5 3 3.5 9.8 0 12.8M18.4 5.6c-3.5 3-3.5 9.8 0 12.8"/></svg><span>Jogos</span></a><a href="#defesa" title="Defesa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/></svg><span>Defesa</span></a><a href="#multipla" title="Múltipla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>Múltipla</span></a><a href="#banca" title="Banca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18v12H3zM3 7l3-4h12l3 4M16 13h2"/></svg><span>Banca</span></a><a href="#guia" title="Guia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.2-2.5 3.8M12 17.2v.3"/></svg><span>Guia</span></a>
+    </nav>
+    <div class="top-meta">
+      <button class="searchpill" id="searchPill" type="button" aria-label="Buscar jogador (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Buscar jogador</span><kbd>Ctrl K</kbd></button>
+      <span class="hdr-games" id="hdrGames"></span>
+      <span class="date" id="hdrDate"></span>
+      <span class="data-pill demo" id="dataPill">Carregando…</span>
+      <button class="iconbtn" id="searchBtn" aria-label="Buscar jogador (Ctrl+K)" title="Buscar jogador (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+      <button class="installbtn" id="installBtn" hidden>Instalar app</button>
+      <a class="iconbtn only-nav-mobile" href="#guia" aria-label="Guia e ajuda"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.2-2.5 3.8M12 17.2v.3"/></svg></a>
+      <button class="themebtn" id="themeBtn" aria-label="Alternar tema claro ou escuro"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="dataNotice"></div>
+
+  <!-- PROPS -->
+  <section class="view" id="v-props" aria-labelledby="h-props">
+    <div id="onboard"></div>
+    <section class="placar" aria-label="Placar da rodada">
+      <div class="pl-top"><h1 id="h-props">Props do dia</h1><p id="propsEyebrow"></p></div>
+      <div id="daySummary"></div>
+    </section>
+    <div class="props-layout">
+      <div class="filters panel" id="filters" role="region" aria-label="Filtros">
+        <div class="fhead"><h2>Filtros</h2><button class="btn ghost sm" id="resetF">Limpar</button></div>
+        <div class="fgroup"><label for="fq">Jogador</label><input class="search" id="fq" type="search" placeholder="Buscar nome" autocomplete="off"></div>
+        <div class="fgroup"><span class="flabel">Jogo</span><div class="chips" id="fGames"></div></div>
+        <div class="fgroup"><span class="flabel">Mercado</span><div id="fMarkets"></div></div>
+        <div class="fgroup"><span class="flabel">Lado</span><div class="seg" id="fSide"><button data-v="best">Melhor</button><button data-v="over">Mais de</button><button data-v="under">Menos de</button></div></div>
+        <div class="fgroup"><span class="flabel">Origem da linha</span><div class="seg" id="fSrc"><button data-v="all">Todas</button><button data-v="book">Casas</button><button data-v="mine">Minhas</button></div></div>
+        <div class="fgroup"><span class="flabel">Posição</span><div class="chips" id="fPos"><button class="chip" data-v="G">Armador</button><button class="chip" data-v="F">Ala</button><button class="chip" data-v="C">Pivô</button></div></div>
+        <div class="fgroup"><span class="flabel">Nota mínima</span><div class="seg" id="fGrade"><button data-v="C">Todas</button><button data-v="B">B ou mais</button><button data-v="A">A ou mais</button><button data-v="A+">Só A+</button></div></div>
+        <div class="fgroup"><span class="flabel">Amostra do acerto</span><div class="seg" id="fSample"><button data-v="L5">L5</button><button data-v="L10">L10</button><button data-v="L20">L20</button><button data-v="H2H">H2H</button><button data-v="CUR">Temp.</button></div></div>
+        <div class="fgroup"><label for="fHit">Acerto mínimo na amostra <span class="val" id="fHitV"></span></label><input type="range" id="fHit" min="0" max="100" step="10"></div>
+        <div class="fgroup"><label for="fProb">Chance mínima <span class="val" id="fProbV"></span></label><input type="range" id="fProb" min="0" max="90" step="5"></div>
+        <div class="fgroup"><label for="fEV">EV mínimo <span class="val" id="fEVV"></span></label><input type="range" id="fEV" min="-20" max="30" step="1"></div>
+        <div class="fgroup"><span class="flabel">Faixa de odd</span><div class="oddrow"><input id="fOddMin" type="number" step="0.05" min="1.01" aria-label="Odd mínima"><span class="muted">até</span><input id="fOddMax" type="number" step="0.05" min="1.01" aria-label="Odd máxima"></div></div>
+        <div class="fgroup"><span class="flabel">Contexto</span>
+          <div class="checks">
+            <label><input type="checkbox" id="fOddOnly"> Só linhas com odd</label>
+            <label><input type="checkbox" id="fMktOnly"> Só com preço de mercado</label>
+            <label><input type="checkbox" id="fSteam"> Mercado andou a favor</label>
+            <label><input type="checkbox" id="fWo"> Com histórico sem o colega fora</label>
+            <label><input type="checkbox" id="fDvp"> Defesa adversária a favor</label>
+            <label><input type="checkbox" id="fNoB2B"> Tirar time em back-to-back</label>
+            <label><input type="checkbox" id="fNoDoubt"> Tirar jogadores em dúvida</label>
+            <label><input type="checkbox" id="fNoBlow"> Tirar jogos com risco de lavada</label>
+            <label><input type="checkbox" id="fProjGap"> Projeção 10% longe da linha</label>
+          </div>
+        </div>
+        <div class="fsheet-foot"><button class="btn primary" id="closeF">Ver resultados</button></div>
+      </div>
+      <div style="min-width:0">
+        <div class="presets" id="presets" role="group" aria-label="Atalhos de análise"></div>
+        <div class="toolbar">
+          <button class="btn only-mobile" id="openF">Filtros <span id="fCount" class="tag good"></span></button>
+          <span class="count" id="rCount"></span>
+          <button class="btn sm" id="importBtn">Importar linhas da casa</button>
+          <span class="grow"></span>
+          <label class="muted" for="fSort" style="font-size:13.5px">Ordenar</label>
+          <select id="fSort"><option value="score">Melhores do dia</option><option value="stake">Maior stake</option><option value="ev">Maior EV</option><option value="prob">Maior chance</option><option value="hit">Maior acerto</option><option value="gap">Projeção longe da linha</option><option value="streak">Sequência</option><option value="time">Horário do jogo</option></select>
+          <div class="seg" id="fView" style="width:160px"><button data-v="cards">Cartões</button><button data-v="table">Tabela</button></div>
+        </div>
+        <div id="results"><div class="loading-screen">Carregando os dados do dia…</div></div>
+        <div class="more"><button class="btn" id="moreBtn" hidden>Mostrar mais</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TENDÊNCIAS -->
+  <section class="view" id="v-tendencias" hidden aria-labelledby="h-trends">
+    <div class="viewhead"><div class="grow"><h1 id="h-trends">Tendências</h1>
+      <p class="lead">Os nomes que se destacam hoje por ângulo: melhores linhas, movimento do mercado, sequências, desfalques e quinteto. Toque em um nome para abrir a ficha.</p></div></div>
+    <div class="trends" id="trends"></div>
+  </section>
+
+  <!-- JOGOS -->
+  <section class="view" id="v-jogos" hidden aria-labelledby="h-jogos">
+    <div class="viewhead"><div class="grow"><h1 id="h-jogos">Jogos de hoje</h1>
+      <p class="lead">Handicap, total e ritmo dizem quantos minutos e posses cada jogo deve ter. Desfalques mudam o uso de quem fica.</p></div></div>
+    <div class="games" id="gamesGrid"></div>
+  </section>
+
+  <!-- DEFESA -->
+  <section class="view" id="v-defesa" hidden aria-labelledby="h-defesa">
+    <div class="viewhead"><div class="grow"><h1 id="h-defesa">Defesa contra cada posição</h1>
+      <p class="lead">Quanto cada defesa de hoje cede por jogo a armadores, alas e pivôs, com ranking entre os 30 times. 30º é quem mais cede (bom para “mais de”); 1º é quem menos cede (bom para “menos de”).</p></div></div>
+    <div class="chips" id="dvpStat" style="margin-bottom:14px"></div>
+    <div class="dvp-layout">
+      <div><div class="tablewrap"><table class="heat" id="dvpTable"></table></div>
+        <div class="legend"><span>Cede pouco</span><span class="grad"></span><span>Cede muito</span></div></div>
+      <div class="panel targets"><h2>Alvos do dia</h2><p class="muted" style="margin:0;font-size:14px">Jogadores cujo adversário está entre as 8 defesas que mais cedem nessa estatística para a posição deles.</p><div class="toplist" id="dvpTargets"></div></div>
+    </div>
+  </section>
+
+  <!-- MÚLTIPLA -->
+  <section class="view" id="v-multipla" hidden aria-labelledby="h-multi">
+    <div class="viewhead"><div class="grow"><h1 id="h-multi">Múltipla</h1>
+      <p class="lead">Junte pernas pela lista de props ou deixe o app montar. Pernas do mesmo jogo têm a correlação medida nos jogos em que estiveram juntas.</p></div></div>
+    <div class="slip-layout">
+      <div class="panel"><div class="legs" id="legs"></div></div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel sum" id="slipSum"></div>
+        <div class="panel auto">
+          <h2>Montar automaticamente</h2>
+          <p class="muted" style="margin:0;font-size:14px">Escolhe as melhores linhas com valor, uma por jogo, nota A ou A+ primeiro, sem jogador em dúvida. Com odd-alvo, soma pernas até chegar nela. No bilhete, ↻ troca uma perna por outra.</p>
+          <div class="fgroup"><span class="flabel">Número de pernas</span><div class="seg" id="autoN"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button></div></div>
+          <div class="fgroup"><label class="flabel" for="autoOdd">Ou odd-alvo (opcional)</label><input id="autoOdd" class="search" inputmode="decimal" placeholder="ex. 3,00" autocomplete="off"></div>
+          <button class="btn primary" id="autoBtn">Montar bilhete</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BANCA -->
+  <section class="view" id="v-banca" hidden aria-labelledby="h-banca">
+    <div class="viewhead"><div class="grow"><h1 id="h-banca">Banca e resultados</h1>
+      <p class="lead">Suas tips, liquidadas sozinhas pelos boxscores, com ROI, CLV e desempenho por mercado.</p></div></div>
+    <div class="banca" id="bancaView"></div>
+  </section>
+
+  <!-- GUIA -->
+  <section class="view" id="v-guia" hidden aria-labelledby="h-guia">
+    <div class="viewhead"><div class="grow"><h1 id="h-guia">Guia</h1>
+      <p class="lead">O que cada número quer dizer, como usar no computador e no celular, de onde vêm os dados e como o modelo calcula.</p></div></div>
+    <div class="guide" id="guideView"></div>
+  </section>
+
+  <footer class="foot">Proibido para menores de 18 anos. A chance é uma estimativa, não garantia de resultado. Aposta não é investimento. Ministério da Fazenda adverte: apostar pode causar dependência.</footer>
+</main>
+
+<nav class="botnav" aria-label="Seções">
+  <a href="#props"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Props</a>
+  <a href="#tendencias"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Tendências</a>
+  <a href="#jogos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18M5.6 5.6c3.5 3 3.5 9.8 0 12.8M18.4 5.6c-3.5 3-3.5 9.8 0 12.8"/></svg>Jogos</a>
+  <a href="#defesa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/></svg>Defesa</a>
+  <a href="#multipla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Múltipla</a>
+  <a href="#banca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h18v12H3zM3 7l3-4h12l3 4M16 13h2"/></svg>Banca</a>
+</nav>
+
+<a class="fab" id="fab" href="#multipla" hidden>Múltipla <span id="fabN">0</span></a>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-modal="true" role="dialog" aria-labelledby="dName"></aside>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true"><div class="mbox" id="mbox"></div></div>
+<div class="pop" id="pop" hidden role="tooltip"></div>
+<datalist id="bookList"></datalist>
+<div class="toast" id="toast" hidden role="status"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
