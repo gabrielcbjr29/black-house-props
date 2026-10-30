@@ -21,7 +21,9 @@ export function parseBDLGames(json) {
 
 export async function fetchBDLGames({ key, dates, log = console.log }) {
   const q = dates.map(d => 'dates[]=' + encodeURIComponent(d)).join('&');
-  const j = await getJSON(`${BASE}/games?${q}&per_page=100`, { headers: { Authorization: key }, retries: 1 });
+  let j;
+  try { j = await getJSON(`${BASE}/games?${q}&per_page=100`, { headers: { Authorization: key }, retries: 1 }); }
+  catch (e) { if (e.status !== 401 && e.status !== 404) throw e; j = await getJSON(`https://api.balldontlie.io/nba/v1/games?${q}&per_page=100`, { headers: { Authorization: key }, retries: 1 }); }
   const games = parseBDLGames(j);
   log(`  BALLDONTLIE: ${games.length} jogos em ${dates.join(', ')}`);
   return games;

@@ -93,7 +93,8 @@ export function parseLineups(json) {
       const pos = String(o.position ?? '').trim();
       const st = String(o.lineupStatus ?? '').toLowerCase();
       const inactive = /inactive|out/.test(String(o.rosterStatus ?? '').toLowerCase());
-      out[String(o.personId)] = { role: pos ? 'starter' : 'bench', confirmed: st.includes('confirm'), team: t || null, ...(inactive ? { inactive: true } : {}) };
+      const nm = o.playerName || [o.firstName, o.lastName].filter(Boolean).join(' ') || null;
+      out[String(o.personId)] = { role: pos ? 'starter' : 'bench', confirmed: st.includes('confirm'), team: t || null, ...(nm ? { name: nm } : {}), ...(inactive ? { inactive: true } : {}) };
     }
     for (const k in o) walk(o[k], t);
   };

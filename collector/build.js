@@ -19,6 +19,8 @@ import { dailySummary, sendTelegram, radarAlerts } from './notify.js';
 import { buildSlate, buildResults } from './slate.js';
 import { runBacktest } from './backtest.js';
 import { fetchBDLGames } from './bdl.js';
+import { fetchESPNDay, fetchESPNSummary } from './espnbox.js';
+import { normName } from './http.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // lê o arquivo .env (se existir) sem dependências
@@ -39,7 +41,10 @@ const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDa
 async function loadHist(label) {
   const f = join(HIST, label + '.json');
   if (!existsSync(f)) return { season: label, games: {}, names: {}, missing: [] };
-  return JSON.parse(await readFile(f, 'utf8'));
+  const h = JSON.parse(await readFile(f, 'utf8'));
+  // um bloqueio (403) marcava todos os jogos como inexistentes; sem nenhum jogo salvo, tenta tudo de novo
+  if (!Object.keys(h.games || {}).length) h.missing = [];
+  return h;
 }
 async function saveHist(h) { await mkdir(HIST, { recursive: true }); await writeFile(join(HIST, h.season + '.json'), JSON.stringify(h)); }
 
@@ -60,6 +65,40 @@ async function fill(h, ids, what) {
   return got;
 }
 
+/* Histórico pela ESPN: calendário da temporada → dias → jogos encerrados da temporada regular → boxscores.
+   Dias já completos ficam guardados em h.days para não serem pedidos de novo. */
+async function espnSeason(label, anchor, from, before) {
+  const h = await loadHist('espn-' + label); h.days ||= {}; h.missing ||= [];
+  const first = await fetchESPNDay(anchor);
+  const cal = [...new Set(first.calendar)].filter(d => d >= from && d < before).sort();
+  const need = cal.filter(d => !h.days[d]);
+  if (need.length) log(`  ESPN ${label}: lendo ${need.length} dias do calendário…`);
+  const days = await pool(need, CONC, d => fetchESPNDay(d).then(x => ({ d, x })));
+  for (const r of days) {
+    if (!r || r.__error || !r.x) continue;
+    const reg = r.x.games.filter(g => g.type === 2 || g.type == null);
+    if (reg.every(g => g.status === 3)) h.days[r.d] = reg.map(g => g.eid);
+  }
+  const todo = [];
+  for (const d of cal) for (const eid of h.days[d] || []) if (!h.games['e' + eid] && !h.missing.includes('e' + eid)) todo.push({ eid, d });
+  if (todo.length) {
+    log(`  ESPN ${label}: baixando ${todo.length} boxscores…`);
+    let last = 0;
+    const res = await pool(todo, CONC, t => fetchESPNSummary(t.eid, t.d), (d, n) => { if (d - last >= 100 || d === n) { last = d; log(`    ${d}/${n}`); } });
+    let errs = 0;
+    for (const r of res) {
+      if (!r || r.__error) { errs++; continue; }
+      if (r.missing) { h.missing.push(r.gid); continue; }
+      if (r.notFinal) continue;
+      const { names, ...g } = r; h.games[g.gid] = g; Object.assign(h.names, names);
+    }
+    if (errs) log(`    aviso: ${errs} boxscores da ESPN falharam (tentaremos de novo na próxima execução)`);
+  }
+  h.season = 'espn-' + label;
+  await saveHist(h);
+  return h;
+}
+
 async function main() {
   const date = arg('--date', todayET());
   const startYear = +date.slice(0, 4) - (+date.slice(5, 7) < 8 ? 1 : 0);
@@ -72,26 +111,41 @@ async function main() {
   try { schedule = await fetchSchedule(); sources.schedule = 'cdn.nba.com'; log(`  calendário: ${schedule.length} jogos`); }
   catch (e) { warnings.push('Calendário da NBA indisponível: ' + e.message); log('  aviso: calendário indisponível'); }
 
-  // 2. histórico
-  const prev = await loadHist(prevL), cur = await loadHist(curL);
-  if (!flag('--no-prev')) {
+  // 2. histórico (NBA; se o calendário da NBA estiver bloqueado, tudo vem da ESPN)
+  const useESPN = !schedule.length;
+  let prev = await loadHist(prevL), cur = await loadHist(curL);
+  let espnToday = null;
+  if (useESPN) {
+    log('  NBA indisponível: usando a ESPN para calendário e boxscores');
+    try {
+      cur = await espnSeason(curL, date, `${startYear}-08-01`, date);
+      prev = flag('--no-prev') ? { games: {}, names: {} } : await espnSeason(prevL, `${startYear}-02-01`, process.env.PREV_FROM || `${startYear}-01-20`, `${startYear}-07-01`);
+      espnToday = await fetchESPNDay(date);
+      sources.schedule = 'ESPN (reserva)';
+      sources.boxscores = `ESPN · ${Object.keys(cur.games).length} jogos ${curL} + ${Object.keys(prev.games).length} jogos ${prevL}`;
+    } catch (e) { warnings.push('ESPN (reserva) falhou: ' + e.message); }
+  }
+  if (!useESPN && !flag('--no-prev')) {
     const n = +(process.env.PREV_GAMES || 1230);
     await fill(prev, Array.from({ length: n }, (_, i) => gameId(startYear - 1, i + 1)), `temporada ${prevL}`);
     await saveHist(prev);
   }
   let curIds = schedule.filter(g => g.gid.startsWith('002' + String(startYear).slice(-2)) && g.date < date && g.status === 3).map(g => g.gid);
-  if (!schedule.length) {
+  if (!schedule.length && !useESPN) {
     // sem calendário: testa IDs em sequência até achar vários seguidos inexistentes
     curIds = []; let miss = 0;
     for (let i = 1; i <= 1230 && miss < 12; i++) { const id = gameId(startYear, i); if (cur.games[id]) { curIds.push(id); miss = 0; continue; } const r = await fetchBoxscore(id).catch(() => null); if (r && !r.missing && !r.notFinal) { const { names, ...g } = r; cur.games[id] = g; Object.assign(cur.names, names); curIds.push(id); miss = 0; } else miss++; }
   }
-  await fill(cur, curIds, `temporada ${curL}`);
-  await saveHist(cur);
-  sources.boxscores = `cdn.nba.com · ${Object.keys(cur.games).length} jogos ${curL} + ${Object.keys(prev.games).length} jogos ${prevL}`;
+  if (!useESPN) {
+    await fill(cur, curIds, `temporada ${curL}`);
+    await saveHist(cur);
+    sources.boxscores = `cdn.nba.com · ${Object.keys(cur.games).length} jogos ${curL} + ${Object.keys(prev.games).length} jogos ${prevL}`;
+  }
 
   // 3. jogos de hoje e back-to-back
   let today = schedule.filter(g => g.date === date);
-  if (!today.length) {
+  if (!today.length && espnToday) today = espnToday.games.filter(g => g.type === 2 || g.type == null).map(({ eid, type, ...g }) => g);
+  if (!today.length && !useESPN) {
     try { const sb = await fetchScoreboard(); if (sb.length && sb[0].date === date) today = sb; } catch (e) { warnings.push('Placar do dia indisponível: ' + e.message); }
   }
   const y = addDays(date, -1);
@@ -157,6 +211,12 @@ async function main() {
     }
     lists.push(S.lines || []); used.sgo = { calls: S.calls, objectsMonth: S.objects };
   }
+  if (useESPN && Object.keys(lineups).length) {
+    const byName = {}; for (const v of Object.values(lineups)) if (v.name) byName[normName(v.name)] = v;
+    const all = { ...prev.names, ...cur.names }, re = {};
+    for (const [pid, nm] of Object.entries(all)) { const v = byName[normName(nm)]; if (v) re[pid] = v; }
+    lineups = re;
+  }
   if (today.length && env.KALSHI !== '0') {
     try { kalshi = await fetchKalshi({ series: env.KALSHI_SERIES || DEFAULT_SERIES, log }); } catch (e) { warnings.push('Kalshi falhou: ' + e.message); }
   }
@@ -182,6 +242,12 @@ async function main() {
   }
   slate.meta.usage = { requests: { ...USAGE }, odds: used };
   if (bt && !bt.demo && bt.calib) { slate.calib = bt.calib; slate.meta.sources.calib = `backtest ${bt.from} → ${bt.to} (${bt.total} linhas)`; }
+  if (!today.length && !sources.schedule) {
+    log('Sem calendário de nenhuma fonte: mantendo os dados anteriores do site.');
+    for (const w of warnings) log('  aviso: ' + w);
+    await saveState(STATE, state);
+    return;
+  }
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(slate));
   // 7. resultados dos últimos dias: o app usa para liquidar as tips registradas (green/red/devolvida)
