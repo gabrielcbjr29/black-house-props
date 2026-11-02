@@ -193,7 +193,7 @@ async function main() {
   if (today.length && env.ODDS_API_KEY) {
     try {
       const r = await fetchLines({ key: env.ODDS_API_KEY, date, teams, markets: env.ODDS_MARKETS || mode.markets, regions: env.ODDS_REGIONS || 'us',
-        bookmakers: env.ODDS_BOOKMAKERS === 'none' ? null : (env.ODDS_BOOKMAKERS || DEFAULT_BOOKS), state, wantOpen: mode.open, wantClose: mode.close, closeWindow,
+        bookmakers: env.ODDS_BOOKMAKERS === 'none' ? null : (env.ODDS_BOOKMAKERS || DEFAULT_BOOKS), state, wantOpen: mode.open || env.ODDS_FORCE === '1', wantClose: mode.close, closeWindow,
         monthlyBudget: env.ODDS_MONTHLY_BUDGET ? +env.ODDS_MONTHLY_BUDGET : null, log });
       lists.push(r.lines); used.oddsapi = { credits: r.credits, remaining: r.remaining, fetched: r.fetched, skipped: r.skipped, mode: mode.label };
     } catch (e) { warnings.push('The Odds API falhou: ' + e.message); }

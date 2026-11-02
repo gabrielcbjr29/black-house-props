@@ -15,6 +15,11 @@ on:
     - cron: '30 23 * * *'
     - cron: '0 1 * * *'
   workflow_dispatch:
+    inputs:
+      odds_agora:
+        description: 'Buscar as odds das casas agora (gasta ~2 créditos por jogo do plano grátis)'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths-ignore: ['data/**', 'public/data/**']
@@ -54,6 +59,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # ajustes (aba Variables): economico | padrao | completo
           ODDS_MODE: ${{ vars.ODDS_MODE || 'economico' }}
+          ODDS_FORCE: ${{ inputs.odds_agora && '1' || '' }}
           ODDS_MARKETS: ${{ vars.ODDS_MARKETS }}
           ODDS_BOOKMAKERS: ${{ vars.ODDS_BOOKMAKERS }}
           ODDS_MONTHLY_BUDGET: ${{ vars.ODDS_MONTHLY_BUDGET }}
