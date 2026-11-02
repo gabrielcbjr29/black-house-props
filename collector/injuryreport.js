@@ -59,7 +59,10 @@ export async function fetchOfficialInjuries({ log = console.log, after = null, h
     if (!res.ok) continue;
     const buf = Buffer.from(await res.arrayBuffer());
     const f = join(mkdtempSync(join(tmpdir(), 'inj-')), 'r.pdf'); writeFileSync(f, buf);
-    const text = execFileSync('python3', [join(HERE, 'pdftext.py'), f], { encoding: 'utf8', maxBuffer: 20e6 });
+    // python3 no Linux/Mac; no Windows costuma ser python ou py
+    let text = null, lastErr = null;
+    for (const py of ['python3', 'python', 'py']) { try { text = execFileSync(py, [join(HERE, 'pdftext.py'), f], { encoding: 'utf8', maxBuffer: 20e6, windowsHide: true }); break; } catch (e) { lastErr = e; } }
+    if (text == null) throw lastErr;
     const parsed = parseInjuryText(text);
     log(`  relatório oficial: ${c} (${Object.keys(parsed).length} jogadores)`);
     return { report: c, injuries: parsed };
