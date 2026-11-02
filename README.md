@@ -13,7 +13,7 @@ A NBA bloqueia servidores de nuvem (o GitHub Actions inclusive), mas não a inte
 3. Precisa ter o **Git** instalado (Windows: git-scm.com, que já traz o Git Bash). O Node é baixado sozinho pela coleta. Python é opcional (lê o PDF oficial de lesões).
 4. Deixe o computador ligado e sem hibernar nos horários de coleta (10h, 15h, 18h30, 20h30 e 22h de Brasília). Se estiver desligado, a coleta espera na fila por até 24 h e roda quando ele ligar.
 
-Para voltar a coletar na nuvem (com a ESPN como fonte), crie a variável `COLETOR` = `nuvem` em Settings → Secrets and variables → Actions → Variables.
+Com o runner instalado e aparecendo como Idle, crie a variável `COLETOR` = `computador` em Settings → Secrets and variables → Actions → Variables. Sem essa variável, a coleta roda na nuvem do GitHub, com a ESPN como fonte.
 
 ## Novidades da versão 10 (painel escuro preto, verde e dourado)
 

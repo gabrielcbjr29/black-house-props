@@ -1,9 +1,8 @@
 # Coleta os dados do dia e publica o app no GitHub Pages.
-# A COLETA roda no seu computador (runner próprio, internet de casa): a NBA bloqueia servidores
-# de nuvem, mas não conexões residenciais. Se o computador estiver desligado, a coleta fica na
-# fila e roda quando ele ligar (o GitHub guarda por até 24 h). Para voltar a coletar na nuvem
-# (com a ESPN como fonte), crie a variável COLETOR = nuvem em Settings → Secrets and variables
-# → Actions → Variables. A PUBLICAÇÃO do site sempre roda na nuvem.
+# A COLETA roda na nuvem do GitHub, com a ESPN como fonte (a NBA bloqueia servidores de nuvem).
+# Com o runner próprio instalado no seu computador, crie a variável COLETOR = computador em
+# Settings → Secrets and variables → Actions → Variables: a coleta passa a sair pela sua internet
+# de casa e usa as fontes oficiais da NBA. A PUBLICAÇÃO do site sempre roda na nuvem.
 # Horários (Brasília): 10h (abertura), 15h, 18h30, 20h30 (quintetos e linhas mais perto do fechamento)
 # e 22h (jogos da costa oeste). Também roda quando você clica em "Run workflow".
 name: Atualizar dados e publicar
@@ -26,12 +25,12 @@ permissions:
   id-token: write
 
 concurrency:
-  group: atualizar
+  group: coleta
   cancel-in-progress: false
 
 jobs:
   coletar:
-    runs-on: ${{ vars.COLETOR == 'nuvem' && 'ubuntu-latest' || 'self-hosted' }}
+    runs-on: ${{ vars.COLETOR == 'computador' && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 50
     defaults:
       run:
