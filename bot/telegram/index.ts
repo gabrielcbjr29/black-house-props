@@ -1,7 +1,8 @@
 // Bot do Telegram do Black House (Supabase Edge Function, Deno).
 // Lê a lista pronta que a coleta publica (bot.json) e responde aos comandos.
 //
-// Segredos (Supabase → Edge Functions → Secrets):
+// Configuração: segredos da função (Edge Functions → Secrets) OU a tabela privada public.bot_config
+// (key, value), lida com a chave de serviço que o Supabase já entrega à função:
 //   TELEGRAM_BOT_TOKEN  token do @BotFather (obrigatório)
 //   WEBHOOK_SECRET      senha qualquer; protege o webhook e o link de instalação (obrigatório)
 //   ALLOWED_CHATS       IDs liberados, separados por vírgula (opcional; vazio = qualquer pessoa)
@@ -9,12 +10,25 @@
 //
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
-const TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '';
-const SECRET = Deno.env.get('WEBHOOK_SECRET') ?? '';
-const ALLOWED = (Deno.env.get('ALLOWED_CHATS') ?? '').split(',').map(s => s.trim()).filter(Boolean);
-const DATA_URL = Deno.env.get('DATA_URL') ?? 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json';
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
-const TG = (m: string, body: unknown) => fetch(`https://api.telegram.org/bot${TOKEN}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; at: number };
+let CFG: Cfg | null = null;
+async function cfg(): Promise<Cfg> {
+  if (CFG && Date.now() - CFG.at < 60_000) return CFG;
+  const v: Record<string, string> = {};
+  const url = Deno.env.get('SUPABASE_URL'), key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (url && key) {
+    try {
+      const r = await fetch(`${url}/rest/v1/bot_config?select=key,value`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+      if (r.ok) for (const x of await r.json()) v[x.key] = x.value;
+    } catch (e) { console.error('bot_config', e); }
+  }
+  const get = (k: string) => Deno.env.get(k) || v[k] || '';
+  CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
+    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', at: Date.now() };
+  return CFG;
+}
+const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
 type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; pj: number; st: string; rl: string | null; sc: number };
 type Data = { date: string; gen: string; demo: boolean; w: number; games: { id: string; a: string; h: string; t: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
@@ -22,7 +36,7 @@ type Data = { date: string; gen: string; demo: boolean; w: number; games: { id: 
 let CACHE: { at: number; data: Data } | null = null;
 async function data(): Promise<Data> {
   if (CACHE && Date.now() - CACHE.at < 120_000) return CACHE.data;
-  const r = await fetch(DATA_URL + '?t=' + Math.floor(Date.now() / 120_000), { headers: { 'Cache-Control': 'no-cache' } });
+  const r = await fetch((await cfg()).dataUrl + '?t=' + Math.floor(Date.now() / 120_000), { headers: { 'Cache-Control': 'no-cache' } });
   if (!r.ok) throw new Error('dados indisponíveis (' + r.status + ')');
   CACHE = { at: Date.now(), data: await r.json() };
   return CACHE.data;
@@ -46,7 +60,7 @@ const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'
 const n1 = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1)).replace('.', ',');
 const n2 = (x: number) => x.toFixed(2).replace('.', ',');
 const pc = (x: number | null) => x == null ? '–' : Math.round(x * 100) + '%';
-const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, '').trim();
+const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '').trim();
 const dateBR = (d: string) => { const [y, m, dd] = d.split('-'); const wd = new Date(d + 'T12:00:00Z').toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', ''); return `${wd}, ${dd}/${m}`; };
 const genBR = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const FOOT = '\n<i>18+. Confira lesões, quinteto e a odd da sua casa antes de entrar. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>';
@@ -165,7 +179,8 @@ async function handle(update: any) {
   if (!msg || !text) return;
   const chatId: number = msg.chat.id;
   if (update.callback_query) await TG('answerCallbackQuery', { callback_query_id: update.callback_query.id });
-  if (ALLOWED.length && !ALLOWED.includes(String(chatId))) {
+  const allowed = (await cfg()).allowed;
+  if (allowed.length && !allowed.includes(String(chatId))) {
     await TG('sendMessage', { chat_id: chatId, text: `Este bot é privado. Peça acesso ao dono e informe o seu ID: ${chatId}` });
     return;
   }
@@ -177,7 +192,8 @@ async function handle(update: any) {
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
-  if (!TOKEN || !SECRET) return new Response('Faltam os segredos TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET.', { status: 500 });
+  const { token: TOKEN, secret: SECRET } = await cfg();
+  if (!TOKEN || !SECRET) return new Response('Falta configurar TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET (tabela bot_config ou segredos da função).', { status: 500 });
   if (req.method === 'GET') {
     if (url.searchParams.get('setup') !== SECRET) return new Response('ok');
     const self = `https://${url.host}${url.pathname}`;
