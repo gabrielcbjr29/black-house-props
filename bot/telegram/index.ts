@@ -5,13 +5,15 @@
 // (key, value), lida com a chave de serviço que o Supabase já entrega à função:
 //   TELEGRAM_BOT_TOKEN  token do @BotFather (obrigatório)
 //   WEBHOOK_SECRET      senha qualquer; protege o webhook e o link de instalação (obrigatório)
-//   ALLOWED_CHATS       IDs liberados, separados por vírgula (opcional; vazio = qualquer pessoa)
+//   OWNER_CHAT          dono (preenchido sozinho no primeiro /start); aprova quem pede acesso
+//   ALLOWED_CHATS       IDs sempre liberados, separados por vírgula (opcional)
 //   DATA_URL            opcional; padrão = bot.json do GitHub Pages
+// Acesso: tabela public.bot_users (pending | ok | blocked). Quem não está liberado vira pedido para o dono.
 //
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
-type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; at: number };
+type Cfg = { token: string; secret: string; owner: string; allowed: string[]; dataUrl: string; at: number };
 let CFG: Cfg | null = null;
 async function cfg(): Promise<Cfg> {
   if (CFG && Date.now() - CFG.at < 60_000) return CFG;
@@ -24,10 +26,24 @@ async function cfg(): Promise<Cfg> {
     } catch (e) { console.error('bot_config', e); }
   }
   const get = (k: string) => Deno.env.get(k) || v[k] || '';
-  CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
+  CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), owner: get('OWNER_CHAT'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
     dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', at: Date.now() };
   return CFG;
 }
+// banco (REST do próprio Supabase, com a chave de serviço)
+async function sb(path: string, init: RequestInit = {}) {
+  const url = Deno.env.get('SUPABASE_URL'), key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) throw new Error('banco indisponível');
+  const r = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+  if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 120));
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+type U = { chat_id: number; name: string | null; username: string | null; status: 'pending' | 'ok' | 'blocked'; created_at?: string };
+const getUser = async (id: number): Promise<U | null> => (await sb(`bot_users?chat_id=eq.${id}&select=*`))?.[0] ?? null;
+const addUser = (u: U) => sb('bot_users?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ ...u, updated_at: new Date().toISOString() }) });
+const setStatus = (id: number, status: U['status']) => sb(`bot_users?chat_id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ status, updated_at: new Date().toISOString() }) });
+const setOwner = (id: number) => sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'OWNER_CHAT', value: String(id), updated_at: new Date().toISOString() }) });
+
 const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
 type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; pj: number; st: string; rl: string | null; sc: number };
@@ -219,17 +235,76 @@ ${top ? `⭐ <b>Destaque:</b> ${esc(top.n)}, ${top.s === 'o' ? 'mais de' : 'meno
 }
 function chunk<T>(a: T[], n: number) { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; }
 
+const uname = (u: { name: string | null; username: string | null } | null, id: number) => u ? `${esc(u.name || 'Sem nome')}${u.username ? ' · @' + esc(u.username) : ''}` : `ID ${id}`;
+const short = (u: U) => (u.name || u.username || String(u.chat_id)).split(' ')[0].slice(0, 18);
+
+async function pedir(u: U | null, chatId: number, who: string, username: string | null) {
+  if (u?.status === 'blocked') { await TG('sendMessage', { chat_id: chatId, text: '🔒 Este bot é privado.' }); return; }
+  if (u?.status === 'pending') { await TG('sendMessage', { chat_id: chatId, text: '⏳ Seu pedido de acesso ainda está aguardando aprovação do dono.' }); return; }
+  const nu: U = { chat_id: chatId, name: who, username, status: 'pending' };
+  await addUser(nu);
+  await TG('sendMessage', { chat_id: (await cfg()).owner, parse_mode: 'HTML', text: `🔔 <b>PEDIDO DE ACESSO</b>\n\n<blockquote>👤 <b>${uname(nu, chatId)}</b>\n🆔 <code>${chatId}</code></blockquote>\nLiberar o bot para essa pessoa?`,
+    reply_markup: { inline_keyboard: [[BTN('✅ Liberar', `ok:${chatId}`), BTN('❌ Recusar', `no:${chatId}`)]] } });
+  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `<b>🏀 BLACK HOUSE · PROPS NBA</b>\n\n🔒 Este bot é privado.\n⏳ Seu pedido de acesso foi enviado ao dono. Você recebe uma mensagem aqui assim que for liberado.` });
+}
+
+async function usuarios(): Promise<Out> {
+  const us: U[] = await sb('bot_users?select=*&order=created_at') ?? [];
+  const by = (st: string) => us.filter(u => u.status === st);
+  const ok = by('ok'), pend = by('pending'), bl = by('blocked');
+  const sec = (t: string, a: U[]) => a.length ? `\n<b>${t} (${a.length})</b>\n` + a.map(u => `• ${uname(u, u.chat_id)}`).join('\n') + '\n' : '';
+  const kb = [
+    ...pend.map(u => [BTN(`✅ Liberar ${short(u)}`, `ok:${u.chat_id}`), BTN('❌ Recusar', `no:${u.chat_id}`)]),
+    ...chunk(ok.map(u => BTN(`🚫 Remover ${short(u)}`, `rm:${u.chat_id}`)), 2),
+    ...chunk(bl.map(u => BTN(`↩️ Liberar ${short(u)}`, `ok:${u.chat_id}`)), 2),
+    [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', '/usuarios')],
+  ];
+  const body = sec('✅ Com acesso', ok) + sec('⏳ Aguardando', pend) + sec('🚫 Recusados ou removidos', bl);
+  return { text: `<b>👥 USUÁRIOS</b>\n<i>Você (dono) sempre tem acesso.</i>\n` + (body || '\nNinguém pediu acesso ainda. Mande o @ do bot para seus amigos: eles dão /start e o pedido chega aqui.'), kb: { inline_keyboard: kb } };
+}
+
+async function admin(act: string, id: number, msg: any, cqId: string) {
+  const u = await getUser(id);
+  const nm = uname(u, id);
+  if (act === 'ok') {
+    if (u) await setStatus(id, 'ok'); else await addUser({ chat_id: id, name: null, username: null, status: 'ok' });
+    await TG('answerCallbackQuery', { callback_query_id: cqId, text: '✅ Liberado' });
+    await TG('sendMessage', { chat_id: id, parse_mode: 'HTML', text: `✅ <b>Acesso liberado!</b>\nBem-vindo ao Black House. Escolha abaixo ou digite /ajuda.`, reply_markup: MENU });
+  } else {
+    if (u) await setStatus(id, 'blocked');
+    await TG('answerCallbackQuery', { callback_query_id: cqId, text: act === 'rm' ? '🚫 Removido' : '❌ Recusado' });
+    if (act === 'no') await TG('sendMessage', { chat_id: id, text: '🔒 Seu pedido de acesso não foi aprovado.' });
+  }
+  // atualiza a mensagem onde o dono tocou
+  const fromList = String(msg.text ?? '').startsWith('👥');
+  const res = fromList ? await usuarios() : { text: `${act === 'ok' ? '✅' : act === 'rm' ? '🚫' : '❌'} <b>${nm}</b> ${act === 'ok' ? 'agora tem acesso.' : act === 'rm' ? 'foi removido.' : 'foi recusado.'}\n<i>Veja e gerencie todos em /usuarios.</i>`, kb: { inline_keyboard: [[BTN('👥 Usuários', '/usuarios')]] } };
+  await TG('editMessageText', { chat_id: msg.chat.id, message_id: msg.message_id, text: res.text, parse_mode: 'HTML', reply_markup: res.kb });
+}
+
 async function handle(update: any) {
   const cq = update.callback_query;
   const msg = update.message ?? cq?.message;
   let text: string | undefined = update.message?.text ?? cq?.data;
   if (!msg || !text) return;
   const chatId: number = msg.chat.id;
-  const allowed = (await cfg()).allowed;
-  if (allowed.length && !allowed.includes(String(chatId))) {
-    if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
-    await TG('sendMessage', { chat_id: chatId, text: `Este bot é privado. Peça acesso ao dono e informe o seu ID: ${chatId}` });
-    return;
+  const from = update.message?.from ?? cq?.from ?? {};
+  const who = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Sem nome';
+  let c = await cfg();
+  // o primeiro a usar depois da instalação vira o dono (relê o banco antes, para não depender de cache)
+  if (!c.owner) { CFG = null; c = await cfg(); }
+  if (!c.owner) {
+    await setOwner(chatId); c.owner = String(chatId);
+    await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '👑 <b>Você é o dono deste bot.</b>\nQuando alguém novo der /start, chega aqui um pedido com ✅ Liberar e ❌ Recusar.\nEm 👥 Usuários (ou /usuarios) você vê e remove quem tem acesso.' });
+  }
+  const isOwner = c.owner === String(chatId);
+  const am = /^(ok|no|rm):(-?\d+)$/.exec(text);
+  if (am) {
+    if (!isOwner) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); return; }
+    await admin(am[1], +am[2], msg, cq?.id); return;
+  }
+  if (!isOwner && !c.allowed.includes(String(chatId))) {
+    const u = await getUser(chatId);
+    if (u?.status !== 'ok') { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await pedir(u, chatId, who, from.username ?? null); return; }
   }
   // página (p:2:/top 20) e atualizar (repete o comando que gerou a mensagem)
   let page = 1;
@@ -238,7 +313,8 @@ async function handle(update: any) {
   if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, ...(refreshed ? { text: '🔄 Dados atualizados' } : {}) });
   if (!text.startsWith('/')) { await TG('sendMessage', { chat_id: chatId, text: 'Escolha abaixo ou digite /ajuda.', reply_markup: MENU }); return; }
   let res: Out;
-  try { res = await answer(text, chatId, page); } catch (e) { res = { text: 'Não consegui ler os dados agora (' + esc(String((e as Error).message)) + '). Tente de novo em instantes.', kb: { inline_keyboard: [HOME] } }; }
+  try { res = isOwner && /^\/usuarios\b/.test(text) ? await usuarios() : await answer(text, chatId, page); } catch (e) { res = { text: 'Não consegui ler os dados agora (' + esc(String((e as Error).message)) + '). Tente de novo em instantes.', kb: { inline_keyboard: [HOME] } }; }
+  if (isOwner && res.kb === MENU) res.kb = { inline_keyboard: [...MENU.inline_keyboard.slice(0, -1), [BTN('👥 Usuários', '/usuarios')], ...MENU.inline_keyboard.slice(-1)] };
   const body = { chat_id: chatId, text: res.text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, ...(res.kb ? { reply_markup: res.kb } : {}) };
   // botão: troca o conteúdo da mesma mensagem (navegação fluida); comando digitado: mensagem nova
   if (cq) {
