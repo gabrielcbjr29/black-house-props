@@ -2,12 +2,6 @@
 
 Painel de análise de props da NBA feito para **tipster**, no celular e no computador. Para cada jogador do dia, calcula a projeção de 20 mercados, mistura com o consenso sem margem das casas, dá a chance de bater, o valor (EV), a **stake sugerida em unidades** e uma nota de A+ a C. Registra as suas tips, **liquida sozinho** pelos boxscores, mede ROI, yield e **CLV**, e gera o **post pronto** (imagem para feed/story e texto para Telegram/WhatsApp).
 
-### Acesso ao bot (dono e amigos)
-- O primeiro `/start` depois da instalação marca o dono (fica salvo em `bot_config.OWNER_CHAT`).
-- Quem mais der `/start` vira um pedido: o dono recebe no Telegram **✅ Liberar / ❌ Recusar**.
-- No menu do dono aparece **👥 Usuários** (`/usuarios`): lista quem tem acesso, quem está aguardando e permite remover ou liberar de novo.
-- Os acessos ficam na tabela privada `public.bot_users` (`pending`, `ok`, `blocked`).
-
 ## Bot do Telegram
 
 A cada coleta, o coletor gera `public/data/bot.json` com as linhas já avaliadas (peso do modelo `BOT_W`, padrão 0,4). O bot é uma função gratuita no Supabase (`bot/telegram/index.ts`) que lê esse arquivo e responde aos comandos: `/top`, `/valor`, `/seguras`, `/pontos`, `/rebotes`, `/assist`, `/tres`, `/pra`, `/combinados`, `/tentativas`, `/convertidos`, `/defesa`, `/mais`, `/menos`, `/jogo`, `/jogador`, `/multipla`, `/jogos`, `/desfalques`, `/resumo`, `/ajuda`.
