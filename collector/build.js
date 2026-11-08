@@ -20,6 +20,7 @@ import { buildSlate, buildResults } from './slate.js';
 import { runBacktest } from './backtest.js';
 import { fetchBDLGames } from './bdl.js';
 import { fetchESPNDay, fetchESPNSummary } from './espnbox.js';
+import { buildBotData } from './botdata.js';
 import { normName } from './http.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -250,6 +251,9 @@ async function main() {
   }
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(slate));
+  // lista pronta para o bot do Telegram
+  try { const bd = buildBotData(slate, { w: +(env.BOT_W || .4) }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
+  catch (e) { warnings.push('bot.json falhou: ' + e.message); }
   // 7. resultados dos últimos dias: o app usa para liquidar as tips registradas (green/red/devolvida)
   await writeFile(RESULTS, JSON.stringify(buildResults([...Object.values(cur.games), ...Object.values(prev.games)], { ...prev.names, ...cur.names }, date)));
   // resumo no Telegram, 1x por dia, no horário de NOTIFY_UTC_HOURS (padrão 21 UTC = 18h de Brasília)

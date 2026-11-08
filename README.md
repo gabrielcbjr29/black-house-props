@@ -2,6 +2,12 @@
 
 Painel de análise de props da NBA feito para **tipster**, no celular e no computador. Para cada jogador do dia, calcula a projeção de 20 mercados, mistura com o consenso sem margem das casas, dá a chance de bater, o valor (EV), a **stake sugerida em unidades** e uma nota de A+ a C. Registra as suas tips, **liquida sozinho** pelos boxscores, mede ROI, yield e **CLV**, e gera o **post pronto** (imagem para feed/story e texto para Telegram/WhatsApp).
 
+## Bot do Telegram
+
+A cada coleta, o coletor gera `public/data/bot.json` com as linhas já avaliadas (peso do modelo `BOT_W`, padrão 0,4). O bot é uma função gratuita no Supabase (`bot/telegram/index.ts`) que lê esse arquivo e responde aos comandos: `/top`, `/valor`, `/seguras`, `/pontos`, `/rebotes`, `/assist`, `/tres`, `/pra`, `/combinados`, `/tentativas`, `/convertidos`, `/defesa`, `/mais`, `/menos`, `/jogo`, `/jogador`, `/multipla`, `/jogos`, `/desfalques`, `/resumo`, `/ajuda`.
+
+Segredos da função: `TELEGRAM_BOT_TOKEN` (do @BotFather), `WEBHOOK_SECRET` (senha qualquer) e, para deixar privado, `ALLOWED_CHATS` (IDs separados por vírgula; o `/start` mostra o seu). Para ligar o bot, abra uma vez `https://<projeto>.supabase.co/functions/v1/telegram-bot?setup=<WEBHOOK_SECRET>`.
+
 ## Coleta no seu computador (runner próprio)
 
 A NBA bloqueia servidores de nuvem (o GitHub Actions inclusive), mas não a internet de casa. Por isso a coleta roda no seu computador, como "runner próprio" do GitHub, e só a publicação do site fica na nuvem.
