@@ -61,30 +61,51 @@ const n1 = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1)).repla
 const n2 = (x: number) => x.toFixed(2).replace('.', ',');
 const pc = (x: number | null) => x == null ? '–' : Math.round(x * 100) + '%';
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '').trim();
-const dateBR = (d: string) => { const [y, m, dd] = d.split('-'); const wd = new Date(d + 'T12:00:00Z').toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', ''); return `${wd}, ${dd}/${m}`; };
-const genBR = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const FOOT = '\n<i>18+. Confira lesões, quinteto e a odd da sua casa antes de entrar. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>';
+const dateBR = (d: string) => { const [, m, dd] = d.split('-'); const wd = new Date(d + 'T12:00:00Z').toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', ''); return `${wd} ${dd}/${m}`; };
+const hourBR = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+const FOOT = '\n<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>';
+const GRADE: Record<string, string> = { 'A+': '🔥 A+', A: '✅ A', B: '➖ B', C: '⚪ C' };
+const bar = (p: number, n = 10) => { const k = Math.max(0, Math.min(n, Math.round(p * n))); return '▰'.repeat(k) + '▱'.repeat(n - k); };
+const dots = (h: [number, number] | null) => h ? '●'.repeat(h[0]) + '○'.repeat(Math.max(0, h[1] - h[0])) + ` ${h[0]}/${h[1]}` : '';
+const PAGE = 8;
 
-function line(r: Row, i: number) {
-  const side = r.s === 'o' ? 'Mais de' : 'Menos de';
-  const vs = r.home ? `x ${r.o}` : `@ ${r.o}`;
-  const odd = r.d ? `@${n2(r.d)} ${esc(r.b ?? '')}${r.k ? ' (bolsa)' : ''}` : `linha de referência, odd justa @${n2(1 / r.p)}`;
-  const ev = r.e == null ? '' : ` · EV ${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%`;
-  const warn = r.e != null && r.e > .15 ? ' ⚠️ diverge muito do mercado' : '';
-  const st = r.st === 'questionable' ? ' · em dúvida' : '';
-  const hits = r.l10 ? `últimos 10: ${r.l10[0]}/${r.l10[1]}` : '';
-  return `${i}. <b>${r.gr}</b> ${esc(r.n)} <i>(${r.t} ${vs}, ${r.h})</i>\n   <b>${side} ${n1(r.l)}</b> ${MK[r.m] ?? r.m}\n   chance ${pc(r.p)}${r.q != null ? ` (mercado ${pc(r.q)})` : ''} · ${odd}${ev}${warn}\n   ${hits}${hits ? ' · ' : ''}projeção ${n1(Math.round(r.pj * 10) / 10)}${st}`;
+type Out = { text: string; kb?: unknown };
+const BTN = (text: string, data: string) => ({ text, callback_data: data.slice(0, 64) });
+const HOME = [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', 'r:1:/menu')];
+const home = (cmd: string, pg = 1) => [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', `r:${pg}:${cmd}`)];
+
+function card(r: Row, i: number) {
+  const side = r.s === 'o' ? '⬆️ <b>Mais de ' + n1(r.l) + '</b>' : '⬇️ <b>Menos de ' + n1(r.l) + '</b>';
+  const vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
+  const odd = r.d ? `💵 <code>@${n2(r.d)}</code> ${esc(r.b ?? '')}${r.k ? ' <i>(bolsa)</i>' : ''}` : `💵 odd justa <code>@${n2(1 / r.p)}</code> <i>(sem casa)</i>`;
+  const ev = r.e == null ? '' : ` · EV <b>${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%</b>`;
+  const warn = r.e != null && r.e > .15 ? '\n⚠️ <i>Muito acima do mercado: confira notícias</i>' : '';
+  const st = r.st === 'questionable' ? '\n🟡 <i>Jogador em dúvida</i>' : '';
+  return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
+${side} ${MK[r.m] ?? r.m}
+${GRADE[r.gr] ?? r.gr}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
+${odd}${ev}
+📊 ${dots(r.l10)}${r.l10 ? ' · ' : ''}proj. ${n1(Math.round(r.pj * 10) / 10)}${warn}${st}</blockquote>`;
 }
-function list(d: Data, rows: Row[], title: string, n: number, onePerPlayer = true, empty = '') {
-  const seen = new Set<string>(), out: Row[] = [];
-  for (const r of rows) { if (onePerPlayer && seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
-  const head = `<b>🏀 ${esc(title)}</b>\n<i>${dateBR(d.date)}, ${d.games.length} jogos, atualizado ${genBR(d.gen)}${d.demo ? ' (demonstração)' : ''}</i>\n`;
-  if (!out.length) return head + '\nNenhuma linha boa nesse filtro agora.' + (empty ? '\n' + empty : '') + FOOT;
-  return head + '\n' + out.map((r, i) => line(r, i + 1)).join('\n\n') + '\n' + FOOT;
+function header(d: Data, title: string, extra = '') {
+  return `<b>${title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}${d.demo ? ' · demonstração' : ''}${extra}</i>\n`;
+}
+function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page = 1, onePerPlayer = true, empty = ''): Out {
+  const seen = new Set<string>(), all: Row[] = [];
+  for (const r of rows) { if (onePerPlayer && seen.has(r.id)) continue; seen.add(r.id); all.push(r); if (all.length >= n) break; }
+  if (!all.length) return { text: header(d, title) + '\nNenhuma linha boa nesse filtro agora.' + (empty ? '\n' + empty : '') + '\n' + FOOT, kb: { inline_keyboard: [HOME] } };
+  const pages = Math.ceil(all.length / PAGE), pg = Math.max(1, Math.min(pages, page));
+  const slice = all.slice((pg - 1) * PAGE, pg * PAGE);
+  const body = slice.map((r, i) => card(r, (pg - 1) * PAGE + i + 1)).join('\n');
+  const nav = [];
+  if (pg > 1) nav.push(BTN('◀ Anteriores', `p:${pg - 1}:${cmd}`));
+  if (pages > 1) nav.push(BTN(`${pg}/${pages}`, `p:${pg}:${cmd}`));
+  if (pg < pages) nav.push(BTN('Próximas ▶', `p:${pg + 1}:${cmd}`));
+  return { text: header(d, title, pages > 1 ? ` · página ${pg}/${pages}` : '') + '\n' + body + '\n' + FOOT, kb: { inline_keyboard: [...(nav.length ? [nav] : []), home(cmd, pg)] } };
 }
 const clampN = (s: string | undefined, def = 10) => { const x = parseInt(s ?? '', 10); return Number.isFinite(x) ? Math.max(1, Math.min(20, x)) : def; };
 
-function multipla(d: Data, arg: string | undefined) {
+function multipla(d: Data, arg: string | undefined): Out {
   const v = arg ? parseFloat(arg.replace(',', '.')) : NaN;
   const target = Number.isFinite(v) && v >= 1.3 && !(Number.isInteger(v) && v <= 8) ? v : null;
   const legs = target ? 8 : Math.max(2, Math.min(6, Number.isFinite(v) ? v : 3));
@@ -92,102 +113,138 @@ function multipla(d: Data, arg: string | undefined) {
     .sort((a, b) => (a.k - b.k) || (b.sc - a.sc));
   const pick: Row[] = [], games = new Set<string>(); let odd = 1, p = 1;
   for (const r of cand) { if (target ? odd >= target : pick.length >= legs) break; if (pick.length >= 8) break; if (games.has(r.g)) continue; games.add(r.g); pick.push(r); odd *= r.d!; p *= r.p; }
+  const kb = { inline_keyboard: [[BTN('2 pernas', '/multipla 2'), BTN('3 pernas', '/multipla 3'), BTN('4 pernas', '/multipla 4')], [BTN('Odd 3,00', '/multipla 3,0'), BTN('Odd 5,00', '/multipla 5,0'), BTN('Odd 10,00', '/multipla 10,0')], home('/multipla ' + (arg ?? '3'))] };
+  if (pick.length < 2) return { text: header(d, '🎟️ MÚLTIPLA') + '\nNão há linhas fortes suficientes em jogos diferentes agora.\n' + FOOT, kb };
   const kal = pick.some(r => r.k);
-  if (pick.length < 2) return 'Não há linhas fortes suficientes em jogos diferentes hoje para uma múltipla.' + FOOT;
-  const head = `<b>🎟️ Múltipla de ${pick.length} pernas</b>${target ? ` <i>(alvo ${n2(target)})</i>` : ''}\nUma perna por jogo, nota A ou A+.\n\n`;
-  return head + pick.map((r, i) => `${i + 1}. ${esc(r.n)}: <b>${r.s === 'o' ? 'mais de' : 'menos de'} ${n1(r.l)}</b> ${MK[r.m]} @${n2(r.d!)} <i>(${r.h})</i>`).join('\n') +
-    `\n\nOdd combinada <b>${n2(odd)}</b> · chance estimada ${pc(p)} · EV ${((p * odd - 1) * 100).toFixed(1).replace('.', ',')}%\n<i>Pernas tratadas como independentes; use stake menor que a de uma simples.${kal ? ' Algumas odds são da bolsa (Kalshi): confira a da sua casa.' : ''}</i>` + FOOT;
+  const legsTxt = pick.map((r, i) => `${i + 1}. <b>${esc(r.n)}</b>  <i>${r.h}</i>\n    ${r.s === 'o' ? '⬆️ mais de' : '⬇️ menos de'} ${n1(r.l)} ${MK[r.m]}  <code>@${n2(r.d!)}</code>`).join('\n');
+  const evx = (p * odd - 1) * 100;
+  return { text: header(d, `🎟️ MÚLTIPLA DE ${pick.length} PERNAS`, target ? ` · alvo ${n2(target)}` : '') + `\n<blockquote>${legsTxt}</blockquote>
+<b>Odd combinada  <code>${n2(odd)}</code></b>
+${bar(p)} chance ${pc(p)} · EV ${evx >= 0 ? '+' : ''}${evx.toFixed(1).replace('.', ',')}%
+<i>Uma perna por jogo, nota A ou A+. Pernas tratadas como independentes: use stake menor que a de uma simples.${kal ? ' Algumas odds são da bolsa (Kalshi): confira a da sua casa.' : ''}</i>
+` + FOOT, kb };
 }
 
-const HELP = `<b>Black House · comandos</b>
+const HELP = `<b>📖 COMANDOS</b>
 
 <b>Melhores do dia</b>
-/top · /top 20 · as melhores em todos os mercados
-/valor · só com odd de casa e EV entre 3% e 15%
+/top · /top 20 · todos os mercados
+/valor · odd de casa com EV de 3% a 15%
 /seguras · chance de 65% ou mais
 
-<b>Por mercado</b> (some um número: /rebotes 15)
+<b>Por mercado</b> <i>(some um número: /rebotes 15)</i>
 /pontos /rebotes /assist /tres
 /pra /pr /pa /ra /combinados
-/tentativas · arremessos tentados (quadra, 2, 3, lance livre)
+/tentativas · arremessos tentados
 /convertidos · arremessos convertidos
 /defesa · roubos, tocos e erros
 
 <b>Filtros</b>
-/mais pontos · /menos rebotes · só um lado
-/jogo LAL · tudo de um jogo
-/jogador brunson · linhas de um jogador
+/mais pontos · /menos rebotes
+/jogo LAL · /jogador brunson
 
 <b>Rodada</b>
 /jogos · /desfalques · /resumo
-/multipla 3 · /multipla 4,5 (odd-alvo)
-/app · abrir o app completo`;
+/multipla 3 · /multipla 4,5
+/app · app completo`;
 const MENU = { inline_keyboard: [
-  [{ text: '⭐ Top 10', callback_data: '/top' }, { text: '💰 Valor', callback_data: '/valor' }, { text: '🛡️ Seguras', callback_data: '/seguras' }],
-  [{ text: 'Pontos', callback_data: '/pontos' }, { text: 'Rebotes', callback_data: '/rebotes' }, { text: 'Assist.', callback_data: '/assist' }, { text: 'Bolas de 3', callback_data: '/tres' }],
-  [{ text: 'PRA', callback_data: '/pra' }, { text: 'Combinados', callback_data: '/combinados' }, { text: 'Tentativas', callback_data: '/tentativas' }],
-  [{ text: 'Defesa', callback_data: '/defesa' }, { text: '🎟️ Múltipla', callback_data: '/multipla 3' }, { text: 'Jogos', callback_data: '/jogos' }],
-  [{ text: 'Desfalques', callback_data: '/desfalques' }, { text: 'Resumo', callback_data: '/resumo' }, { text: '📱 App', url: APP_URL }],
+  [BTN('🔥 Top do dia', '/top'), BTN('💰 Valor', '/valor'), BTN('🛡️ Seguras', '/seguras')],
+  [BTN('🏀 Pontos', '/pontos'), BTN('🙌 Rebotes', '/rebotes'), BTN('🎯 Assist.', '/assist')],
+  [BTN('👌 Bolas de 3', '/tres'), BTN('➕ PRA', '/pra'), BTN('🧩 Combinados', '/combinados')],
+  [BTN('🏹 Tentativas', '/tentativas'), BTN('🧱 Defesa', '/defesa'), BTN('🎟️ Múltipla', '/multipla 3')],
+  [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
+  [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
-async function answer(text: string, chatId: number): Promise<{ text: string; menu?: boolean }> {
+async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   const [rawCmd, ...rest] = text.trim().split(/\s+/);
   const cmd = norm(rawCmd.replace(/^\//, '').replace(/@.*$/, ''));
   const arg = rest.join(' ');
-  if (cmd === 'start' || cmd === 'menu') return { text: `Fala! Aqui ficam as melhores entradas de props da NBA de hoje, atualizadas a cada coleta.\n\nToque num botão ou digite /ajuda.\n<i>Seu ID: ${chatId}</i>`, menu: true };
-  if (cmd === 'ajuda' || cmd === 'help' || cmd === 'comandos') return { text: HELP, menu: true };
-  if (cmd === 'app') return { text: `📱 App completo: ${APP_URL}` };
+  const raw = '/' + [cmd, ...rest].join(' ');
+  if (cmd === 'start' || cmd === 'menu') {
+    const d = await data().catch(() => null);
+    const a = d ? d.rows.filter(r => r.gr === 'A+' || r.gr === 'A').length : 0;
+    return { text: `<b>🏀 BLACK HOUSE · PROPS NBA</b>\n${d ? `<i>${dateBR(d.date)} · ${d.games.length} jogos · ${a} linhas nota A ou A+</i>\n` : ''}\nEscolha abaixo ou digite um comando (/ajuda).\n\n<i>Seu ID: <code>${chatId}</code></i>`, kb: MENU };
+  }
+  if (cmd === 'ajuda' || cmd === 'help' || cmd === 'comandos') return { text: HELP, kb: MENU };
+  if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
-  if (cmd === 'top') return { text: list(d, d.rows, `Top ${clampN(rest[0])} do dia`, clampN(rest[0])) };
-  if (cmd === 'valor') return { text: list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15).sort((a, b) => (b.e! - a.e!)), 'Valor com odd de casa', clampN(rest[0]), true, 'As odds das casas entram perto de cada jogo (até 2h30 antes). Tente de novo mais perto do primeiro jogo ou veja /top.') };
-  if (cmd === 'seguras') return { text: list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && (!r.d || r.d >= 1.25) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), 'Mais seguras (chance ≥ 65%)', clampN(rest[0])) };
-  if (GROUPS[cmd]) { const g = GROUPS[cmd]; return { text: list(d, d.rows.filter(r => g.mk.includes(r.m)), g.title, clampN(rest[0]), g.mk.length === 1) }; }
+  if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows, `🔥 TOP ${n} DO DIA`, n, raw, page); }
+  if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.');
+  if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && (!r.d || r.d >= 1.25) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page);
+  if (GROUPS[cmd]) { const g = GROUPS[cmd]; return list(d, d.rows.filter(r => g.mk.includes(r.m)), '🏀 ' + g.title.toUpperCase(), clampN(rest[0]), raw, page, g.mk.length === 1); }
   if (cmd === 'mais' || cmd === 'menos') {
     const s = cmd === 'mais' ? 'o' : 'u'; const gk = WORD2GROUP[norm(rest[0] ?? '')];
     const rows = d.rows.filter(r => r.s === s && (!gk || GROUPS[gk].mk.includes(r.m)));
-    return { text: list(d, rows, `${cmd === 'mais' ? 'Mais de' : 'Menos de'}${gk ? ': ' + GROUPS[gk].title : ''}`, clampN(gk ? rest[1] : rest[0])) };
+    return list(d, rows, `${cmd === 'mais' ? '⬆️ MAIS DE' : '⬇️ MENOS DE'}${gk ? ' · ' + GROUPS[gk].title.toUpperCase() : ''}`, clampN(gk ? rest[1] : rest[0]), raw, page);
   }
   if (cmd === 'jogo') {
-    const q = norm(arg).toUpperCase(); if (!q) return { text: 'Use assim: /jogo LAL (sigla de um dos times).' };
-    const g = d.games.find(x => x.a === q || x.h === q); if (!g) return { text: `Não achei jogo hoje com ${esc(q)}. Veja /jogos.` };
-    return { text: list(d, d.rows.filter(r => r.g === g.id), `${g.a} @ ${g.h}, ${g.t}`, 15) };
+    const q = norm(arg).toUpperCase();
+    const pickKb = { inline_keyboard: [...chunk(d.games.map(g => BTN(`${g.t} ${g.a}@${g.h}`, `/jogo ${g.h}`)), 2), HOME] };
+    if (!q) return { text: '<b>🏟️ Escolha o jogo</b>', kb: pickKb };
+    const g = d.games.find(x => x.a === q || x.h === q); if (!g) return { text: `Não achei jogo hoje com <b>${esc(q)}</b>. Escolha abaixo:`, kb: pickKb };
+    return list(d, d.rows.filter(r => r.g === g.id), `🏟️ ${g.a} @ ${g.h} · ${g.t}`, 16, raw, page);
   }
   if (cmd === 'jogador') {
-    const q = norm(arg); if (q.length < 3) return { text: 'Use assim: /jogador brunson' };
-    const rows = d.rows.filter(r => norm(r.n).includes(q)); if (!rows.length) return { text: `Nenhuma linha boa hoje para "${esc(arg)}".` };
-    return { text: list(d, rows, rows[0].n, 12, false) };
+    const q = norm(arg); if (q.length < 3) return { text: 'Digite o nome assim: <code>/jogador brunson</code>', kb: { inline_keyboard: [HOME] } };
+    const rows = d.rows.filter(r => norm(r.n).includes(q)); if (!rows.length) return { text: `Nenhuma linha boa hoje para <b>${esc(arg)}</b>.`, kb: { inline_keyboard: [HOME] } };
+    return list(d, rows, '👤 ' + rows[0].n.toUpperCase(), 12, raw, page, false);
   }
-  if (cmd === 'multipla') return { text: multipla(d, rest[0]) };
-  if (cmd === 'jogos') return { text: `<b>🗓️ Jogos de ${dateBR(d.date)}</b>\n\n` + d.games.map(g => `${g.t}  <b>${g.a} @ ${g.h}</b>${g.sp != null ? `  · ${g.sp < 0 ? g.h : g.a} −${n1(Math.abs(g.sp))}` : ''}${g.to ? ` · total ${n1(g.to)}` : ''}`).join('\n') + '\n\n<i>Use /jogo SIGLA para ver as linhas de um jogo.</i>' };
+  if (cmd === 'multipla') return multipla(d, rest[0]);
+  if (cmd === 'jogos') {
+    const w = (s: string, n: number) => (s + ' '.repeat(n)).slice(0, n);
+    const rowsTxt = d.games.map(g => `${g.t}  ${w(`${g.a} @ ${g.h}`, 11)} ${w(g.sp != null ? `${g.sp < 0 ? g.h : g.a} -${n1(Math.abs(g.sp))}` : '', 10)} ${g.to ? n1(g.to) : ''}`).join('\n');
+    return { text: header(d, '🗓️ JOGOS DE HOJE') + `\n<pre>HORA   JOGO        FAVORITO   TOTAL\n${rowsTxt}</pre>\nToque num jogo para ver as linhas:`, kb: { inline_keyboard: [...chunk(d.games.map(g => BTN(`${g.a} @ ${g.h}`, `/jogo ${g.h}`)), 2), home('/jogos')] } };
+  }
   if (cmd === 'desfalques') {
+    const ic: Record<string, string> = { out: '🔴', doubtful: '🟠', questionable: '🟡' };
     const lb: Record<string, string> = { out: 'fora', doubtful: 'provável fora', questionable: 'dúvida' };
-    const by = new Map<string, string[]>(); for (const p of d.injuries) { if (!by.has(p.t)) by.set(p.t, []); by.get(p.t)!.push(`${esc(p.n)} (${lb[p.st] ?? p.st})`); }
-    const teams = new Set(d.games.flatMap(g => [g.a, g.h]));
-    return { text: `<b>🚑 Desfalques de hoje</b>\n\n` + ([...by].filter(([t]) => teams.has(t)).map(([t, l]) => `<b>${t}</b>: ${l.join(', ')}`).join('\n') || 'Nenhum desfalque listado.') };
+    const by = new Map<string, string[]>(); for (const p of d.injuries) { if (!by.has(p.t)) by.set(p.t, []); by.get(p.t)!.push(`${ic[p.st] ?? '⚪'} ${esc(p.n)} <i>(${lb[p.st] ?? p.st})</i>`); }
+    const teams = d.games.flatMap(g => [g.a, g.h]);
+    const txt = teams.filter(t => by.has(t)).map(t => `<b>${t}</b>\n${by.get(t)!.join('\n')}`).join('\n\n');
+    return { text: header(d, '🚑 DESFALQUES') + '\n' + (txt ? `<blockquote expandable>${txt}</blockquote>` : 'Nenhum desfalque listado.') + '\n<i>🔴 fora · 🟠 provável fora · 🟡 dúvida</i>', kb: { inline_keyboard: [home('/desfalques')] } };
   }
   if (cmd === 'resumo') {
-    const a = d.rows.filter(r => r.gr === 'A+' || r.gr === 'A'), val = d.rows.filter(r => r.d && !r.k && (r.e ?? 0) >= .03);
+    const a = d.rows.filter(r => r.gr === 'A+' || r.gr === 'A'), ap = d.rows.filter(r => r.gr === 'A+'), val = d.rows.filter(r => r.d && !r.k && (r.e ?? 0) >= .03 && (r.e ?? 0) <= .15);
     const out = d.injuries.filter(p => p.st === 'out' || p.st === 'doubtful').length;
-    return { text: `<b>📋 Resumo de ${dateBR(d.date)}</b>\n\n${d.games.length} jogos, o primeiro às ${d.games.map(g => g.t).sort()[0] ?? '–'}\n${a.length} linhas com nota A ou A+\n${val.length} com valor na odd de casa\n${out} desfalques confirmados ou prováveis\n\nAtualizado ${genBR(d.gen)}.\n/top para ver as melhores.` + FOOT, menu: true };
+    const top = d.rows[0];
+    return { text: header(d, '📋 RESUMO DA RODADA') + `
+<blockquote>🗓️ <b>${d.games.length}</b> jogos · primeiro às <b>${d.games.map(g => g.t).sort()[0] ?? '–'}</b>
+🔥 <b>${ap.length}</b> linhas A+ · ✅ <b>${a.length - ap.length}</b> linhas A
+💰 <b>${val.length}</b> com valor na odd de casa
+🚑 <b>${out}</b> desfalques confirmados ou prováveis</blockquote>
+${top ? `⭐ <b>Destaque:</b> ${esc(top.n)}, ${top.s === 'o' ? 'mais de' : 'menos de'} ${n1(top.l)} ${MK[top.m]} (${pc(top.p)})\n` : ''}` + FOOT, kb: MENU };
   }
-  return { text: 'Não conheci esse comando. Digite /ajuda para ver a lista.', menu: true };
+  return { text: 'Não conheci esse comando. Escolha abaixo ou digite /ajuda.', kb: MENU };
 }
+function chunk<T>(a: T[], n: number) { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; }
 
 async function handle(update: any) {
-  const msg = update.message ?? update.callback_query?.message;
-  const text: string | undefined = update.message?.text ?? update.callback_query?.data;
+  const cq = update.callback_query;
+  const msg = update.message ?? cq?.message;
+  let text: string | undefined = update.message?.text ?? cq?.data;
   if (!msg || !text) return;
   const chatId: number = msg.chat.id;
-  if (update.callback_query) await TG('answerCallbackQuery', { callback_query_id: update.callback_query.id });
   const allowed = (await cfg()).allowed;
   if (allowed.length && !allowed.includes(String(chatId))) {
+    if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
     await TG('sendMessage', { chat_id: chatId, text: `Este bot é privado. Peça acesso ao dono e informe o seu ID: ${chatId}` });
     return;
   }
-  if (!text.startsWith('/')) { await TG('sendMessage', { chat_id: chatId, text: 'Digite /ajuda para ver os comandos.', reply_markup: MENU }); return; }
-  let res: { text: string; menu?: boolean };
-  try { res = await answer(text, chatId); } catch (e) { res = { text: 'Não consegui ler os dados agora (' + esc(String((e as Error).message)) + '). Tente de novo em instantes.' }; }
-  await TG('sendMessage', { chat_id: chatId, text: res.text.slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true, ...(res.menu ? { reply_markup: MENU } : {}) });
+  // página (p:2:/top 20) e atualizar (repete o comando que gerou a mensagem)
+  let page = 1;
+  const pm = /^([pr]):(\d+):(.+)$/.exec(text); let refreshed = false;
+  if (pm) { page = +pm[2]; text = pm[3]; if (pm[1] === 'r') { CACHE = null; refreshed = true; } }
+  if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, ...(refreshed ? { text: '🔄 Dados atualizados' } : {}) });
+  if (!text.startsWith('/')) { await TG('sendMessage', { chat_id: chatId, text: 'Escolha abaixo ou digite /ajuda.', reply_markup: MENU }); return; }
+  let res: Out;
+  try { res = await answer(text, chatId, page); } catch (e) { res = { text: 'Não consegui ler os dados agora (' + esc(String((e as Error).message)) + '). Tente de novo em instantes.', kb: { inline_keyboard: [HOME] } }; }
+  const body = { chat_id: chatId, text: res.text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, ...(res.kb ? { reply_markup: res.kb } : {}) };
+  // botão: troca o conteúdo da mesma mensagem (navegação fluida); comando digitado: mensagem nova
+  if (cq) {
+    const r = await TG('editMessageText', { ...body, message_id: msg.message_id });
+    if (!r.ok && !/not modified/i.test(r.description ?? '')) await TG('sendMessage', body);
+  } else await TG('sendMessage', body);
 }
 
 Deno.serve(async (req: Request) => {
