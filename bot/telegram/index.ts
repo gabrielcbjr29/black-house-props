@@ -196,7 +196,9 @@ Deno.serve(async (req: Request) => {
   if (!TOKEN || !SECRET) return new Response('Falta configurar TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET (tabela bot_config ou segredos da função).', { status: 500 });
   if (req.method === 'GET') {
     if (url.searchParams.get('setup') !== SECRET) return new Response('ok');
-    const self = `https://${url.host}${url.pathname}`;
+    // dentro do Supabase a função vê só /telegram-bot; o endereço público tem /functions/v1 na frente
+    const base = Deno.env.get('SUPABASE_URL');
+    const self = base ? `${base}/functions/v1/telegram-bot` : `https://${url.host}${url.pathname}`;
     const hook = await TG('setWebhook', { url: self, secret_token: SECRET, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true });
     const cmds = await TG('setMyCommands', { commands: [
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
@@ -204,7 +206,8 @@ Deno.serve(async (req: Request) => {
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
       ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
-    return new Response(JSON.stringify({ webhook: hook, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+    const info = await TG('getWebhookInfo', {});
+    return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
   }
   if (req.headers.get('x-telegram-bot-api-secret-token') !== SECRET) return new Response('forbidden', { status: 403 });
   const update = await req.json().catch(() => null);
