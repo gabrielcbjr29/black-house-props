@@ -5,8 +5,11 @@ import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRa
 const POS_PT = { G: 'armadores', F: 'alas', C: 'pivôs' };
 const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bolas de 3', stl: 'roubos', blk: 'tocos', tov: 'erros', fgm: 'arremessos convertidos', fga: 'arremessos tentados', fta: 'lances livres tentados', ftm: 'lances livres', tpa: 'bolas de 3 tentadas', twom: 'arremessos de 2', twoa: 'arremessos de 2 tentados', oreb: 'rebotes ofensivos', pf: 'faltas' };
 // movimento do mercado desde a abertura a favor (+1) ou contra (−1) do lado
+// top 10 do Modelo BH: só jogador de rotação (24+ min) e linhas que as casas costumam abrir
+export const TOP_MIN_LINE = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
+export const topEligible = (r, g) => r.mb && g.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (TOP_MIN_LINE[r.m] ?? 0);
 // grupos das listas do bot (mesmos mercados dos comandos)
-const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['FGA', '2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV']];
+const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['FGA', '2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV'], ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM']];
 const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt.mu - pr.mkt.openMu) / Math.max(pr.mkt.mu, 1); return Math.abs(d) >= .025 ? Math.sign(side === 'over' ? d : -d) : 0; };
 
 const brTime = iso => iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '';
@@ -38,7 +41,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
     const h10 = s.hits?.L10?.[1] ? s.hits.L10[0] / s.hits.L10[1] : 0;
     rows.push({ id: pr.p.id, n: pr.p.name, t: pr.p.team, o: opp, home: pr.p.team === g.home, g: pr.game.id, h: brTime(g.timeUTC), m: pr.mk, s: s.side === 'over' ? 'o' : 'u', l: e.line,
       p: r3(s.p), q: r3(s.pMkt), d: odd, b: book, k: kal ? 1 : 0, e: r3(ev), gr: s.grade, l10: s.hits?.L10 || null, l20: s.hits?.L20 || null,
-      ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF), mb: pr.model ? 1 : 0,
+      ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF), mb: pr.model ? 1 : 0, mn: Math.round((pr.ctx.m5 + pr.ctx.m20) / 2),
       st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
       _v: () => ({ ps: POSLB[pr.p.pos] || '', v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) });
   }
@@ -63,6 +66,8 @@ export function buildBotData(slate, { w = .4 } = {}) {
   take(R, 20);
   for (const g of CARD_GROUPS) take(R.filter(r => g.includes(r.m)), 10, g.length === 1);
   take(R.filter(r => r.p >= .65 && GRADE_ORDER[r.gr] >= 3).sort((a, b) => b.p - a.p), 10);
+  // top 10 do Modelo BH (sem faixa de odd: são linhas de referência, sem odd de casa)
+  for (const g of [['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']]) take(rows.filter(r => topEligible(r, g)).sort((a, b) => b.sc - a.sc), 10);
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));

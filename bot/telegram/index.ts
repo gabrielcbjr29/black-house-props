@@ -38,7 +38,7 @@ async function sb(path: string, init: RequestInit = {}) {
 }
 const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number };
 type MStat = [number, number, number[], number | null];
 type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
 type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
@@ -59,7 +59,7 @@ const GROUPS: Record<string, { mk: string[]; title: string }> = {
   tres: { mk: ['3PM'], title: 'Bolas de 3' }, triplos: { mk: ['3PM'], title: 'Bolas de 3' },
   pra: { mk: ['PRA'], title: 'Pts+Reb+Ast' }, pr: { mk: ['PR'], title: 'Pts+Reb' }, pa: { mk: ['PA'], title: 'Pts+Ast' }, ra: { mk: ['RA'], title: 'Reb+Ast' },
   combinados: { mk: ['PRA', 'PR', 'PA', 'RA'], title: 'Combinados' },
-  tentativas: { mk: ['FGA', '2PA', '3PA', 'FTA'], title: 'Tentativas de arremesso' },
+  tentativas: { mk: ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'Tentativas e convertidos' },
   convertidos: { mk: ['FGM', '2PM', 'FTM'], title: 'Arremessos convertidos' },
   defesa: { mk: ['STL', 'BLK', 'SB', 'TOV'], title: 'Roubos, tocos e erros' },
   roubos: { mk: ['STL'], title: 'Roubos' }, tocos: { mk: ['BLK'], title: 'Tocos' }, erros: { mk: ['TOV'], title: 'Erros' },
@@ -243,6 +243,74 @@ async function testesCmd(chatId: number, rest: string[]): Promise<Out> {
   return { text: resumo(rows, all ? '📒 TESTES DO MODELO BH · TODOS OS USUÁRIOS' : '📒 SEUS TESTES DO MODELO BH') + `\n\n<b>Últimos</b>\n${last}`,
     kb: { inline_keyboard: [[BTN(all ? '👤 Só os meus' : '👥 De todos', all ? '/testes' : '/testes todos'), BTN('🔄 Atualizar', all ? '/testes todos' : '/testes')], [BTN('🧠 Modelo BH', '/modelo'), BTN('🏠 Menu', '/menu')]] } };
 }
+// ---------- Top 10 do Modelo BH (tentativas/convertidos e reb+ast) ----------
+const MT: Record<string, { mk: string[]; title: string; cmd: string; ic: string }> = {
+  tent: { mk: ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'TENTATIVAS E CONVERTIDOS', cmd: '/toptentativas', ic: '🏹' },
+  ra: { mk: ['RA'], title: 'REBOTES + ASSISTÊNCIAS', cmd: '/topra', ic: '🙌' },
+};
+// ranking: Nota BH (chance do modelo, L10/L20/temporada, confronto, defesa x posição), desempate pelo L10; um por jogador
+function modelTop(d: Data, mk: string[], n = 10) {
+  // só jogador de rotação (24+ min) e linhas que as casas costumam abrir (mesmo critério dos cards)
+  const MIN_LINE: Record<string, number> = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
+  const rows = d.rows.filter(r => r.mb && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0)).sort((a, b) => b.sc - a.sc);
+  const seen = new Set<string>(), out: Row[] = [];
+  for (const r of rows) { if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
+  return out;
+}
+const MT_NOTE = '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
+function compact(r: Row, i: number) {
+  const over = r.s === 'o', vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
+  const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
+  return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
+${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
+📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}`;
+}
+function topText(d: Data, key: string) {
+  const T = MT[key], top = modelTop(d, T.mk);
+  if (!top.length) return null;
+  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE + FOOT;
+}
+const subKb = (s: { tent: boolean; ra: boolean } | null) => ({ inline_keyboard: [
+  [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
+  [BTN('🔕 Parar de receber', '/receber parar'), BTN('🏠 Menu', '/menu')]] });
+async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
+  const a = norm(rest[0] ?? '');
+  let s: { tent: boolean; ra: boolean } | null = null;
+  try { s = (await sb(`bot_subs?chat_id=eq.${chatId}&select=tent,ra`))?.[0] ?? null; } catch { return { text: 'Não consegui acessar as inscrições agora.', kb: { inline_keyboard: [HOME] } }; }
+  let next = s;
+  if (!a) next = s ?? { tent: true, ra: true };
+  else if (a === 'parar') next = { tent: false, ra: false };
+  else if (a === 'tent' || a === 'ra') next = { ...(s ?? { tent: false, ra: false }), [a]: !(s?.[a as 'tent' | 'ra']) };
+  if (JSON.stringify(next) !== JSON.stringify(s)) await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...next, updated_at: new Date().toISOString() }) });
+  const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências'].filter(Boolean);
+  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, por volta das 19h (depois da atualização com escalações e lesões):\n${on.map(x => '• ' + x).join('\n')}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
+}
+// envio do dia para os inscritos (chamado pelo GitHub depois de publicar os dados)
+// minHour: só envia se os dados foram gerados depois dessa hora (Brasília) — espera a rodada das 18h30
+async function pushDaily(force = false, minHour = 0) {
+  CACHE = null;
+  const d = await data();
+  const flag = `PUSH_${d.date}`;
+  if (!force) {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    if (d.date !== today) return { ok: true, skip: `dados de ${d.date}, hoje é ${today}` };
+    const h = +new Date(d.gen).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false });
+    if (minHour && h < minHour) return { ok: true, skip: `dados das ${h}h ainda; espero a rodada das 18h30` };
+    const done = await sb(`bot_config?key=eq.${flag}&select=key`).catch(() => []); if (done?.length) return { ok: true, skip: 'já enviado hoje' };
+  }
+  const subs: { chat_id: number; tent: boolean; ra: boolean }[] = await sb('bot_subs?select=chat_id,tent,ra&or=(tent.eq.true,ra.eq.true)') ?? [];
+  const txt = { tent: topText(d, 'tent'), ra: topText(d, 'ra') };
+  let sent = 0;
+  for (const s of subs) for (const k of ['tent', 'ra'] as const) {
+    if (!s[k] || !txt[k]) continue;
+    const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[BTN('📋 Ver com detalhes', MT[k].cmd), BTN('🖼️ Cards', `/cards`)], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
+    if (r.ok) sent++;
+    await new Promise(res => setTimeout(res, 60));
+  }
+  await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: flag, value: String(sent), updated_at: new Date().toISOString() }) }).catch(() => null);
+  return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent };
+}
 const hitTxt = (h?: [number, number] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 
 type Out = { text: string; kb?: unknown };
@@ -326,7 +394,7 @@ const HELP = `<b>📖 COMANDOS</b>
 <b>Por mercado</b> <i>(some um número: /rebotes 15)</i>
 /pontos /rebotes /assist /tres
 /pra /pr /pa /ra /combinados
-/tentativas · arremessos tentados
+/tentativas · tentados (total, de 3, de 2, lances) e convertidos
 /convertidos · arremessos convertidos
 /defesa · roubos, tocos e erros
 
@@ -342,6 +410,9 @@ const HELP = `<b>📖 COMANDOS</b>
 <b>Modelo BH</b>
 /modelo brunson tentativas 17,5 · chance pelo modelo + teste
 /testes · seus testes conferidos · /testes todos
+/toptentativas · top 10 em tentativas e convertidos
+/topra · top 10 em rebotes + assistências
+/receber · receber os dois tops todo dia
 /app · app completo
 
 <b>Como ler o cartão</b>
@@ -355,7 +426,9 @@ const MENU = { inline_keyboard: [
   [BTN('👌 Bolas de 3', '/tres'), BTN('➕ PRA', '/pra'), BTN('🧩 Combinados', '/combinados')],
   [BTN('🏹 Tentativas', '/tentativas'), BTN('🧱 Defesa', '/defesa'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
-  [BTN('🧠 Modelo BH', '/modelo'), BTN('🖼️ Cards do dia', '/cards'), BTN('📒 Testes', '/testes')],
+  [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
+  [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
+  [BTN('🖼️ Cards do dia', '/cards')],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -371,9 +444,11 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   }
   if (cmd === 'ajuda' || cmd === 'help' || cmd === 'comandos') return { text: HELP, kb: MENU };
   if (cmd === 'testes') return testesCmd(chatId, rest);
+  if (cmd === 'receber' || cmd === 'envio') return receberCmd(chatId, rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
+  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, modelTop(d, T.mk), `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', ' · linha de referência'); }
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
@@ -484,6 +559,10 @@ Deno.serve(async (req: Request) => {
   const { token: TOKEN, secret: SECRET } = await cfg();
   if (!TOKEN || !SECRET) return new Response('Falta configurar TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET (tabela bot_config ou segredos da função).', { status: 500 });
   if (req.method === 'GET') {
+    if (url.searchParams.get('push') && url.searchParams.get('push') === SECRET) {
+      const r = await pushDaily(url.searchParams.get('force') === '1', +(url.searchParams.get('min') || 0)).catch(e => ({ ok: false, erro: String(e) }));
+      return new Response(JSON.stringify(r), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+    }
     if (url.searchParams.get('setup') !== SECRET) return new Response('ok');
     // dentro do Supabase a função vê só /telegram-bot; o endereço público tem /functions/v1 na frente
     const base = Deno.env.get('SUPABASE_URL');
@@ -493,7 +572,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

@@ -65,3 +65,15 @@ test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dis
   const old = buildProps({ ...slate, model: { date: '1999-01-01', players: s2.model.players } }, { calib: false }).find(x => x.p.id === p.id && x.mk === 'FGA');
   assert.ok(old && !old.model, 'modelo de outro dia é ignorado');
 });
+
+test('top 10 do Modelo BH: só rotação (24+ min) e linhas que as casas abrem', async () => {
+  const { topEligible, TOP_MIN_LINE } = await import('../collector/botdata.js');
+  const g = ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'];
+  const base = { mb: 1, m: 'FGA', st: 'ok', p: .7, mn: 30, l: 12.5 };
+  assert.ok(topEligible(base, g));
+  assert.ok(!topEligible({ ...base, mn: 18 }, g), 'reserva fica de fora');
+  assert.ok(!topEligible({ ...base, l: TOP_MIN_LINE.FGA - 1 }, g), 'linha baixa fica de fora');
+  assert.ok(!topEligible({ ...base, st: 'questionable' }, g), 'em dúvida fica de fora');
+  assert.ok(!topEligible({ ...base, mb: 0 }, g), 'só linhas com o Modelo BH');
+  assert.ok(!topEligible({ ...base, m: 'PTS' }, g), 'só os mercados do grupo');
+});

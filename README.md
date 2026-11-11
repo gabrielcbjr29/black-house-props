@@ -26,6 +26,14 @@ Com o runner instalado e aparecendo como Idle, crie a variável `COLETOR` = `com
 - **Três acertos lado a lado:** temporada · últimos 10 · contra o adversário de hoje. A defesa aparece em texto, como "Defesa do BOS: 25ª de 30 contra armadores em pontos · favorável".
 - **Por que sim / por que não**, gerado a partir dos números do modelo: média recente contra a linha, folga da projeção, H2H, defesa, minutos, histórico sem o companheiro, ritmo e mercado. Também avisa de amostra pequena, margem curta, lavada, dúvida e EV exagerado. Aparece no cartão (2 a favor e 1 contra) e completo na gaveta do jogador.
 - **Faixa de odd 1,40–3,50** no Top do dia, nas listas do bot e na múltipla (sem casa, vale a odd justa).
+- **Top 10 do Modelo BH no bot:**
+  - `/toptentativas` cobre arremessos tentados, de 3 tentados, lances livres tentados, de 2 tentados, de 2 convertidos e arremessos convertidos.
+  - `/topra` cobre rebotes + assistências.
+  - O ranking usa a Nota BH (chance do modelo, L10/L20/temporada, confronto direto, defesa × posição), com desempate pelo L10 e um por jogador.
+  - Entram só jogadores de rotação (24+ min) com linhas que as casas abrem, contra a linha de referência (mediana dos últimos 15 jogos).
+- **Envio diário:** `/receber` assina os dois tops.
+  - O Supabase (pg_cron + pg_net) chama `telegram-bot?push=<WEBHOOK_SECRET>` às 19h20 e 20h00 (só com dados da rodada das 18h30) e às 20h40 (com o que houver).
+  - O envio sai uma vez por dia; a trava fica em `bot_config.PUSH_<data>`.
 - **Cards em imagem no bot:**
   - Toque em 🖼️ 1…5 embaixo de qualquer lista para receber a entrada como imagem. O card traz nome, linha, odd, chance, projeção, EV, a nota, o gráfico dos últimos 10 jogos contra a linha, L10 · temporada · vs adversário, a defesa e os motivos.
   - **/cards** (ou "🖼️ Cards do dia" no menu) manda as 5 melhores num álbum; **/cards 10** manda as 10.
