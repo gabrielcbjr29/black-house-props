@@ -72,6 +72,14 @@ jobs:
           RADAR_MIN: ${{ vars.RADAR_MIN }}
           NOTIFY_UTC_HOURS: ${{ vars.NOTIFY_UTC_HOURS }}
         run: node collector/build.js
+      # Modelo BH: modelos por mercado treinados no histórico (model/), previsões gravadas no slate.json
+      - name: Modelo BH (previsões por mercado)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          python3 -m pip install --quiet pandas scikit-learn scipy || pip install --quiet pandas scikit-learn scipy
+          python3 model/predict.py public/data/slate.json
+          node collector/rebuild-bot.js
       - name: Salvar histórico e slate no repositório
         run: |
           git config user.name "garrafao-bot"

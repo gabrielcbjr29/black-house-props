@@ -51,3 +51,17 @@ test('cards: linhas marcadas têm últimos 10 jogos e o HTML do card sai complet
   const h = cardHTML(cards[0], b.date);
   assert.ok(h.includes(cards[0].n.replace(/&/g, '&amp;').replace(/'/g, "'")) && !/undefined|NaN/.test(h));
 });
+
+test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dispersão da binomial negativa)', async () => {
+  const { buildProps } = await import('../public/engine.js');
+  const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
+  const p = slate.players.find(x => x.status === 'ok' && x.logs.length > 10);
+  const s2 = { ...slate, model: { date: slate.meta.date, players: { [p.id]: { fga: [17.25, 25], pts: [21.5, 7], reb: [5.5, 12], ast: [4, 15] } } } };
+  const props = buildProps(s2, { calib: false }).filter(x => x.p.id === p.id);
+  const fga = props.find(x => x.mk === 'FGA'), pra = props.find(x => x.mk === 'PRA');
+  assert.ok(fga && fga.model && Math.abs(fga.proj - 17.25) < 1e-9, 'FGA usa o modelo');
+  assert.ok(Math.abs(fga.d - (1 + 17.25 / 25)) < 1e-9, 'dispersão da binomial negativa');
+  assert.ok(pra && pra.model && Math.abs(pra.proj - 31) < 1e-9, 'combinado soma as estatísticas do modelo');
+  const old = buildProps({ ...slate, model: { date: '1999-01-01', players: s2.model.players } }, { calib: false }).find(x => x.p.id === p.id && x.mk === 'FGA');
+  assert.ok(old && !old.model, 'modelo de outro dia é ignorado');
+});

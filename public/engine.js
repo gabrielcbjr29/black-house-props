@@ -217,6 +217,8 @@ export function buildProps(slate, opts = {}) {
   for (const ln of slate.lines || []) lines[ln.pid + '|' + ln.mk] = ln;
   const lgPace = slate.league?.pace || 100, lgTotal = slate.league?.avgTotal || null;
   const props = [];
+  // Modelo BH (model/predict.py): média e dispersão por jogador e estatística para o jogo de hoje
+  const MODEL = slate.model && (!slate.meta?.date || slate.model.date === slate.meta.date) ? slate.model.players || {} : null;
   for (const p of slate.players) {
     const game = gameByTeam[p.team]; if (!game || p.status === 'out') continue;
     const ctx = context(p, slate, game); if (ctx.logs.length < 3 || ctx.exp < 8) continue;
@@ -251,6 +253,14 @@ export function buildProps(slate, opts = {}) {
       const varr = v20.length > 1 ? sum(v20.map(x => (x - m) ** 2)) / (v20.length - 1) : m;
       let d = m > 0 ? varr / m : 1.4; if (v20.length < 8) d = Math.max(d, 1.5);
       const kc = calib?.[mk]; if (kc && kc > 0) d = d / (kc * kc);
+      // Modelo BH: troca a projeção pela do modelo treinado (soma das estatísticas nos combinados);
+      // num mercado simples, a dispersão vem da binomial negativa ajustada no treino (var = μ + μ²/k)
+      const MP = MODEL?.[p.id]; let model = null;
+      if (MP && M.k.every(k => MP[k])) {
+        model = { proj: sum(M.k.map(k => MP[k][0])), base: proj };
+        proj = model.proj;
+        if (M.k.length === 1) d = 1 + MP[M.k[0]][0] / MP[M.k[0]][1];
+      }
       const dist = makeDist(proj, d);
       // linha de referência: entre as duas linhas .5 vizinhas da mediana, a que dividiu
       // os últimos 15 jogos mais perto de 50/50 (é o que as casas tentam fazer)
@@ -273,7 +283,7 @@ export function buildProps(slate, opts = {}) {
         }
       }
       props.push({
-        id: p.id + '-' + mk, p, mk, game, opp, ctx, vals, proj, d, dist, refLine, mkt, _df: {},
+        id: p.id + '-' + mk, p, mk, game, opp, ctx, vals, proj, d, dist, refLine, mkt, _df: {}, model,
         book: book || null, line: book ? book.line : refLine, lineSource: book ? 'book' : 'ref',
         factors: { base: sum(fac.map(f => f.r)) * ctx.exp, mf: mfAvg, pf: pfAvg, uf: ufAvg, paceRatio, per36: sum(fac.map(f => f.r)) * 36 },
         rank: rk

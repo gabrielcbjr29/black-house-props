@@ -28,10 +28,20 @@ async function cfg(): Promise<Cfg> {
     dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', at: Date.now() };
   return CFG;
 }
+// banco (REST do próprio Supabase, com a chave de serviço): testes do Modelo BH
+async function sb(path: string, init: RequestInit = {}) {
+  const url = Deno.env.get('SUPABASE_URL'), key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) throw new Error('banco indisponível');
+  const r = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+  if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 120));
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
 const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number };
-type Data = { date: string; gen: string; demo: boolean; w: number; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number };
+type MStat = [number, number, number[], number | null];
+type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
+type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
 
 let CACHE: { at: number; data: Data } | null = null;
 async function data(): Promise<Data> {
@@ -81,6 +91,158 @@ function caption(r: Row) {
   const odd = r.d ? `odd <b>${n2(r.d)}</b> ${esc(r.b ?? '')}${r.k ? ' (bolsa)' : ''}` : `odd justa <b>${n2(1 / r.p)}</b>`;
   return `<b>${esc(r.gr)}${r.nt != null ? ' · Nota ' + r.nt : ''} · ${esc(r.n)}</b>\n${r.s === 'o' ? 'Mais de' : 'Menos de'} ${n1(r.l)} ${MK[r.m] ?? r.m} · ${odd}\n<i>${vs} · ${r.h}</i>\n<i>🔞 18+ · Aposte com responsabilidade</i>`;
 }
+// ---------- Modelo BH: chance de qualquer linha pelo modelo (binomial negativa) ----------
+const STATW: Record<string, { k: string[]; lb: string }> = {
+  pontos: { k: ['pts'], lb: 'pontos' }, pts: { k: ['pts'], lb: 'pontos' }, rebotes: { k: ['reb'], lb: 'rebotes' }, reb: { k: ['reb'], lb: 'rebotes' },
+  assist: { k: ['ast'], lb: 'assistências' }, assistencias: { k: ['ast'], lb: 'assistências' }, ast: { k: ['ast'], lb: 'assistências' },
+  tres: { k: ['tpm'], lb: 'bolas de 3' }, '3': { k: ['tpm'], lb: 'bolas de 3' }, triplos: { k: ['tpm'], lb: 'bolas de 3' }, '3pm': { k: ['tpm'], lb: 'bolas de 3' },
+  tentativas: { k: ['fga'], lb: 'arremessos tentados' }, arremessos: { k: ['fga'], lb: 'arremessos tentados' }, fga: { k: ['fga'], lb: 'arremessos tentados' },
+  '3t': { k: ['tpa'], lb: 'bolas de 3 tentadas' }, '3pa': { k: ['tpa'], lb: 'bolas de 3 tentadas' }, 'tres tentadas': { k: ['tpa'], lb: 'bolas de 3 tentadas' }, '3 tentadas': { k: ['tpa'], lb: 'bolas de 3 tentadas' }, 'tentativas 3': { k: ['tpa'], lb: 'bolas de 3 tentadas' },
+  lances: { k: ['fta'], lb: 'lances livres tentados' }, lt: { k: ['fta'], lb: 'lances livres tentados' }, fta: { k: ['fta'], lb: 'lances livres tentados' }, 'lances tentados': { k: ['fta'], lb: 'lances livres tentados' },
+  ltc: { k: ['ftm'], lb: 'lances livres convertidos' }, ftm: { k: ['ftm'], lb: 'lances livres convertidos' }, 'lances convertidos': { k: ['ftm'], lb: 'lances livres convertidos' },
+  '2t': { k: ['twoa'], lb: 'arremessos de 2 tentados' }, '2pa': { k: ['twoa'], lb: 'arremessos de 2 tentados' }, '2 tentadas': { k: ['twoa'], lb: 'arremessos de 2 tentados' },
+  '2pm': { k: ['twom'], lb: 'arremessos de 2 convertidos' }, convertidos: { k: ['fgm'], lb: 'arremessos convertidos' }, fgm: { k: ['fgm'], lb: 'arremessos convertidos' }, cestas: { k: ['fgm'], lb: 'arremessos convertidos' },
+  roubos: { k: ['stl'], lb: 'roubos' }, tocos: { k: ['blk'], lb: 'tocos' }, erros: { k: ['tov'], lb: 'erros' },
+  pra: { k: ['pts', 'reb', 'ast'], lb: 'pts+reb+ast' }, pr: { k: ['pts', 'reb'], lb: 'pts+reb' }, pa: { k: ['pts', 'ast'], lb: 'pts+ast' }, ra: { k: ['reb', 'ast'], lb: 'reb+ast' },
+};
+const STAT_KEY = (k: string[]) => k.join('+');
+const statByKey = (key: string) => Object.values(STATW).find(x => STAT_KEY(x.k) === key);
+// P(X > linha) com X ~ binomial negativa de média mu e dispersão k (var = mu + mu²/k)
+function nbOver(mu: number, k: number, line: number) {
+  mu = Math.max(mu, .01); const thr = Math.floor(line);
+  if (k > 400) { let p = Math.exp(-mu), c = 0; for (let x = 0; x <= thr; x++) { c += p; p *= mu / (x + 1); } return Math.max(0, Math.min(1, 1 - c)); }
+  let p = Math.pow(k / (k + mu), k), c = 0; const q = mu / (k + mu);
+  for (let x = 0; x <= thr; x++) { c += p; p *= (x + k) / (x + 1) * q; }
+  return Math.max(0, Math.min(1, 1 - c));
+}
+function modelDist(m: MPlayer, keys: string[]) {
+  const parts = keys.map(k => m.s[k]).filter(Boolean); if (parts.length !== keys.length) return null;
+  const mu = parts.reduce((a, x) => a + x[0], 0);
+  if (parts.length === 1) return { mu, k: parts[0][1] };
+  // combinados: soma das variâncias com 10% a mais pela correlação positiva entre as estatísticas
+  const v = parts.reduce((a, x) => a + x[0] + x[0] * x[0] / x[1], 0) * 1.1;
+  return { mu, k: v > mu ? mu * mu / (v - mu) : 500 };
+}
+const sumK = (vals: Record<string, number>, keys: string[]) => keys.reduce((a, k) => a + (vals[k] ?? 0), 0);
+const conf = (p: number) => p >= .62 ? 'alta' : p >= .56 ? 'média' : 'baixa (perto de 50/50)';
+
+async function modeloCmd(d: Data, rest: string[], chatId: number): Promise<Out> {
+  const back = { inline_keyboard: [[BTN('📒 Meus testes', '/testes'), BTN('🧠 Como usar', '/modelo')], [BTN('🏠 Menu', '/menu')]] };
+  if (!d.mdl || !Object.keys(d.mdl).length) return { text: 'O Modelo BH ainda não rodou para os jogos de hoje. Tente depois da próxima atualização.', kb: { inline_keyboard: [HOME] } };
+  if (!rest.length) return { text: `<b>🧠 MODELO BH</b>
+Projeção e chance de qualquer linha pelo modelo treinado para cada mercado: forma, minutos, defesa contra a posição, ritmo, mando, descanso, confronto direto e desfalques.
+
+<b>Como usar</b>
+<code>/modelo brunson tentativas 17,5</code>
+<code>/modelo curry 3 tentadas 9,5</code>
+<code>/modelo sengun lances 4,5</code>
+<code>/modelo jokic pra 48,5</code>
+Sem a linha, mostra a projeção e as linhas mais comuns.
+
+<b>Mercados</b>: pontos, rebotes, assist, tres, <b>tentativas</b>, <b>3 tentadas</b>, <b>lances</b> (tentados), ltc (lances convertidos), 2t, convertidos, roubos, tocos, erros, pra, pr, pa, ra.
+
+📒 Toda linha que você manda vira um <b>teste</b>: no dia seguinte eu confiro o resultado sozinho. Veja em /testes.`, kb: back };
+  // linha (último número), mercado (1 ou 2 palavras antes) e jogador (o resto)
+  const toks = rest.map(t => t.toLowerCase());
+  let line: number | null = null;
+  if (/^\d+([.,]\d+)?$/.test(toks[toks.length - 1] ?? '')) { line = parseFloat(toks.pop()!.replace(',', '.')); if (!Number.isInteger(line - .5)) line = Math.floor(line) + .5; }
+  let st: { k: string[]; lb: string } | undefined;
+  for (const n of [2, 1]) { if (toks.length > n - 1) { const w = norm(toks.slice(-n).join(' ')); if (STATW[w]) { st = STATW[w]; toks.splice(-n); break; } } }
+  if (!st) { const w = toks.find(t => statByKey(t)); if (w) { st = statByKey(w); toks.splice(toks.indexOf(w), 1); } }
+  if (!st) return { text: 'Não entendi o mercado. Exemplo: <code>/modelo brunson tentativas 17,5</code>', kb: back };
+  const q = toks.join(' ');
+  let pid: string | undefined;
+  if (q.startsWith('#')) pid = q.slice(1);
+  else {
+    const nq = norm(q); if (nq.length < 3) return { text: 'Digite pelo menos 3 letras do nome do jogador.', kb: back };
+    const hits = Object.entries(d.mdl).filter(([, m]) => norm(m.n).includes(nq));
+    if (!hits.length) return { text: `Não achei <b>${esc(q)}</b> nos jogos de hoje (ou ele está fora).`, kb: back };
+    if (hits.length > 1) return { text: `Achei ${hits.length} jogadores. Qual deles?`, kb: { inline_keyboard: [...chunk(hits.slice(0, 8).map(([id, m]) => BTN(`${m.n} (${m.t})`, `/modelo #${id} ${STAT_KEY(st!.k)}${line != null ? ' ' + line : ''}`)), 2), [BTN('🏠 Menu', '/menu')]] } };
+    pid = hits[0][0];
+  }
+  const m = d.mdl[pid!]; if (!m) return { text: 'Jogador não encontrado nos jogos de hoje.', kb: back };
+  const dist = modelDist(m, st.k); if (!dist) return { text: 'Sem modelo para esse mercado.', kb: back };
+  const vs = m.home ? `${m.t} x ${m.o}` : `${m.t} @ ${m.o}`;
+  const v10 = st.k.length === 1 ? m.s[st.k[0]][2] : (m.s[st.k[0]][2] || []).map((_, i) => st!.k.reduce((a, k) => a + (m.s[k][2][i] ?? 0), 0));
+  const szn = st.k.every(k => m.s[k][3] != null) ? st.k.reduce((a, k) => a + (m.s[k][3] as number), 0) : null;
+  const h2h = (m.h2h || []).map(x => sumK(x, st!.k));
+  const head = `<b>🧠 MODELO BH · ${esc(m.n)}</b>\n<i>${vs} · ${m.h}${m.st === 'questionable' ? ' · 🟡 em dúvida' : ''}</i>\n`;
+  if (line == null) {
+    const base = Math.floor(dist.mu);
+    const ls = [base - 1.5, base - .5, base + .5, base + 1.5].filter(x => x > 0);
+    const rows = ls.map(l => { const po = nbOver(dist.mu, dist.k, l); return `${n1(l).padStart(5)}  mais ${String(Math.round(po * 100)).padStart(2)}%  menos ${String(Math.round((1 - po) * 100)).padStart(2)}%`; }).join('\n');
+    return { text: head + `\n<b>${st.lb}</b>\nProjeção <b>${n1(Math.round(dist.mu * 10) / 10)}</b>${szn != null ? ` · média na temporada ${n1(Math.round(szn * 10) / 10)}` : ''}\n<pre>LINHA  CHANCE PELO MODELO\n${rows}</pre>\nÚltimos ${v10.length}: ${v10.join(' · ')}\n\nToque numa linha para registrar o teste:`,
+      kb: { inline_keyboard: [ls.map(l => BTN(n1(l), `/modelo #${pid} ${STAT_KEY(st!.k)} ${l}`)), ...back.inline_keyboard] } };
+  }
+  const po = nbOver(dist.mu, dist.k, line), side = po >= .5 ? 'o' : 'u', ps = Math.max(po, 1 - po);
+  const hitsL10 = v10.filter(v => side === 'o' ? v > line! : v < line!).length;
+  const hitsH = h2h.filter(v => side === 'o' ? v > line! : v < line!).length;
+  const dots10 = v10.slice().reverse().map(v => (side === 'o' ? v > line! : v < line!) ? '●' : '○').join('');
+  // registra o teste (um por jogador/mercado/linha/dia)
+  let reg = '';
+  try {
+    const r = await sb('model_tests?on_conflict=chat_id,date,pid,stat,line', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({ chat_id: chatId, date: d.date, pid, name: m.n, team: m.t, opp: m.o, stat: STAT_KEY(st.k), line, side, p: Math.round(ps * 1000) / 1000, mu: Math.round(dist.mu * 100) / 100 }) });
+    reg = `📒 Teste <b>#${r?.[0]?.id ?? ''}</b> registrado: confiro amanhã com o resultado (/testes).`;
+  } catch (e) { reg = '<i>(não consegui registrar o teste agora)</i>'; }
+  return { text: head + `
+<b>${st.lb} · linha ${n1(line)}</b>
+<blockquote>Projeção <b>${n1(Math.round(dist.mu * 10) / 10)}</b>${szn != null ? `  ·  temporada ${n1(Math.round(szn * 10) / 10)}` : ''}
+⬆️ Mais de ${n1(line)}: <b>${Math.round(po * 100)}%</b>  ${bar(po)}
+⬇️ Menos de ${n1(line)}: <b>${Math.round((1 - po) * 100)}%</b>
+📊 Últimos ${v10.length}: ${dots10} <b>${hitsL10}/${v10.length}</b> ${side === 'o' ? 'acima' : 'abaixo'}
+<i>${v10.slice().reverse().join(' · ')}</i>${h2h.length ? `\n🆚 Contra o ${m.o}: <b>${hitsH}/${h2h.length}</b> (${h2h.join(' · ')})` : ''}</blockquote>
+👉 Lado do modelo: <b>${side === 'o' ? 'MAIS' : 'MENOS'} de ${n1(line)}</b> · ${Math.round(ps * 100)}% · confiança ${conf(ps)}
+${reg}
+<i>Modelo testado nesta temporada: erra 8% a 10% menos que a média dos últimos 10. Contra as linhas da Kalshi ainda não mostrou vantagem; em tentativas, o teste é este.</i>`, kb: back };
+}
+
+// ---------- testes: confere sozinho com os resultados publicados ----------
+const RES_IDX: Record<string, (a: number[]) => number> = { pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
+async function settle(rows: any[]) {
+  const open = rows.filter(r => !r.settled_at);
+  if (!open.length) return;
+  const res = await fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 300_000)).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!res?.stats) return;
+  for (const r of open) {
+    if (!res.dates?.includes(r.date)) continue; // dia ainda sem box score
+    const a = res.stats[r.date]?.[r.pid];
+    const keys = String(r.stat).split('+');
+    let patch: Record<string, unknown>;
+    if (!a || !(a[0] > 0)) patch = { settled_at: new Date().toISOString(), hit: null, result: null }; // não jogou: anulado
+    else { const v = keys.reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); patch = { settled_at: new Date().toISOString(), result: v, hit: v === +r.line ? null : (r.side === 'o' ? v > +r.line : v < +r.line) }; }
+    Object.assign(r, patch);
+    try { await sb(`model_tests?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(patch) }); } catch { /* tenta de novo na próxima */ }
+  }
+}
+function resumo(rows: any[], titulo: string) {
+  const done = rows.filter(r => r.settled_at && r.hit != null);
+  const pct1 = (a: any[]) => a.length ? Math.round(a.filter(r => r.hit).length / a.length * 1000) / 10 : 0;
+  const roi = (a: any[]) => a.length ? Math.round((a.filter(r => r.hit).length * 1.87 - a.length) / a.length * 1000) / 10 : 0;
+  const band = (lo: number, hi: number) => done.filter(r => +r.p >= lo && +r.p < hi);
+  const by: Record<string, any[]> = {}; for (const r of done) (by[r.stat] ||= []).push(r);
+  const lines = Object.entries(by).sort((a, b) => b[1].length - a[1].length).slice(0, 6).map(([k, a]) => `${(statByKey(k)?.lb ?? k).padEnd(24).slice(0, 24)} ${String(a.length).padStart(3)}  ${String(pct1(a)).padStart(5)}%`).join('\n');
+  return `<b>${titulo}</b>
+<blockquote>✅ <b>${done.filter(r => r.hit).length}</b> · ❌ <b>${done.filter(r => !r.hit).length}</b> · ⏳ ${rows.filter(r => !r.settled_at).length} aguardando
+Acerto: <b>${pct1(done)}%</b>${done.length ? ` · se fosse odd 1,87: ${roi(done) >= 0 ? '+' : ''}${String(roi(done)).replace('.', ',')}%` : ''}
+Confiança alta (62%+): ${band(.62, 1.01).length} testes, ${pct1(band(.62, 1.01))}%
+Confiança média (56–62%): ${band(.56, .62).length} testes, ${pct1(band(.56, .62))}%
+Confiança baixa: ${band(0, .56).length} testes, ${pct1(band(0, .56))}%</blockquote>${lines ? `\n<pre>MERCADO                    N  ACERTO\n${lines}</pre>` : ''}
+<i>Para lucrar com odd ~1,87 é preciso acertar 53,5% ou mais. Amostra pequena engana: o número começa a valer com 100+ testes.</i>`;
+}
+async function testesCmd(chatId: number, rest: string[]): Promise<Out> {
+  const all = norm(rest[0] ?? '') === 'todos';
+  let rows: any[] = [];
+  try { rows = await sb(`model_tests?select=*${all ? '' : `&chat_id=eq.${chatId}`}&order=created_at.desc&limit=${all ? 1000 : 300}`) ?? []; } catch (e) { return { text: 'Não consegui ler os testes agora.', kb: { inline_keyboard: [HOME] } }; }
+  await settle(rows);
+  if (!rows.length) return { text: 'Nenhum teste ainda. Mande uma linha da sua casa, por exemplo:\n<code>/modelo brunson tentativas 17,5</code>', kb: { inline_keyboard: [[BTN('🧠 Como usar', '/modelo')], HOME] } };
+  const last = rows.slice(0, 12).map(r => {
+    const ic = !r.settled_at ? '⏳' : r.hit == null ? '➖' : r.hit ? '✅' : '❌';
+    return `${ic} ${esc(r.name)} · ${r.side === 'o' ? 'mais' : 'menos'} ${n1(+r.line)} ${statByKey(r.stat)?.lb ?? r.stat} <i>(${Math.round(+r.p * 100)}%${r.result != null ? ', fez ' + n1(+r.result) : ''})</i>`;
+  }).join('\n');
+  return { text: resumo(rows, all ? '📒 TESTES DO MODELO BH · TODOS OS USUÁRIOS' : '📒 SEUS TESTES DO MODELO BH') + `\n\n<b>Últimos</b>\n${last}`,
+    kb: { inline_keyboard: [[BTN(all ? '👤 Só os meus' : '👥 De todos', all ? '/testes' : '/testes todos'), BTN('🔄 Atualizar', all ? '/testes todos' : '/testes')], [BTN('🧠 Modelo BH', '/modelo'), BTN('🏠 Menu', '/menu')]] } };
+}
 const hitTxt = (h?: [number, number] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 
 type Out = { text: string; kb?: unknown };
@@ -96,7 +258,7 @@ function card(r: Row, i: number) {
   const ev = r.e == null ? '' : ` · EV <b>${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%</b>`;
   const nota = r.nt != null ? ` · Nota <b>${r.nt}</b>` : '';
   // três acertos lado a lado: últimos 10 · temporada · contra o adversário
-  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}  <i>proj. ${n1(Math.round(r.pj * 10) / 10)}</i>`;
+  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
@@ -176,6 +338,10 @@ const HELP = `<b>📖 COMANDOS</b>
 /jogos · /desfalques · /resumo
 /multipla 3 · /multipla 4,5
 /cards · /cards 10 · melhores do dia em imagem
+
+<b>Modelo BH</b>
+/modelo brunson tentativas 17,5 · chance pelo modelo + teste
+/testes · seus testes conferidos · /testes todos
 /app · app completo
 
 <b>Como ler o cartão</b>
@@ -189,7 +355,7 @@ const MENU = { inline_keyboard: [
   [BTN('👌 Bolas de 3', '/tres'), BTN('➕ PRA', '/pra'), BTN('🧩 Combinados', '/combinados')],
   [BTN('🏹 Tentativas', '/tentativas'), BTN('🧱 Defesa', '/defesa'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
-  [BTN('🖼️ Cards do dia', '/cards')],
+  [BTN('🧠 Modelo BH', '/modelo'), BTN('🖼️ Cards do dia', '/cards'), BTN('📒 Testes', '/testes')],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -204,8 +370,10 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     return { text: `<b>🏀 BLACK HOUSE · PROPS NBA</b>\n${d ? `<i>${dateBR(d.date)} · ${d.games.length} jogos · ${a} linhas nota A ou A+</i>\n` : ''}\nEscolha abaixo ou digite um comando (/ajuda).\n\n<i>Seu ID: <code>${chatId}</code></i>`, kb: MENU };
   }
   if (cmd === 'ajuda' || cmd === 'help' || cmd === 'comandos') return { text: HELP, kb: MENU };
+  if (cmd === 'testes') return testesCmd(chatId, rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
+  if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
@@ -325,7 +493,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

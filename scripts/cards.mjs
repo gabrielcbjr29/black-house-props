@@ -96,7 +96,7 @@ export function cardHTML(r, date) {
     <div class="grade"><div class="g g${r.gr === 'A+' ? 'Ap' : r.gr}">${esc(r.gr)}</div><small>NOTA ${r.nt ?? '–'}</small></div></div>
   <div class="line"><span class="side ${r.s}">${over ? 'MAIS DE' : 'MENOS DE'}</span><span class="ln">${n1(r.l)}</span><span class="mk">${esc(MK[r.m] || r.m)}</span></div>
   <div class="kpis">${odd}<div class="k gr"><small>CHANCE</small><b>${pct(r.p)}</b><span>${r.q != null ? 'mercado ' + pct(r.q) : 'modelo'}</span></div>
-    <div class="k"><small>PROJEÇÃO</small><b>${n1(Math.round(r.pj * 10) / 10)}</b><span>linha ${n1(r.l)}</span></div>
+    <div class="k"><small>${r.mb ? 'MODELO BH' : 'PROJEÇÃO'}</small><b>${n1(Math.round(r.pj * 10) / 10)}</b><span>linha ${n1(r.l)}</span></div>
     <div class="k"><small>EV</small><b>${r.e == null ? '–' : (r.e >= 0 ? '+' : '') + (r.e * 100).toFixed(1).replace('.', ',') + '%'}</b><span>${r.e == null ? 'falta odd' : 'valor esperado'}</span></div></div>
   <div class="chart"><h3><span>Últimos ${v.length} jogos · bateu <b>${nHit} de ${v.length}</b></span><span class="lg">linha ${n1(r.l)}</span></h3>
     <div class="bars">${bars}<div class="thr" style="bottom:${r.l / max * 100}%"></div></div>

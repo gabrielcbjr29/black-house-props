@@ -38,7 +38,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
     const h10 = s.hits?.L10?.[1] ? s.hits.L10[0] / s.hits.L10[1] : 0;
     rows.push({ id: pr.p.id, n: pr.p.name, t: pr.p.team, o: opp, home: pr.p.team === g.home, g: pr.game.id, h: brTime(g.timeUTC), m: pr.mk, s: s.side === 'over' ? 'o' : 'u', l: e.line,
       p: r3(s.p), q: r3(s.pMkt), d: odd, b: book, k: kal ? 1 : 0, e: r3(ev), gr: s.grade, l10: s.hits?.L10 || null, l20: s.hits?.L20 || null,
-      ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF),
+      ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF), mb: pr.model ? 1 : 0,
       st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
       _v: () => ({ ps: POSLB[pr.p.pos] || '', v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) });
   }
@@ -66,5 +66,19 @@ export function buildBotData(slate, { w = .4 } = {}) {
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
-  return { v: 2, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows };
+  // Modelo BH por jogador (para o /modelo do bot): média e dispersão de cada estatística + últimos 10 jogos e média na temporada
+  const mdl = {};
+  if (slate.model?.players && slate.model.date === slate.meta.date) {
+    const gameOf = {}; for (const g of slate.games) { gameOf[g.home] = g; gameOf[g.away] = g; }
+    const ST = { pts: x => x[L.pts], reb: x => x[L.reb], ast: x => x[L.ast], fgm: x => x[L.fgm], fga: x => x[L.fga], tpm: x => x[L.tpm], tpa: x => x[L.tpa], ftm: x => x[L.ftm], fta: x => x[L.fta], twoa: x => x[L.fga] - x[L.tpa], twom: x => x[L.fgm] - x[L.tpm], stl: x => x[L.stl], blk: x => x[L.blk], tov: x => x[L.tov] };
+    for (const p of slate.players) {
+      const M = slate.model.players[p.id], g = gameOf[p.team]; if (!M || !g || p.status === 'out') continue;
+      const logs = p.logs || [], cur = logs.filter(x => x[L.cur]);
+      const st = {};
+      for (const k in M) { if (!ST[k]) continue; const v = logs.slice(0, 10).map(ST[k]); st[k] = [M[k][0], M[k][1], v, cur.length ? r3(cur.reduce((a, x) => a + ST[k](x), 0) / cur.length) : null]; }
+      mdl[p.id] = { n: p.name, t: p.team, o: g.home === p.team ? g.away : g.home, home: g.home === p.team, h: brTime(g.timeUTC), g: g.id, st: p.status, gp: cur.length, s: st,
+        h2h: logs.filter(x => x[L.opp] === (g.home === p.team ? g.away : g.home)).slice(0, 10).map(x => Object.fromEntries(Object.keys(ST).map(k => [k, ST[k](x)]))) };
+    }
+  }
+  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, mdl };
 }
