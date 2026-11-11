@@ -379,6 +379,108 @@ export function parlayProb(legs) {
 }
 export const GRADE_ORDER = { 'A+': 4, A: 3, B: 2, C: 1 };
 
+/* ---------- v11: Nota BH (0–100), faixa de odd e "por que sim / por que não" ---------- */
+/* Faixa de odd das listas de destaque: abaixo de 1,40 rende pouco por unidade arriscada,
+   acima de 3,50 é zebra (mesmo critério do PropFinder: -250 a +250). */
+export const ODD_RANGE = [1.4, 3.5];
+export const inOddRange = (odd, r = ODD_RANGE) => odd != null && odd >= r[0] - 1e-9 && odd <= r[1] + 1e-9;
+const hitR = h => h?.[1] ? h[0] / h[1] : null;
+// acerto encolhido para 50% com amostra pequena (k jogos "imaginários" a 50%)
+const shrinkHit = (h, k) => h?.[1] ? (h[0] + .5 * k) / (h[1] + k) : .5;
+/* Nota BH 0–100: quanto os dados sustentam o lado escolhido. Pesos:
+   chance 30 · valor (EV) 20 · consistência L10/L20/temporada 25 · confronto direto 5 ·
+   defesa × posição 10 · mercado 10; descontos por dúvida, amostra curta, lavada e EV exagerado.
+   opts.steam: +1 mercado andou a favor, −1 contra. */
+export function bhScore(pr, e, side, opts = {}) {
+  const s = e[side]; if (!s) return 0;
+  const u = (x, lo, hi) => clamp((x - lo) / (hi - lo), 0, 1);
+  const cP = u(s.p, .48, .72);
+  let cV = s.ev == null ? .4 : u(s.ev, -.03, .10);
+  if (s.ev != null && s.ev > .15) cV = .55; // valor alto demais costuma ser notícia que o modelo não viu
+  const cons = 15 * u(shrinkHit(s.hits.L10, 2), .45, .85) + 6 * u(shrinkHit(s.hits.L20, 3), .45, .8) + 4 * u(shrinkHit(s.hits.CUR, 3), .45, .8);
+  const cH = s.hits.H2H?.[1] >= 2 ? u(shrinkHit(s.hits.H2H, 2), .35, .8) : .5;
+  const r = pr.rank?.rank, of = pr.rank?.of || 30;
+  const cM = r ? (side === 'over' ? (r - 1) / (of - 1) : (of - r) / (of - 1)) : .5;
+  const cK = s.pMkt == null ? .45 : u(s.pMkt, .4, .62);
+  let sc = 30 * cP + 20 * cV + cons + 5 * cH + 10 * cM + 10 * cK;
+  if (pr.p.status === 'questionable') sc -= 8;
+  if (pr.ctx.logs.length < 10) sc -= 6;
+  if (side === 'over' && pr.ctx.adj.some(a => a.lb.startsWith('Risco de lavada'))) sc -= 4;
+  if (s.odd && s.odd < ODD_RANGE[0]) sc -= 12;
+  if (s.ev != null && s.ev < 0) sc -= 6;
+  if (opts.steam) sc += 3 * Math.sign(opts.steam);
+  // número e letra não se contradizem: C no máximo 55, B no máximo 74
+  const cap = { C: 55, B: 74 }[s.grade] ?? 99;
+  return Math.round(clamp(sc, 0, cap));
+}
+
+/* Motivos a favor e contra, em português, a partir dos mesmos números do modelo.
+   Cada motivo tem peso (w) para ordenar; volta no máximo `max` de cada lado. */
+const POSPL = { G: 'armadores', F: 'alas', C: 'pivôs' };
+const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bolas de 3', stl: 'roubos', blk: 'tocos', tov: 'erros', fgm: 'arremessos convertidos', fga: 'arremessos tentados', fta: 'lances livres tentados', ftm: 'lances livres', tpa: 'bolas de 3 tentadas', twom: 'arremessos de 2', twoa: 'arremessos de 2 tentados', oreb: 'rebotes ofensivos', pf: 'faltas' };
+const f1 = x => (Math.round(x * 10) / 10).toFixed(1).replace('.', ',').replace(',0', '');
+export function reasons(pr, e, side, opts = {}) {
+  const s = e[side], line = e.line, over = side === 'over', max = opts.max || 3;
+  const pro = [], con = [];
+  const v10 = pr.vals.slice(0, 10), avg10 = v10.length ? mean(v10) : null;
+  const sideTxt = over ? 'acima' : 'abaixo';
+  const margin = over ? e.muF - line : line - e.muF;
+  // média recente x linha
+  if (avg10 != null && v10.length >= 5) {
+    const d = over ? avg10 - line : line - avg10;
+    if (d >= Math.max(.5, line * .08)) pro.push({ w: 3 + Math.min(d / Math.max(line, 1), .5) * 4, t: `Média de ${f1(avg10)} nos últimos ${v10.length}, ${sideTxt} da linha ${f1(line)}` });
+    else if (d < 0) con.push({ w: 2.5, t: `Média de ${f1(avg10)} nos últimos ${v10.length}: o lado está contra a forma recente` });
+  }
+  // acertos
+  const h10 = s.hits.L10, hc = s.hits.CUR, hh = s.hits.H2H;
+  if (h10?.[1] >= 6 && hitR(h10) >= .7) pro.push({ w: 2 + hitR(h10) * 2, t: `Bateu em ${h10[0]} dos últimos ${h10[1]}` });
+  else if (h10?.[1] >= 6 && hitR(h10) <= .5) con.push({ w: 3, t: `Só bateu ${h10[0]} dos últimos ${h10[1]}` });
+  if (hc?.[1] >= 5 && hitR(hc) >= .65 && !(h10?.[1] >= 6 && hitR(h10) >= .7 && hc[1] <= 10)) pro.push({ w: 1.5 + hitR(hc), t: `${hc[0]} de ${hc[1]} na temporada` });
+  if (hh?.[1] >= 3 && hitR(hh) >= .67) pro.push({ w: 1.5 + hitR(hh) + Math.min(hh[1], 8) / 8, t: `Contra o ${pr.opp}: ${hh[0]} de ${hh[1]}` });
+  else if (hh?.[1] >= 3 && hitR(hh) <= .34) con.push({ w: 2, t: `Contra o ${pr.opp}: só ${hh[0]} de ${hh[1]}` });
+  // defesa x posição
+  const r = pr.rank?.rank, of = pr.rank?.of || 30, posTxt = POSPL[pr.p.pos] || 'a posição', stat = STAT_PT[pr.rank?.k] || 'essa estatística';
+  if (r) {
+    const good = over ? r >= of - 5 : r <= 6, bad = over ? r <= 6 : r >= of - 5;
+    const desc = r >= of - 5 ? 'uma das que mais cedem' : r <= 6 ? 'uma das que menos cedem' : '';
+    if (good) pro.push({ w: 2.2, t: `Defesa do ${pr.opp}: ${r}ª de ${of} contra ${posTxt} em ${stat} (${desc})` });
+    else if (bad) con.push({ w: 2.2, t: `Defesa do ${pr.opp}: ${r}ª de ${of} contra ${posTxt} em ${stat} (${desc})` });
+  }
+  // modelo x mercado
+  if (s.pMkt != null) {
+    const g = s.p - s.pMkt;
+    if (g >= .04) pro.push({ w: 1.8 + g * 10, t: `Modelo vê ${Math.round(s.p * 100)}% contra ${Math.round(s.pMkt * 100)}% do mercado` });
+    else if (g <= -.03) con.push({ w: 2, t: `Mercado mais cético: ${Math.round(s.pMkt * 100)}% contra ${Math.round(s.p * 100)}% do modelo` });
+  }
+  // minutos e desfalques
+  const c = pr.ctx;
+  if (c.wo?.active && s.hits.WO?.[1] >= 2) {
+    const woV = pr.vals.filter((_, i) => c.wo.set.has(String(c.logs[i][L.gid])));
+    const t = `Sem ${c.wo.q.name}: média de ${f1(mean(woV))} em ${woV.length} jogos (${s.hits.WO[0]} de ${s.hits.WO[1]} ${over ? 'acima' : 'abaixo'})`;
+    (hitR(s.hits.WO) >= .6 ? pro : con).push({ w: 2.4, t });
+  } else if (c.out.length && over && c.extra >= 1.5) pro.push({ w: 1.6, t: `Desfalques no time: +${f1(c.extra)} minutos esperados` });
+  if (c.role === 'up') (over ? pro : con).push({ w: 2, t: 'Previsto como titular (vinha saindo do banco)' });
+  if (c.role === 'down') (over ? con : pro).push({ w: 2, t: 'Previsto no banco (vinha como titular)' });
+  if (c.m5 - c.m20 >= 4) (over ? pro : con).push({ w: 1.2, t: `Minutos em alta: ${f1(c.m5)} nos últimos 5 (${f1(c.m20)} nos 20)` });
+  else if (c.m20 - c.m5 >= 4) (over ? con : pro).push({ w: 1.2, t: `Minutos em queda: ${f1(c.m5)} nos últimos 5 (${f1(c.m20)} nos 20)` });
+  // ritmo do jogo
+  const pace = pr.factors?.paceRatio;
+  if (pace && pace >= 1.03) (over ? pro : con).push({ w: 1, t: `Jogo de ritmo alto${pr.game.total ? ` (total ${f1(pr.game.total)})` : ''}` });
+  else if (pace && pace <= .97) (over ? con : pro).push({ w: 1, t: `Jogo de ritmo baixo${pr.game.total ? ` (total ${f1(pr.game.total)})` : ''}` });
+  // riscos
+  if (c.logs.length < 10) con.push({ w: 3, t: `Amostra pequena: só ${c.logs.length} jogos no histórico` });
+  if (Math.abs(margin) < Math.max(.35, line * .06)) con.push({ w: 2.3, t: `Margem curta: projeção ${f1(e.muF)} para linha ${f1(line)}` });
+  else if (margin >= Math.max(.5, line * .12)) pro.push({ w: 2.5, t: `Projeção ${f1(e.muF)}: folga de ${f1(margin)} ${over ? 'acima' : 'abaixo'} da linha` });
+  if (over && c.adj.some(a => a.lb.startsWith('Risco de lavada'))) con.push({ w: 2.2, t: `Risco de lavada (handicap ${f1(Math.abs(pr.game.spread))}): pode jogar menos` });
+  if ((pr.game.b2b || []).includes(pr.p.team)) (over ? con : pro).push({ w: 1.4, t: 'Segundo jogo em duas noites' });
+  if (pr.p.status === 'questionable') con.push({ w: 3.5, t: 'Jogador em dúvida: confira antes do jogo' });
+  if (s.ev != null && s.ev > .15) con.push({ w: 3, t: 'Valor alto demais: o mercado pode saber de algo (lesão, minutos)' });
+  if (s.odd && s.odd < ODD_RANGE[0]) con.push({ w: 1.5, t: `Odd baixa (${s.odd.toFixed(2).replace('.', ',')}): rende pouco` });
+  if (s.streak >= 5 && pro.length < 6) pro.push({ w: 1.3, t: `${s.streak} jogos seguidos ${over ? 'acima' : 'abaixo'}` });
+  const top = a => a.sort((x, y) => y.w - x.w).slice(0, max).map(x => x.t);
+  return { pro: top(pro), con: top(con) };
+}
+
 /* ---------- v7: faixa provável, escada de linhas e radar de divergência ---------- */
 // quantil: menor valor inteiro k com P(X ≤ k) ≥ q
 export function quantile(dist, q) { const cap = Math.ceil(dist.mu * 6 + 60); let k = 0; while (k < cap && dist.cdf(k) < q) k++; return k; }

@@ -21,6 +21,12 @@ A NBA bloqueia servidores de nuvem (o GitHub Actions inclusive), mas não a inte
 
 Com o runner instalado e aparecendo como Idle, crie a variável `COLETOR` = `computador` em Settings → Secrets and variables → Actions → Variables. Sem essa variável, a coleta roda na nuvem do GitHub, com a ESPN como fonte.
 
+## Novidades da versão 11 (ideias do PropFinder)
+- **Nota BH 0–100** em cada entrada, no app e no bot, ao lado da letra. Ela soma chance (30), valor/EV (20), acertos nos últimos 10, 20 e na temporada (25), confronto direto (5), defesa × posição (10) e mercado (10). Há descontos por dúvida, amostra curta, risco de lavada, odd abaixo de 1,40 e EV negativo. A nota nunca contradiz a letra: C vai no máximo a 55 e B a 74. O ranking do dia ordena pela nota e desempata pelo L10.
+- **Três acertos lado a lado:** temporada · últimos 10 · contra o adversário de hoje. A defesa aparece em texto, como "Defesa do BOS: 25ª de 30 contra armadores em pontos · favorável".
+- **Por que sim / por que não**, gerado a partir dos números do modelo: média recente contra a linha, folga da projeção, H2H, defesa, minutos, histórico sem o companheiro, ritmo e mercado. Também avisa de amostra pequena, margem curta, lavada, dúvida e EV exagerado. Aparece no cartão (2 a favor e 1 contra) e completo na gaveta do jogador.
+- **Faixa de odd 1,40–3,50** no Top do dia, nas listas do bot e na múltipla (sem casa, vale a odd justa).
+
 ## Novidades da versão 10 (painel escuro preto, verde e dourado)
 
 - Visual de painel escuro: barra lateral de ícones no computador, cartões arredondados, fonte Manrope (licença OFL) e degradê verde → dourado.

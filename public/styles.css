@@ -951,3 +951,28 @@ h2 { font-weight: 800; letter-spacing: -.015em; }
   .data-pill { font-size: 0; width: 12px; height: 12px; padding: 0; border-width: 2px; }
   .data-pill.demo { background: var(--gold); } .data-pill.live { background: var(--green); }
 }
+
+/* v11: Nota BH, defesa em texto e "por que sim / por que não" */
+.nota { display: inline-grid; place-items: center; min-width: 34px; height: 30px; padding: 0 6px; border-radius: 7px; font-family: var(--fd); font-weight: 800; font-size: 16px; line-height: 1; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.nota.hi { background: var(--green-soft); color: var(--green); box-shadow: inset 0 0 0 1.5px var(--green-line); }
+.nota.md { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line-2); }
+.nota.lo { color: var(--muted); background: var(--surface-2); }
+td .nota { height: 24px; min-width: 30px; font-size: 13px; margin: 0; }
+.bigkpis .nota { vertical-align: middle; }
+.deftxt { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.deftxt b { color: var(--ink); font-weight: 600; }
+.deftxt .pos { color: var(--green); font-weight: 600; } .deftxt .neg { color: var(--bad); font-weight: 600; }
+ul.why { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; line-height: 1.38; }
+ul.why li { display: grid; grid-template-columns: 16px 1fr; gap: 6px; align-items: start; }
+ul.why li span { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; font-size: 10px; font-weight: 800; }
+ul.why li.y span { background: var(--green-soft); color: var(--green); }
+ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
+.whycols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+.whycols h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.whycols p { margin: 0; font-size: 13px; }
+.why3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.why3 > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.why3 small { color: var(--muted); font-size: 11.5px; }
+.why3 b { font-family: var(--fd); font-size: 20px; font-variant-numeric: tabular-nums; }
+.why3 .kpisub { font-size: 11.5px; color: var(--muted); }
+@media (max-width: 560px) { .whycols { grid-template-columns: 1fr; } }

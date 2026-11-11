@@ -1,5 +1,5 @@
 // Garrafão Props — interface. Lê data/slate.json e calcula tudo no navegador com engine.js.
-import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GRADE_ORDER, parlayProb, overProb, bestPrice, makeDist, quantile, ladder, divergence } from './engine.js';
+import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GRADE_ORDER, parlayProb, overProb, bestPrice, makeDist, quantile, ladder, divergence, bhScore, reasons, ODD_RANGE, inOddRange } from './engine.js';
 import { newTip, settleTip, summarize, toCSV, clvOf, profitOf } from './tips.js';
 import { postText, drawCard, legText, WARNINGS, resultsText, drawResults } from './share.js';
 import { parseImport } from './importer.js';
@@ -149,14 +149,21 @@ function header() {
 function srcOf(pr) { return OVR[pr.id]?.line != null || OVR[pr.id]?.oOver || OVR[pr.id]?.oUnder ? 'mine' : pr.lineSource; }
 function rowsAll() { const out = []; for (const pr of PROPS) { const e = EVAL[pr.id]; out.push({ pr, e, s: e.over }, { pr, e, s: e.under }); } return out; }
 const hitRate = h => h?.[1] ? h[0] / h[1] : 0;
-/* pontuação do dia pensada para tipster: valor primeiro (EV e nota), depois chance e histórico.
-   Odd muito baixa (< 1,40) perde pontos: rende pouco por unidade arriscada. */
-const GB = { 'A+': 18, A: 11, B: 4, C: 0 };
-function score(r) {
-  const s = r.s;
-  // Kelly (vantagem ÷ (odd − 1)) ordena valor sem premiar zebra: EV alto em odd alta pesa menos
-  return (s.odd ? Math.min(s.kelly, .25) * 450 + (s.ev ?? 0) * 40 : 0) + s.p * 55 + GB[s.grade] + hitRate(s.hits.L10) * 10 + Math.min(s.streak, 10) * .4 + (s.fav ? 3 : 0)
-    + (steamOf(r.pr, s.side) > 0 ? 4 : steamOf(r.pr, s.side) < 0 ? -4 : 0) - (s.odd && s.odd < 1.4 ? 12 : 0) - (s.p < .4 ? 15 : 0);
+/* v11: a ordem do dia é a Nota BH (0–100, mesma do bot), com desempate pelo acerto nos últimos 10.
+   A nota pesa chance, valor, acertos (L10/L20/temporada), confronto, defesa × posição e mercado. */
+const NOTA = new WeakMap();
+function nota(r) { let v = NOTA.get(r.s); if (v == null) { v = bhScore(r.pr, r.e, r.s.side, { steam: steamOf(r.pr, r.s.side) }); NOTA.set(r.s, v); } return v; }
+function score(r) { return nota(r) + hitRate(r.s.hits.L10) / 10; }
+const notaChip = r => { const n = nota(r); return `<span class="nota ${n >= 75 ? 'hi' : n >= 55 ? 'md' : 'lo'}" title="Nota BH: ${n} de 100">${n}</span>`; };
+// odd da faixa: a da casa ou, sem casa, a justa
+const oddForRange = s => s.odd ?? s.fair;
+// por que sim / por que não (memo)
+const WHY = new WeakMap();
+function why(r, max = 3) { const k = r.s; let v = WHY.get(k); if (!v || v.max !== max) { v = { max, ...reasons(r.pr, r.e, r.s.side, { max }) }; WHY.set(k, v); } return v; }
+function defText(pr, s) {
+  const r = pr.rank?.rank; if (!r) return '';
+  const good = s.side === 'over' ? r >= pr.rank.of - 5 : r <= 6, bad = s.side === 'over' ? r <= 6 : r >= pr.rank.of - 5;
+  return `Defesa do ${pr.opp}: <b>${r}ª de ${pr.rank.of}</b> contra ${POSLB[pr.p.pos].toLowerCase()}s em ${(STATLB[pr.rank.k] || pr.rank.k).toLowerCase()}${good ? ' · <span class="pos">favorável</span>' : bad ? ' · <span class="neg">difícil</span>' : ''}`;
 }
 /* movimento do mercado desde a abertura, a favor do lado (+) ou contra (−), em fração da média */
 function steamOf(pr, side) {
@@ -185,7 +192,7 @@ function filtered() {
     if (F.mktOnly && !pr.mkt) return false;
     if (s.ev != null && s.ev * 100 < F.minEV) return false;
     if (F.minEV > -20 && s.ev == null) return false;
-    if (s.odd && (s.odd < F.oddMin || s.odd > F.oddMax)) return false;
+    { const o = s.odd ?? (F.oddMin > 1.01 || F.oddMax < 10 ? s.fair : null); if (o && (o < F.oddMin || o > F.oddMax)) return false; }
     if (F.dvp && !s.fav) return false;
     if (F.noB2B && (pr.game.b2b || []).includes(pr.p.team)) return false;
     if (F.noDoubt && pr.p.status !== 'ok') return false;
@@ -222,7 +229,8 @@ const HELP = {
   unidade: ['Unidade (u)', 'Tamanho padrão de aposta, em reais. Falar em unidades deixa o resultado comparável entre tipsters com bancas diferentes.', 'Banca R$ 1.000 e 1u = R$ 10: 2u = R$ 20.'],
   mercado: ['Chance do mercado', 'As odds das casas sem a margem delas, numa média que pesa mais as casas afiadas. É a melhor referência do “preço justo”.', 'Se o app vê 60% e o mercado 52%, confira a notícia antes de entrar.'],
   proj: ['Projeção', 'Quanto o jogador deve fazer hoje: ritmo por minuto × minutos esperados, ajustado por defesa, ritmo do jogo, desfalques e mercado.', 'Projeção 27,1 contra linha 25,5 favorece o “mais de”.'],
-  nota: ['Nota', 'Resumo da linha. Com odd: A+ exige EV ≥ 6%, chance ≥ 56% e histórico de apoio; A exige EV ≥ 3%. Sem odd, o máximo é A.', 'C não quer dizer que vai perder: quer dizer que não há valor.'],
+  nota: ['Nota', 'A letra resume valor: com odd, A+ exige EV ≥ 6%, chance ≥ 56% e histórico de apoio; A exige EV ≥ 3%. Sem odd, o máximo é A. O número (0–100) é a Nota BH: quanto os dados sustentam a entrada, somando chance (30), valor (20), acertos nos últimos 10, 20 e na temporada (25), confronto direto (5), defesa × posição (10) e mercado (10), com descontos por dúvida, amostra curta e risco de lavada.', 'A+ 82 com L10 9/10 e defesa favorável é mais sólido que A+ 66 com amostra curta.'],
+  porque: ['Por que sim, por que não', 'Os motivos saem dos mesmos números do modelo: média recente contra a linha, folga da projeção, acertos, confronto, defesa, minutos, desfalques, ritmo e mercado. Os pontos contra mostram o risco que a nota não esconde.', '“Margem curta” quer dizer que a projeção está colada na linha: um lance muda o resultado.'],
   acerto: ['L5, L10, L20, H2H', 'Quantas vezes a linha de hoje teria batido nos últimos 5, 10 e 20 jogos, e contra o adversário de hoje (H2H).', '8/10 = bateu em 8 dos últimos 10.'],
   def: ['Defesa (DEF)', 'Ranking do adversário contra a posição do jogador naquela estatística. 30º é quem mais cede; 1º, quem menos cede.', 'DEF 28º para um armador em pontos = defesa fraca contra armadores.'],
   clv: ['CLV', 'Compara a odd que você pegou com o preço justo na última coleta antes do jogo. CLV positivo de forma constante é o sinal mais confiável de vantagem, mesmo numa fase de reds.', 'Pegou 2,00 e fechou valendo 1,85 = CLV positivo.'],
@@ -298,9 +306,9 @@ function stakeCell(s) { const u = stakeU(s); return s.odd ? (u ? `<b>${uFmt(u)}<
 
 function card({ pr, e, s }) {
   const p = pr.p, on = inSlip(pr.id, s.side), u = stakeU(s);
-  const tags = [dvpTag(pr, s), ...alerts(pr, s.side).map(([t, c]) => `<span class="tag ${c}">${esc(t)}</span>`)].filter(Boolean);
+  const tags = [...alerts(pr, s.side).map(([t, c]) => `<span class="tag ${c}">${esc(t)}</span>`)].filter(Boolean);
   return `<article class="pcard${s.ev > 0 ? ' value' : ''} ${s.side}" style="--tc:${teamCol(p.team)}">
-  <div class="pc-head">${badge(p.team)}<div class="pc-name"><button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="sub">${POSLB[p.pos]} ${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</span></div>${gradeChip(s.grade)}</div>
+  <div class="pc-head">${badge(p.team)}<div class="pc-name"><button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="sub">${POSLB[p.pos]} ${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</span></div>${notaChip({ pr, e, s })}${gradeChip(s.grade)}</div>
   <div class="pc-line"><span class="side ${s.side}">${sideLb(s.side)}</span><span class="lnum">${fmt(e.line)}</span><span class="mk">${MARKETS[pr.mk].lb}</span>${srcTag(pr)}</div>
   ${valbar(s)}
   <div class="pc-kpis">
@@ -311,13 +319,22 @@ function card({ pr, e, s }) {
   </div>
   <div class="hits">${hitCell('L5', s.hits.L5, F.sample === 'L5')}${hitCell('L10', s.hits.L10, F.sample === 'L10')}${hitCell('L20', s.hits.L20, F.sample === 'L20')}${hitCell('H2H', s.hits.H2H, F.sample === 'H2H')}${s.hits.WO ? hitCell('sem ' + lastName(pr.ctx.wo.q.name), s.hits.WO, false) : hitCell('Temp.', s.hits.CUR, F.sample === 'CUR')}</div>
   <div class="dotsrow"><span>últ. 10</span>${dots(pr, s.side, e.line)}<span>${s.streak >= 3 ? s.streak + ' seguidos' : 'hoje'}</span></div>
+  ${pr.rank?.rank ? `<p class="deftxt">${defText(pr, s)}</p>` : ''}
+  ${whyList({ pr, e, s }, 2, 1)}
   ${tags.length ? `<div class="pc-tags">${tags.join('')}</div>` : ''}
   <div class="pc-foot"><button class="editbtn" data-edit="${pr.id}" data-side="${s.side}">Minha linha</button><button class="editbtn" data-tip="${pr.id}" data-side="${s.side}">Registrar</button><span class="grow"></span><button class="addbtn" data-add="${pr.id}" data-side="${s.side}" aria-pressed="${on}">${on ? 'No bilhete' : '+ Múltipla'}</button></div>
 </article>`;
 }
+/* lista "por que sim / por que não": no cartão sem repetir o que já aparece (acertos e defesa) */
+function whyList(r, nPro = 3, nCon = 2, dedup = true) {
+  const W = why(r, 4), dup = /^(Bateu em|Defesa do|Contra o |\d+ de \d+ na temporada)/;
+  const pro = W.pro.filter(t => !dedup || !dup.test(t)).slice(0, nPro), con = W.con.filter(t => !dedup || !dup.test(t)).slice(0, nCon);
+  if (!pro.length && !con.length) return '';
+  return `<ul class="why">${pro.map(t => `<li class="y"><span aria-hidden="true">✓</span>${esc(t)}</li>`).join('')}${con.map(t => `<li class="n"><span aria-hidden="true">!</span>${esc(t)}</li>`).join('')}</ul>`;
+}
 function hc(h) { if (!h?.[1]) return '<span class="hcell">—</span>'; const r = h[0] / h[1]; return `<span class="hcell ${r >= .7 ? 'hi' : r < .5 ? 'lo' : ''}">${h[0]}/${h[1]}</span>`; }
 function table(rows) {
-  return `<div class="tablewrap"><table><thead><tr><th>Jogador</th><th>Jogo</th><th>Mercado</th><th>Linha</th><th class="r">Proj.</th><th class="r">Chance</th><th class="r">Mercado</th><th class="r">Odd</th><th class="r">EV</th><th class="r">Stake</th><th>L5</th><th>L10</th><th>L20</th><th>H2H</th><th class="r">Seq.</th><th>Def.</th><th>Nota</th><th></th></tr></thead><tbody>
+  return `<div class="tablewrap"><table><thead><tr><th>Jogador</th><th>Jogo</th><th>Mercado</th><th>Linha</th><th class="r">Proj.</th><th class="r">Chance</th><th class="r">Mercado</th><th class="r">Odd</th><th class="r">EV</th><th class="r">Stake</th><th>L5</th><th>L10</th><th>L20</th><th>H2H</th><th class="r">Seq.</th><th>Def.</th><th>Nota</th><th class="r">BH</th><th></th></tr></thead><tbody>
   ${rows.map(({ pr, e, s }) => { const p = pr.p, on = inSlip(pr.id, s.side), u = stakeU(s); return `<tr>
     <td><div class="tplayer">${badge(p.team, 1)}<button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="muted">${p.pos}</span>${p.status !== 'ok' ? '<span class="tag bad" title="' + esc(p.note) + '">!</span>' : ''}</div></td>
     <td class="muted">${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</td><td>${MARKETS[pr.mk].lb}</td>
@@ -325,7 +342,7 @@ function table(rows) {
     <td class="r num">${fmt(e.muF)}</td><td class="r num">${pct(s.p)}</td><td class="r num muted">${pct(s.pMkt)}</td><td class="r num">${s.odd ? fmt(s.odd, 2) + ' <span class="muted">' + esc(s.book) + '</span>' : '<span class="muted">—</span>'}</td>
     <td class="r num ${s.ev == null ? 'muted' : s.ev >= 0 ? 'pos' : 'neg'}">${sgnPct(s.ev)}</td><td class="r num">${u ? uFmt(u) : '<span class="muted">—</span>'}</td>
     <td>${hc(s.hits.L5)}</td><td>${hc(s.hits.L10)}</td><td>${hc(s.hits.L20)}</td><td>${hc(s.hits.H2H)}</td><td class="r num">${s.streak}</td>
-    <td>${dvpTag(pr, s)}</td><td>${gradeChip(s.grade)}</td>
+    <td>${dvpTag(pr, s)}</td><td>${gradeChip(s.grade)}</td><td class="r">${notaChip({ pr, e, s })}</td>
     <td class="nowrap"><button class="editbtn" data-tip="${pr.id}" data-side="${s.side}">Registrar</button> <button class="addbtn" data-add="${pr.id}" data-side="${s.side}" aria-pressed="${on}">${on ? '✓' : '+'}</button></td></tr>`; }).join('')}
   </tbody></table></div>`;
 }
@@ -333,7 +350,7 @@ function table(rows) {
 /* ---------------- PROPS ---------------- */
 const PRESETS = [
   { id: 'all', lb: 'Todas', d: '', f: {} },
-  { id: 'top', lb: 'Top do dia', d: 'nota A ou A+', f: { minGrade: 'A', sort: 'score' } },
+  { id: 'top', lb: 'Top do dia', d: 'A ou A+, odds 1,40–3,50', f: { minGrade: 'A', oddMin: ODD_RANGE[0], oddMax: ODD_RANGE[1], sort: 'score' } },
   { id: 'value', lb: 'Valor', d: 'EV ≥ +5% com odd', f: { minEV: 5, oddOnly: true, sort: 'ev' } },
   { id: 'mkt', lb: 'Valor vs mercado', d: 'consenso das casas + EV ≥ 3%', f: { mktOnly: true, minEV: 3, oddOnly: true, sort: 'stake' } },
   { id: 'steam', lb: 'Mercado a favor', d: 'linha andou para o seu lado', f: { steam: true, minGrade: 'B', sort: 'score' } },
@@ -518,7 +535,7 @@ function rankItem(i, pr, s, right, sub) {
 }
 function bestRows() { return PROPS.map(pr => { const e = EVAL[pr.id]; return { pr, e, s: e[e.best] }; }); }
 function byPlayerBest(list, n) { const seen = new Set(), out = []; for (const x of list) { if (seen.has(x.pr.p.id)) continue; seen.add(x.pr.p.id); out.push(x); if (out.length >= n) break; } return out; }
-function topPicks(n = 10) { return byPlayerBest(bestRows().filter(x => GRADE_ORDER[x.s.grade] >= 3).sort((a, b) => score(b) - score(a)), n); }
+function topPicks(n = 10) { return byPlayerBest(bestRows().filter(x => GRADE_ORDER[x.s.grade] >= 3 && inOddRange(oddForRange(x.s))).sort((a, b) => score(b) - score(a)), n); }
 function renderTrends() {
   const best = bestRows();
   const sideTxt = x => `${sideLb(x.s.side).toLowerCase()} ${fmt(x.e.line)} ${MARKETS[x.pr.mk].lb.toLowerCase()}`;
@@ -618,9 +635,9 @@ function renderSlip() {
     ${perBook.length ? `<div><div class="eyebrow" style="margin-bottom:6px">Bilhete inteiro numa casa só</div><div class="booklist">${perBook.map((x, i) => `<div class="${x.o ? (i === 0 ? 'best' : '') : 'na'}"><span>${esc(x.b)}</span><span class="num">${x.o ? fmt(x.o, 2) : 'falta linha'}</span></div>`).join('')}</div></div>` : ''}
     <div class="edbtns" style="margin:0"><button class="btn primary" data-tipslip>Registrar bilhete</button><button class="btn" data-postslip>Gerar post</button><button class="btn" id="clearSlip">Limpar</button></div>`;
 }
-/* candidatos para múltipla: jogador liberado, odd ≥ 1,30, sem EV negativo; A+/A primeiro, depois B */
+/* candidatos para múltipla: jogador liberado, odd entre 1,40 e 3,50, sem EV negativo; A+/A primeiro, depois B */
 function autoCands() {
-  const c = PROPS.map(pr => { const e = EVAL[pr.id]; return { pr, e, s: e[e.best] }; }).filter(x => x.pr.p.status === 'ok' && (!x.s.odd || x.s.odd >= 1.3) && (x.s.ev == null || x.s.ev >= 0) && GRADE_ORDER[x.s.grade] >= 2);
+  const c = PROPS.map(pr => { const e = EVAL[pr.id]; return { pr, e, s: e[e.best] }; }).filter(x => x.pr.p.status === 'ok' && inOddRange(oddForRange(x.s)) && (x.s.ev == null || x.s.ev >= 0) && GRADE_ORDER[x.s.grade] >= 2);
   return c.sort((a, b) => (GRADE_ORDER[b.s.grade] >= 3) - (GRADE_ORDER[a.s.grade] >= 3) || !!b.s.odd - !!a.s.odd || score(b) - score(a));
 }
 const legOdd = x => x.s.odd || x.s.fair || 1;
@@ -1059,6 +1076,15 @@ function ladderBox(pr) {
   const rows = ladOf(pr, 8); if (rows.length < 2) return '';
   return `<div class="dbox"><h3>Escada de linhas${help('escada')}</h3><div class="tablewrap" style="border:0"><table class="splits ladder"><thead><tr><th>Linha</th><th class="r">Chance</th><th class="r">Odd justa</th><th class="r">L10</th><th class="r">L20</th></tr></thead><tbody>${rows.map(r => `<tr${r.p >= .8 ? ' class="hl"' : ''}><td><b>${r.t}+</b> <span class="muted lad-x">(mais de ${fmt(r.t - .5)})</span></td><td class="r num">${pct(r.p)}</td><td class="r num">${fmt(r.fair, 2)}</td><td class="r">${hc(r.L10)}</td><td class="r">${hc(r.L20)}</td></tr>`).join('')}</tbody></table></div><p class="muted" style="font-size:12.5px;margin:6px 0 0">Linhas alternativas: a casa costuma pagar menos que a odd justa nos degraus baixos. Só entre se a odd dela for maior.</p></div>`;
 }
+function whyBox(pr, e, s) {
+  const W0 = why({ pr, e, s }, 4), noDef = t => !/^Defesa do/.test(t), W = { pro: W0.pro.filter(noDef), con: W0.con.filter(noDef) };
+  const hrow = (lb, h) => `<div><small>${lb}</small><b>${h?.[1] ? h[0] + '/' + h[1] : '—'}</b><span class="kpisub">${h?.[1] ? pct(h[0] / h[1]) : 'sem jogos'}</span></div>`;
+  return `<div class="dbox"><h3>Por que sim, por que não${help('porque')}</h3>
+    <div class="why3">${hrow('Temporada', s.hits.CUR)}${hrow('Últimos 10', s.hits.L10)}${hrow('Contra o ' + pr.opp, s.hits.H2H)}</div>
+    ${pr.rank?.rank ? `<p class="deftxt">${defText(pr, s)}</p>` : ''}
+    <div class="whycols"><div><h4>A favor</h4>${W.pro.length ? `<ul class="why">${W.pro.map(t => `<li class="y"><span aria-hidden="true">✓</span>${esc(t)}</li>`).join('')}</ul>` : '<p class="muted">Nada que se destaque.</p>'}</div>
+    <div><h4>Contra</h4>${W.con.length ? `<ul class="why">${W.con.map(t => `<li class="n"><span aria-hidden="true">!</span>${esc(t)}</li>`).join('')}</ul>` : '<p class="muted">Nenhum alerta.</p>'}</div></div></div>`;
+}
 function renderDrawer(focusEditor) {
   const pr = BYID[D.id], p = pr.p, e = EVAL[pr.id], s = e[D.side], o = e.over, u = e.under, line = e.line;
   const mks = PROPS.filter(x => x.p === p);
@@ -1074,9 +1100,10 @@ function renderDrawer(focusEditor) {
       <button data-dside="over" aria-pressed="${D.side === 'over'}"><b>Mais de ${fmt(line)}</b><span>${pct(o.p)}, ${o.odd ? fmt(o.odd, 2) + ' ' + esc(o.book) + ', EV <span class="' + (o.ev >= 0 ? 'pos' : 'neg') + '">' + sgnPct(o.ev) + '</span>' : 'justa ' + fmt(o.fair, 2)}</span></button>
       <button data-dside="under" aria-pressed="${D.side === 'under'}"><b>Menos de ${fmt(line)}</b><span>${pct(u.p)}, ${u.odd ? fmt(u.odd, 2) + ' ' + esc(u.book) + ', EV <span class="' + (u.ev >= 0 ? 'pos' : 'neg') + '">' + sgnPct(u.ev) + '</span>' : 'justa ' + fmt(u.fair, 2)}</span></button>
     </div>
-    <div class="bigkpis"><div><small>Nota${help('nota')}</small><b>${gradeChip(s.grade)}</b></div><div><small>Chance${help('chance')}</small><b>${pct(s.p)}</b></div><div><small>Projeção${help('proj')}</small><b>${fmt(e.muF)}</b><span class="kpisub">faixa ${rangeOf(pr).join('–')}, ${pr.ctx.logs.length} jogos</span></div><div><small>Stake${help('stake')}</small><b>${s.odd ? (stakeU(s) ? uFmt(stakeU(s)) : '0u') : '—'}</b></div></div>
+    <div class="bigkpis"><div><small>Nota${help('nota')}</small><b>${gradeChip(s.grade)} ${notaChip({ pr, e, s })}</b></div><div><small>Chance${help('chance')}</small><b>${pct(s.p)}</b></div><div><small>Projeção${help('proj')}</small><b>${fmt(e.muF)}</b><span class="kpisub">faixa ${rangeOf(pr).join('–')}, ${pr.ctx.logs.length} jogos</span></div><div><small>Stake${help('stake')}</small><b>${s.odd ? (stakeU(s) ? uFmt(stakeU(s)) : '0u') : '—'}</b></div></div>
     ${alerts(pr, D.side).length ? `<div class="chips">${alerts(pr, D.side).map(([t, c2]) => `<span class="tag ${c2}">${esc(t)}</span>`).join('')}</div>` : ''}
     <div class="edbtns" style="margin:0"><button class="btn primary" data-tip="${pr.id}" data-side="${D.side}">Registrar tip</button><button class="btn" data-postone="${pr.id}" data-side="${D.side}">Gerar post</button><button class="btn" data-add="${pr.id}" data-side="${D.side}" aria-pressed="${on}">${on ? 'No bilhete' : '+ Múltipla'}</button></div>
+    ${whyBox(pr, e, s)}
     <div class="dbox"><h3>Linha da sua casa</h3>
       <div class="edrow"><label>Linha<input id="edLine" inputmode="decimal" value="${ov.line ?? ''}" placeholder="${fmt(pr.line)}"></label><label>Odd mais de<input id="edO" inputmode="decimal" value="${ov.oOver ?? ''}" placeholder="ex. 1,85"></label><label>Odd menos de<input id="edU" inputmode="decimal" value="${ov.oUnder ?? ''}" placeholder="ex. 1,95"></label></div>
       <div class="edrow" style="grid-template-columns:1fr;margin-top:8px"><label>Casa<input id="edBook" list="bookList" value="${esc(ov.book || CFG.defBook)}"></label></div>
