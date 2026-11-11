@@ -26,6 +26,11 @@ Com o runner instalado e aparecendo como Idle, crie a variável `COLETOR` = `com
 - **Três acertos lado a lado:** temporada · últimos 10 · contra o adversário de hoje. A defesa aparece em texto, como "Defesa do BOS: 25ª de 30 contra armadores em pontos · favorável".
 - **Por que sim / por que não**, gerado a partir dos números do modelo: média recente contra a linha, folga da projeção, H2H, defesa, minutos, histórico sem o companheiro, ritmo e mercado. Também avisa de amostra pequena, margem curta, lavada, dúvida e EV exagerado. Aparece no cartão (2 a favor e 1 contra) e completo na gaveta do jogador.
 - **Faixa de odd 1,40–3,50** no Top do dia, nas listas do bot e na múltipla (sem casa, vale a odd justa).
+- **Cards em imagem no bot:**
+  - Toque em 🖼️ 1…5 embaixo de qualquer lista para receber a entrada como imagem. O card traz nome, linha, odd, chance, projeção, EV, a nota, o gráfico dos últimos 10 jogos contra a linha, L10 · temporada · vs adversário, a defesa e os motivos.
+  - **/cards** (ou "🖼️ Cards do dia" no menu) manda as 5 melhores num álbum; **/cards 10** manda as 10.
+  - As imagens são geradas no passo *publicar* do GitHub (`scripts/cards.mjs`, Chromium) para as entradas que as listas mostram por padrão, cerca de 140 por rodada.
+  - O card não tem foto do jogador: no lugar dela vai um selo com a cor e a sigla do time.
 
 ## Novidades da versão 10 (painel escuro preto, verde e dourado)
 

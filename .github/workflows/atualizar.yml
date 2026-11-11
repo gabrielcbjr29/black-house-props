@@ -98,6 +98,17 @@ jobs:
         with:
           ref: main
       - uses: actions/configure-pages@v5
+      # cards em imagem das melhores entradas (o bot do Telegram envia por /cards e pelos botões 🖼️)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Gerar cards em imagem
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          npm i --no-save --no-audit --no-fund playwright@1.48.2
+          npx playwright install --with-deps chromium
+          node scripts/cards.mjs public
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public

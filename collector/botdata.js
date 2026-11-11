@@ -1,10 +1,12 @@
 // Dados prontos para o bot do Telegram (public/data/bot.json).
 // O modelo roda aqui, na coleta; o bot só filtra e formata, então responde rápido.
-import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons } from '../public/engine.js';
+import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB } from '../public/engine.js';
 
 const POS_PT = { G: 'armadores', F: 'alas', C: 'pivôs' };
 const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bolas de 3', stl: 'roubos', blk: 'tocos', tov: 'erros', fgm: 'arremessos convertidos', fga: 'arremessos tentados', fta: 'lances livres tentados', ftm: 'lances livres', tpa: 'bolas de 3 tentadas', twom: 'arremessos de 2', twoa: 'arremessos de 2 tentados', oreb: 'rebotes ofensivos', pf: 'faltas' };
 // movimento do mercado desde a abertura a favor (+1) ou contra (−1) do lado
+// grupos das listas do bot (mesmos mercados dos comandos)
+const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['FGA', '2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV']];
 const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt.mu - pr.mkt.openMu) / Math.max(pr.mkt.mu, 1); return Math.abs(d) >= .025 ? Math.sign(side === 'over' ? d : -d) : 0; };
 
 const brTime = iso => iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '';
@@ -37,7 +39,8 @@ export function buildBotData(slate, { w = .4 } = {}) {
     rows.push({ id: pr.p.id, n: pr.p.name, t: pr.p.team, o: opp, home: pr.p.team === g.home, g: pr.game.id, h: brTime(g.timeUTC), m: pr.mk, s: s.side === 'over' ? 'o' : 'u', l: e.line,
       p: r3(s.p), q: r3(s.pMkt), d: odd, b: book, k: kal ? 1 : 0, e: r3(ev), gr: s.grade, l10: s.hits?.L10 || null, l20: s.hits?.L20 || null,
       ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF),
-      st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }) });
+      st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
+      _v: () => ({ ps: POSLB[pr.p.pos] || '', v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) });
   }
   // ordem: Nota BH, desempate pelo acerto nos últimos 10
   rows.sort((a, b) => b.sc - a.sc);
@@ -52,6 +55,16 @@ export function buildBotData(slate, { w = .4 } = {}) {
     if (GRADE_ORDER[r.gr] >= 3 || r.nt >= 40 || perMk[r.m] <= 25) keep.push(r);
   }
   rows.length = 0; rows.push(...keep);
+  // cards em imagem (o publicar renderiza): as entradas que as listas do bot mostram por padrão
+  const key = r => `${r.id}-${r.m}-${r.s}`, sel = new Set();
+  const inR = r => inOddRange(r.d ?? (r.p > 0 ? 1 / r.p : 99));
+  const take = (arr, n, one = true) => { const seen = new Set(); let k = 0; for (const r of arr) { if (one && seen.has(r.id)) continue; seen.add(r.id); sel.add(key(r)); if (++k >= n) break; } };
+  const R = rows.filter(inR);
+  take(R, 20);
+  for (const g of CARD_GROUPS) take(R.filter(r => g.includes(r.m)), 10, g.length === 1);
+  take(R.filter(r => r.p >= .65 && GRADE_ORDER[r.gr] >= 3).sort((a, b) => b.p - a.p), 10);
+  for (const g of games) take(R.filter(r => r.g === g.id), 8);
+  for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
   return { v: 2, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows };
 }

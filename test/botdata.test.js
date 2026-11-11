@@ -39,3 +39,15 @@ test('v11: Nota BH 0–100 coerente com a letra, motivos e faixa de odd', async 
   assert.ok(R.pro.length + R.con.length > 0 && R.pro.every(t => typeof t === 'string'));
   assert.ok(inOddRange(ODD_RANGE[0]) && inOddRange(ODD_RANGE[1]) && !inOddRange(1.3) && !inOddRange(4) && !inOddRange(null));
 });
+
+test('cards: linhas marcadas têm últimos 10 jogos e o HTML do card sai completo', async () => {
+  const { cardHTML } = await import('../scripts/cards.mjs');
+  const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
+  const b = buildBotData(slate, { w: .4 });
+  const cards = b.rows.filter(r => r.cd);
+  assert.ok(cards.length > 0 && cards.length <= 220, `quantidade de cards: ${cards.length}`);
+  assert.ok(cards.every(r => Array.isArray(r.v10) && r.v10.length > 0 && r.v10.length <= 10 && r.ps != null));
+  assert.ok(b.rows.every(r => !r._v && !r._r), 'sem funções no JSON');
+  const h = cardHTML(cards[0], b.date);
+  assert.ok(h.includes(cards[0].n.replace(/&/g, '&amp;').replace(/'/g, "'")) && !/undefined|NaN/.test(h));
+});

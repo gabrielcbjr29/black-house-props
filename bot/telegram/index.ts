@@ -30,7 +30,7 @@ async function cfg(): Promise<Cfg> {
 }
 const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[] };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number };
 type Data = { date: string; gen: string; demo: boolean; w: number; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
 
 let CACHE: { at: number; data: Data } | null = null;
@@ -73,6 +73,14 @@ const ODD_MIN = 1.4, ODD_MAX = 3.5;
 const oddOf = (r: Row) => r.d ?? (r.p > 0 ? 1 / r.p : 99);
 const inRange = (r: Row) => { const o = oddOf(r); return o >= ODD_MIN - 1e-9 && o <= ODD_MAX + 1e-9; };
 const RANGE_TXT = ' · odds 1,40–3,50';
+// cards em imagem (gerados no publicar do GitHub Pages)
+const keyOf = (r: Row) => `${r.id}-${r.m}-${r.s}`;
+const cardUrl = (d: Data, r: Row) => `${APP_URL}data/cards/${keyOf(r)}.jpg?v=${encodeURIComponent(d.gen)}`;
+function caption(r: Row) {
+  const vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
+  const odd = r.d ? `odd <b>${n2(r.d)}</b> ${esc(r.b ?? '')}${r.k ? ' (bolsa)' : ''}` : `odd justa <b>${n2(1 / r.p)}</b>`;
+  return `<b>${esc(r.gr)}${r.nt != null ? ' · Nota ' + r.nt : ''} · ${esc(r.n)}</b>\n${r.s === 'o' ? 'Mais de' : 'Menos de'} ${n1(r.l)} ${MK[r.m] ?? r.m} · ${odd}\n<i>${vs} · ${r.h}</i>\n<i>🔞 18+ · Aposte com responsabilidade</i>`;
+}
 const hitTxt = (h?: [number, number] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 
 type Out = { text: string; kb?: unknown };
@@ -121,7 +129,8 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
   if (pg > 1) nav.push(BTN('◀ Anteriores', `p:${pg - 1}:${cmd}`));
   if (pages > 1) nav.push(BTN(`${pg}/${pages}`, `p:${pg}:${cmd}`));
   if (pg < pages) nav.push(BTN('Próximas ▶', `p:${pg + 1}:${cmd}`));
-  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + '\n' + FOOT, kb: { inline_keyboard: [...(nav.length ? [nav] : []), home(cmd, pg)] } };
+  const pics = slice.map((r, i) => r.cd ? BTN(`🖼️ ${(pg - 1) * PAGE + i + 1}`, `i:${keyOf(r)}`) : null).filter(Boolean) as { text: string; callback_data: string }[];
+  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + (pics.length ? '\n<i>🖼️ toque no número para ver o card em imagem</i>' : '') + '\n' + FOOT, kb: { inline_keyboard: [...(pics.length ? [pics] : []), ...(nav.length ? [nav] : []), home(cmd, pg)] } };
 }
 const clampN = (s: string | undefined, def = 10) => { const x = parseInt(s ?? '', 10); return Number.isFinite(x) ? Math.max(1, Math.min(20, x)) : def; };
 
@@ -166,6 +175,7 @@ const HELP = `<b>📖 COMANDOS</b>
 <b>Rodada</b>
 /jogos · /desfalques · /resumo
 /multipla 3 · /multipla 4,5
+/cards · /cards 10 · melhores do dia em imagem
 /app · app completo
 
 <b>Como ler o cartão</b>
@@ -179,6 +189,7 @@ const MENU = { inline_keyboard: [
   [BTN('👌 Bolas de 3', '/tres'), BTN('➕ PRA', '/pra'), BTN('🧩 Combinados', '/combinados')],
   [BTN('🏹 Tentativas', '/tentativas'), BTN('🧱 Defesa', '/defesa'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
+  [BTN('🖼️ Cards do dia', '/cards')],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -245,6 +256,28 @@ ${top ? `⭐ <b>Destaque:</b> ${esc(top.n)}, ${top.s === 'o' ? 'mais de' : 'meno
 }
 function chunk<T>(a: T[], n: number) { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; }
 
+async function sendCard(chatId: number, key: string) {
+  const d = await data().catch(() => null);
+  const r = d?.rows.find(x => keyOf(x) === key);
+  if (!d || !r) { await TG('sendMessage', { chat_id: chatId, text: 'Essa entrada saiu da lista na última atualização. Abra o menu de novo.', reply_markup: MENU }); return; }
+  const res = await TG('sendPhoto', { chat_id: chatId, photo: cardUrl(d, r), caption: caption(r), parse_mode: 'HTML', reply_markup: { inline_keyboard: [HOME] } });
+  // sem imagem (ainda não gerada ou o Telegram não conseguiu baixar): manda o cartão em texto
+  if (!res.ok) await TG('sendMessage', { chat_id: chatId, text: card(r, 1) + '\n' + FOOT, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [HOME] } });
+}
+async function sendCards(chatId: number, arg?: string) {
+  const d = await data().catch(() => null);
+  if (!d) { await TG('sendMessage', { chat_id: chatId, text: 'Não consegui ler os dados agora. Tente de novo em instantes.' }); return; }
+  const n = Math.max(1, Math.min(10, parseInt(arg ?? '', 10) || 5));
+  const seen = new Set<string>(), pick: Row[] = [];
+  for (const r of d.rows) { if (!r.cd || !inRange(r) || seen.has(r.id)) continue; seen.add(r.id); pick.push(r); if (pick.length >= n) break; }
+  if (!pick.length) { await TG('sendMessage', { chat_id: chatId, text: 'Os cards do dia ainda estão sendo gerados. Tente em alguns minutos ou veja o /top.', reply_markup: MENU }); return; }
+  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `<b>🖼️ AS ${pick.length} MELHORES DO DIA</b>\n<i>${dateBR(d.date)} · pela Nota BH · odds 1,40–3,50 · atualizado ${hourBR(d.gen)}</i>` });
+  const media = pick.map(r => ({ type: 'photo', media: cardUrl(d, r), caption: caption(r), parse_mode: 'HTML' }));
+  const res = pick.length === 1 ? await TG('sendPhoto', { chat_id: chatId, photo: media[0].media, caption: media[0].caption, parse_mode: 'HTML' }) : await TG('sendMediaGroup', { chat_id: chatId, media });
+  if (!res.ok) { await TG('sendMessage', { chat_id: chatId, text: pick.map((r, i) => card(r, i + 1)).join('\n') + '\n' + FOOT, parse_mode: 'HTML', disable_web_page_preview: true }); }
+  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>', reply_markup: { inline_keyboard: [[BTN('🔥 Top do dia em texto', '/top'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('🏠 Menu', '/menu')]] } });
+}
+
 async function handle(update: any) {
   const cq = update.callback_query;
   const msg = update.message ?? cq?.message;
@@ -257,6 +290,11 @@ async function handle(update: any) {
     await TG('sendMessage', { chat_id: chatId, text: `Este bot é privado. Peça acesso ao dono e informe o seu ID: ${chatId}` });
     return;
   }
+  // card em imagem de uma entrada (botão 🖼️ das listas)
+  const im = /^i:(.+)$/.exec(text);
+  if (im) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCard(chatId, im[1]); return; }
+  // /cards: as melhores do dia em imagem (sempre mensagens novas)
+  if (/^\/cards(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCards(chatId, text.split(/\s+/)[1]); return; }
   // página (p:2:/top 20) e atualizar (repete o comando que gerou a mensagem)
   let page = 1;
   const pm = /^([pr]):(\d+):(.+)$/.exec(text); let refreshed = false;
@@ -287,7 +325,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
