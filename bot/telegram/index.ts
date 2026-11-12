@@ -79,7 +79,7 @@ const FOOT = '\n<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O 
 const GRADE: Record<string, string> = { 'A+': '🔥 A+', A: '✅ A', B: '➖ B', C: '⚪ C' };
 const bar = (p: number, n = 10) => { const k = Math.max(0, Math.min(n, Math.round(p * n))); return '▰'.repeat(k) + '▱'.repeat(n - k); };
 const dots = (h: [number, number] | null) => h ? '●'.repeat(h[0]) + '○'.repeat(Math.max(0, h[1] - h[0])) + ` ${h[0]}/${h[1]}` : '';
-const PAGE = 10;
+const PAGE = 5;
 // faixa de odd das listas (odd da casa ou, sem casa, a odd justa): mesmo critério do PropFinder (-250 a +250)
 const ODD_MIN = 1.4, ODD_MAX = 3.5;
 const oddOf = (r: Row) => r.d ?? (r.p > 0 ? 1 / r.p : 99);
@@ -262,10 +262,17 @@ function modelTop(d: Data, mk: string[], n = 10) {
   return out;
 }
 const MT_NOTE = '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
+function compact(r: Row, i: number) {
+  const over = r.s === 'o', vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
+  const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
+  return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
+${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
+📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}`;
+}
 function topText(d: Data, key: string) {
   const T = MT[key], top = modelTop(d, T.mk);
   if (!top.length) return null;
-  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => brief(r, i + 1)).join('\n') + '\n' + MT_NOTE + '\n<i>🔥 sequência · 🚑 rende mais sem um colega que está fora</i>\n<i>📝 Toque no número para registrar (1u) com a sua odd, ou em "Ver com detalhes" para a análise de cada um.</i>' + FOOT;
+  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd.</i>' + FOOT;
 }
 const subKb = (s: { tent: boolean; ra: boolean } | null) => ({ inline_keyboard: [
   [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
@@ -549,11 +556,33 @@ ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i
 ${odd}${ev}
 ${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
 }
-// lista compacta: duas linhas por entrada
-function brief(r: Row, i: number) {
-  const marks = [r.sk && r.sk >= 5 ? `🔥${r.sk}` : '', r.wo?.x && r.wo.h[1] >= 3 && r.wo.h[0] / r.wo.h[1] >= .66 ? '🚑' : '', r.st === 'questionable' ? '🟡' : ''].filter(Boolean).join(' ');
-  return `<b>${i}. ${esc(r.n)}</b> <i>${r.t}${r.home ? ' x ' : ' @ '}${r.o} ${r.h}</i>${marks ? ' ' + marks : ''}
-    ${r.s === 'o' ? '⬆️' : '⬇️'} ${n1(r.l)} ${MKS[r.m] ?? r.m} · <b>${pc(r.p)}</b> · nota <b>${r.nt ?? '–'}</b> · L10 ${hitTxt(r.l10)}${r.d ? ` · @${n2(r.d)}` : ''}`;
+// cartão das listas (visual de antes)
+function listCard(r: Row, i: number) {
+  const over = r.s === 'o';
+  const side = over ? '⬆️ <b>Mais de ' + n1(r.l) + '</b>' : '⬇️ <b>Menos de ' + n1(r.l) + '</b>';
+  const vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
+  const odd = r.d ? `💵 <code>@${n2(r.d)}</code> ${esc(r.b ?? '')}${r.k ? ' <i>(bolsa)</i>' : ''}` : `💵 odd justa <code>@${n2(1 / r.p)}</code> <i>(sem casa)</i>`;
+  const ev = r.e == null ? '' : ` · EV <b>${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%</b>`;
+  const nota = r.nt != null ? ` · Nota <b>${r.nt}</b>` : '';
+  // três acertos lado a lado: últimos 10 · temporada · contra o adversário
+  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
+  let def = '';
+  if (r.dv?.r) {
+    const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
+    def = `\n🛡️ Defesa ${r.o}: ${r.dv.r}ª/${r.dv.of} contra ${r.dv.ps} em ${esc(r.dv.k)}${good ? ' · <b>favorável</b>' : bad ? ' · <i>difícil</i>' : ''}`;
+  }
+  // por que sim / por que não (sem repetir o que as linhas acima já mostram)
+  const dup = /^(Bateu em|Defesa do|Contra o )/;
+  const wy = (r.wy ?? []).filter(t => !dup.test(t)).slice(0, 2).map(t => `✅ ${esc(t)}`);
+  const wn = (r.wn ?? []).filter(t => !dup.test(t)).slice(0, 1).map(t => `⚠️ ${esc(t)}`);
+  if (!r.wn && r.e != null && r.e > .15) wn.push('⚠️ <i>Muito acima do mercado: confira notícias</i>');
+  if (r.st === 'questionable' && !wn.some(t => t.includes('dúvida'))) wn.push('🟡 <i>Jogador em dúvida</i>');
+  const why = [...wy, ...wn];
+  return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
+${side} ${MK[r.m] ?? r.m}
+${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
+${odd}${ev}
+${hits}${def}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
 }
 function header(d: Data, title: string, extra = '') {
   return `<b>${title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}${d.demo ? ' · demonstração' : ''}${extra}</i>\n`;
@@ -573,14 +602,14 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
   }
   const pages = Math.ceil(all.length / PAGE), pg = Math.max(1, Math.min(pages, page));
   const slice = all.slice((pg - 1) * PAGE, pg * PAGE);
-  const body = slice.map((r, i) => brief(r, (pg - 1) * PAGE + i + 1)).join('\n');
+  const body = slice.map((r, i) => listCard(r, (pg - 1) * PAGE + i + 1)).join('\n');
   const nav = [];
   if (pg > 1) nav.push(BTN('◀ Anteriores', `p:${pg - 1}:${cmd}`));
   if (pages > 1) nav.push(BTN(`${pg}/${pages}`, `p:${pg}:${cmd}`));
   if (pg < pages) nav.push(BTN('Próximas ▶', `p:${pg + 1}:${cmd}`));
-  const nums = slice.map((_, i) => BTN(String((pg - 1) * PAGE + i + 1), `x:${(pg - 1) * PAGE + i + 1}:${cmd}`));
-  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + '\n\n<i>👆 Toque no número para abrir a análise completa e registrar a entrada.</i>' + '\n<i>🔥 sequência atual · 🚑 rende mais sem um colega que está fora · 🟡 em dúvida</i>' + '\n' + FOOT,
-    kb: { inline_keyboard: [...chunk(nums, 5), ...(nav.length ? [nav] : []), home(cmd, pg)] } };
+  const pics = slice.map((r, i) => r.cd ? BTN(`🖼️ ${(pg - 1) * PAGE + i + 1}`, `i:${keyOf(r)}`) : null).filter(Boolean) as { text: string; callback_data: string }[];
+  const nums = slice.map((_, i) => BTN(`🔎 ${(pg - 1) * PAGE + i + 1}`, `x:${(pg - 1) * PAGE + i + 1}:${cmd}`));
+  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + '\n<i>🔎 análise completa e registro (1u, com a sua odd)' + (pics.length ? ' · 🖼️ ver o card em imagem' : '') + '</i>\n' + FOOT, kb: { inline_keyboard: [nums, ...(pics.length ? [pics] : []), ...(nav.length ? [nav] : []), home(cmd, pg)] } };
 }
 const clampN = (s: string | undefined, def = 10) => { const x = parseInt(s ?? '', 10); return Number.isFinite(x) ? Math.max(1, Math.min(20, x)) : def; };
 
@@ -639,7 +668,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /app · app completo
 
 <b>Como usar as listas</b>
-Cada lista mostra 10 por página em duas linhas. Toque no número para abrir a análise completa na mesma mensagem, registrar (📝) ou ver o card (🖼️).
+Toque em 🔎 e o número para abrir a análise completa na mesma mensagem (L5, L20, temporada passada, sequência, sem o colega) e registrar (📝). 🖼️ manda o card em imagem.
 
 <b>Como ler o cartão</b>
 <b>Nota</b> 0–100: quanto os dados sustentam a entrada (chance, valor, acertos, confronto, defesa e mercado).
@@ -683,8 +712,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     const d = await data().catch(() => null);
     const a = d ? d.rows.filter(r => r.gr === 'A+' || r.gr === 'A').length : 0;
     const head = `<b>🏀 BLACK HOUSE · PROPS NBA</b>\n${d ? `<i>${dateBR(d.date)} · ${d.games.length} jogos · ${a} linhas nota A ou A+</i>\n` : ''}`;
-    if (cmd !== 'menu') return { text: head + '\nO que você quer ver?', kb: HUB };
-    return { text: head + `\nTodos os mercados e ferramentas. Para o dia a dia, use os botões de baixo.\n\n<i>Seu ID: <code>${chatId}</code></i>`, kb: MENU };
+    if (cmd === 'inicio') return { text: head + '\nO que você quer ver?', kb: HUB };
+    return { text: head + `\nEscolha abaixo ou digite um comando (/ajuda).\n\n<i>Seu ID: <code>${chatId}</code></i>`, kb: MENU };
   }
   if (cmd === 'hoje') { const d = await data().catch(() => null); return { text: `<b>🔥 HOJE</b>\n${d ? `<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n` : ''}\nEscolha a lista:`, kb: HOJE }; }
   if (cmd === 'modelobh') return { text: `<b>🧠 MODELO BH</b>\nModelos treinados por mercado (forma, minutos, defesa × posição, ritmo, mando, descanso, confronto e desfalques).\n\nOs tops usam a linha de referência (mediana dos últimos 15). Na sua casa a linha pode ser outra: confira em "Chance de uma linha".`, kb: MODELO_HUB };
