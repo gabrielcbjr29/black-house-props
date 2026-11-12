@@ -261,14 +261,9 @@ function modelTop(d: Data, mk: string[], n = 10) {
   for (const r of rows) { if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
   return out;
 }
-// os dois tops sem jogador repetido: quem aparece nas duas listas fica só na entrada de nota maior,
-// e a outra lista completa com o próximo da fila
+// os dois tops (cada lista independente: o mesmo jogador pode estar em tentativas e em reb+ast; dentro de uma lista, uma vez só)
 function tops(d: Data, n = 10): Record<string, Row[]> {
-  const cand = Object.entries(MT).flatMap(([k, T]) => modelTop(d, T.mk, 60).map(r => ({ k, r })));
-  cand.sort((a, b) => b.r.sc - a.r.sc);
-  const out: Record<string, Row[]> = { tent: [], ra: [] }, used = new Set<string>();
-  for (const { k, r } of cand) { if (used.has(r.id) || out[k].length >= n) continue; used.add(r.id); out[k].push(r); }
-  return out;
+  return Object.fromEntries(Object.entries(MT).map(([k, T]) => [k, modelTop(d, T.mk, n)]));
 }
 const MT_NOTE = '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
 function compact(r: Row, i: number) {
@@ -458,9 +453,10 @@ async function recordTops(d: Data) {
     rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta',
       odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', tip_utc: tip[r.g] ? new Date(tip[r.g]).toISOString() : null, updated_at: new Date(now).toISOString() });
   });
-  // sem entrada repetida no dia: jogador que já tem outra entrada (outra lista ou outro mercado) fica com a primeira
+  // sem entrada repetida na mesma lista no dia: se o jogador já foi registrado nessa lista (ex.: tentados de manhã),
+  // não entra de novo com outro mercado da mesma lista (ex.: lances à noite). Em listas diferentes pode.
   const have: any[] = await sb(`top_picks?date=eq.${d.date}&select=pid,list,mk`).catch(() => []) ?? [];
-  const fresh = rows.filter(x => !have.some(h => h.pid === x.pid && (h.list !== x.list || h.mk !== x.mk)));
+  const fresh = rows.filter(x => !have.some(h => h.pid === x.pid && h.list === x.list && h.mk !== x.mk));
   rows.length = 0; rows.push(...fresh);
   if (!rows.length) return 0;
   await sb('top_picks?on_conflict=date,list,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
