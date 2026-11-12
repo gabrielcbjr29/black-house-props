@@ -38,7 +38,7 @@ async function sb(path: string, init: RequestInit = {}) {
 }
 const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number; sq?: number[] };
 type MStat = [number, number, number[], number | null];
 type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
 type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
@@ -267,7 +267,23 @@ function modelTop(d: Data, mk: string[], n = 10) {
 function tops(d: Data, n = 10): Record<string, Row[]> {
   return Object.fromEntries(Object.entries(MT).map(([k, T]) => [k, modelTop(d, T.mk, n)]));
 }
-const MT_NOTE = '\n<i>🏠 Linha e odd da 99play. 📏 Ref. = linha de referência (mediana dos últimos 15 jogos), só para comparar. Jogo sem linhas da 99play ainda usa a referência. Só jogadores de rotação (24+ min).</i>';
+const MT_NOTE = (d: Data) => d.rows.some(r => r.c9)
+  ? '\n<i>🏠 Linha e odd da 99play. 📏 Ref. = linha de referência (mediana dos últimos 15 jogos), só para comparar. Jogo sem linhas da 99play ainda usa a referência. Só jogadores de rotação (24+ min).</i>'
+  : '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
+// sequência dos últimos 10 (mais recente primeiro) e texto pronto para os inscritos
+const seq = (r: Row) => r.sq?.length ? r.sq.join('-') : '';
+const vsTxt = (r: Row) => r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
+function shareText(r: Row, i?: number) {
+  const head = i != null ? `${i}. ${r.n} (${vsTxt(r)} · ${r.h})` : `🏀 ${r.n} (${vsTxt(r)} · ${r.h})`;
+  return [head, `${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(r.l)} ${MK[r.m] ?? r.m}`, `📊 Últimos 10: ${r.l10 ? `${r.l10[0]}/${r.l10[1]}` : '–'}`, ...(seq(r) ? [`🔢 Sequência: ${seq(r)}`] : [])].join('\n');
+}
+// lista inteira para copiar (um bloco: tocar no bloco copia tudo)
+function shareList(d: Data, key: string) {
+  const T = MT[key], top = tops(d)[key];
+  if (!top.length) return 'Nenhuma entrada no top agora.';
+  const body = top.map((r, i) => shareText(r, i + 1)).join('\n\n');
+  return `📋 <b>Texto para os inscritos</b> <i>(toque no bloco para copiar)</i>\n<pre>${esc(`${T.ic} TOP 10 MODELO BH · ${T.title}\n${dateBR(d.date)}\n\n${body}\n\n🔢 Sequência = últimos 10 jogos, do mais recente para o mais antigo.\n🔞 18+ · Aposte com responsabilidade.`)}</pre>`;
+}
 // de onde vem a linha: 🏠 99play (e a referência embaixo, para comparar) ou 📏 só referência
 const lineSrc = (r: Row) => r.c9 ? `🏠 99play @${r.d ? n2(r.d) : '–'}${r.rf != null ? ` · 📏 Ref. ${n1(r.rf)}${r.rf !== r.l ? ` (99play ${r.l > r.rf ? '+' : '−'}${n1(Math.abs(r.l - r.rf))})` : ''}` : ''}` : `📏 Linha de referência${r.d ? ` · @${n2(r.d)} ${esc(r.b ?? '')}` : ' · sem odd de casa'}`;
 function compact(r: Row, i: number) {
@@ -275,13 +291,12 @@ function compact(r: Row, i: number) {
   const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
   return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
 ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
-${lineSrc(r)}
-📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}`;
+${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n🔢 ${seq(r)}` : ''}`;
 }
 function topText(d: Data, key: string) {
   const T = MT[key], top = tops(d)[key];
   if (!top.length) return null;
-  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd.</i>' + FOOT;
+  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE(d) + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd. 🔢 = sequência dos últimos 10 (mais recente primeiro).</i>' + FOOT;
 }
 const subKb = (s: { tent: boolean; ra: boolean } | null) => ({ inline_keyboard: [
   [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
@@ -319,7 +334,7 @@ async function pushDaily(force = false, minHour = 0) {
     if (!s[k] || !txt[k]) continue;
     const regs = tops(d)[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
     const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
+      reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('📤 Texto p/ inscritos', 'cp:' + k)], [BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
     if (r.ok) sent++;
     await new Promise(res => setTimeout(res, 60));
   }
@@ -561,7 +576,7 @@ function card(r: Row, i: number) {
   // histórico em janelas (estilo hit rate): recente, temporada, temporada passada e confronto
   const hits = `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}
 📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${r.o} ${hitTxt(r.hh)}
-${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
+${seq(r) ? `🔢 Sequência: <code>${seq(r)}</code>\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
@@ -590,7 +605,7 @@ function listCard(r: Row, i: number) {
   const ev = r.e == null ? '' : ` · EV <b>${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%</b>`;
   const nota = r.nt != null ? ` · Nota <b>${r.nt}</b>` : '';
   // três acertos lado a lado: últimos 10 · temporada · contra o adversário
-  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
+  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${seq(r) ? `\n🔢 Seq.: ${seq(r)}` : ''}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
@@ -623,7 +638,7 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
     const k = Math.min(all.length, -page), r = all[k - 1], pg = Math.ceil(k / PAGE);
     const nav = [k > 1 ? BTN('‹ Anterior', `x:${k - 1}:${cmd}`) : null, BTN('☰ Lista', `p:${pg}:${cmd}`), k < all.length ? BTN('Próxima ›', `x:${k + 1}:${cmd}`) : null].filter(Boolean) as { text: string; callback_data: string }[];
     return { text: header(d, title, note) + '\n' + card(r, k) + '\n' + FOOT,
-      kb: { inline_keyboard: [[BTN('📝 Registrar (1u)', `be:${keyOf(r)}:${src}`), ...(r.cd ? [BTN('🖼️ Card', `i:${keyOf(r)}`)] : [])], nav, [BTN('🏠 Menu', '/menu')]] } };
+      kb: { inline_keyboard: [[BTN('📝 Registrar (1u)', `be:${keyOf(r)}:${src}`), ...(r.cd ? [BTN('🖼️ Card', `i:${keyOf(r)}`)] : [])], [{ text: '📋 Copiar para inscritos', copy_text: { text: shareText(r).slice(0, 256) } }], nav, [BTN('🏠 Menu', '/menu')]] } };
   }
   const pages = Math.ceil(all.length / PAGE), pg = Math.max(1, Math.min(pages, page));
   const slice = all.slice((pg - 1) * PAGE, pg * PAGE);
@@ -634,7 +649,8 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
   if (pg < pages) nav.push(BTN('Próximas ▶', `p:${pg + 1}:${cmd}`));
   const pics = slice.map((r, i) => r.cd ? BTN(`🖼️ ${(pg - 1) * PAGE + i + 1}`, `i:${keyOf(r)}`) : null).filter(Boolean) as { text: string; callback_data: string }[];
   const nums = slice.map((_, i) => BTN(`🔎 ${(pg - 1) * PAGE + i + 1}`, `x:${(pg - 1) * PAGE + i + 1}:${cmd}`));
-  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + '\n<i>🔎 análise completa e registro (1u, com a sua odd)' + (pics.length ? ' · 🖼️ ver o card em imagem' : '') + '</i>\n' + FOOT, kb: { inline_keyboard: [nums, ...(pics.length ? [pics] : []), ...(nav.length ? [nav] : []), home(cmd, pg)] } };
+  const share = src === 'tent' || src === 'ra' ? [[BTN('📤 Texto p/ inscritos (lista toda)', 'cp:' + src)]] : [];
+  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + '\n<i>🔎 análise completa, registro e 📋 copiar' + (pics.length ? ' · 🖼️ ver o card em imagem' : '') + '</i>\n' + FOOT, kb: { inline_keyboard: [nums, ...(pics.length ? [pics] : []), ...(nav.length ? [nav] : []), ...share, home(cmd, pg)] } };
 }
 const clampN = (s: string | undefined, def = 10) => { const x = parseInt(s ?? '', 10); return Number.isFinite(x) ? Math.max(1, Math.min(20, x)) : def; };
 
@@ -751,7 +767,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
-  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', ' · linhas da 99play'); }
+  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', d.rows.some(r => r.c9) ? ' · linhas da 99play' : ' · linha de referência'); }
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
@@ -869,6 +885,14 @@ async function handle(update: any) {
   if (!text.startsWith('/') && !cq) {
     const out = await betFinish(chatId, null, text).catch(() => null);
     if (out) { await TG('sendMessage', { chat_id: chatId, text: out.text, parse_mode: 'HTML', reply_markup: out.kb }); return; }
+  }
+  // texto pronto para os inscritos (lista inteira do top num bloco copiável; sempre mensagem nova)
+  const cpm = /^cp:(tent|ra)$/.exec(text);
+  if (cpm) {
+    if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
+    const d = await data().catch(() => null);
+    await TG('sendMessage', { chat_id: chatId, text: d ? shareList(d, cpm[1]).slice(0, 4090) : 'Não consegui ler os dados agora.', parse_mode: 'HTML', disable_web_page_preview: true });
+    return;
   }
   // card em imagem de uma entrada (botão 🖼️ das listas)
   const im = /^i:(.+)$/.exec(text);

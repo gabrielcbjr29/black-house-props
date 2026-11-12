@@ -48,6 +48,8 @@ export function buildBotData(slate, { w = .4 } = {}) {
       st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10,
       // linha da 99play (c9) e a linha de referência (mediana dos últimos 15) para comparar
       c9: pr.book?.books?.['99play'] ? 1 : 0, rf: pr.refLine,
+      // sequência dos últimos 10 jogos no mercado (mais recente primeiro), para mostrar e copiar
+      sq: pr.vals.slice(0, 10),
       // L5, sequência atual, vantagem (projeção − linha a favor do lado), temporada passada e "sem o colega"
       l5: s.hits?.L5?.[1] ? s.hits.L5 : null, sk: s.streak || 0, ed: Math.round(s.gap * 10) / 10, tp: s.hits?.PS?.[1] ? s.hits.PS : null,
       wo: pr.ctx.wo && s.hits?.WO?.[1] >= 2 ? { q: pr.ctx.wo.q.name, h: s.hits.WO, a: Math.round(pr.woVals.reduce((a, x) => a + x, 0) / pr.woVals.length * 10) / 10, x: pr.ctx.wo.active ? 1 : 0 } : null, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
