@@ -76,6 +76,9 @@ jobs:
       - name: Modelo BH (previsões por mercado)
         continue-on-error: true
         timeout-minutes: 10
+        env:
+          # odds reais dos tops do Modelo BH (teste de lucro): reb+ast, arremessos convertidos e lances tentados
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
           python3 -m pip install --quiet pandas scikit-learn scipy || pip install --quiet pandas scikit-learn scipy
           python3 model/predict.py public/data/slate.json

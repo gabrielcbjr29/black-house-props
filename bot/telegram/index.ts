@@ -11,7 +11,7 @@
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
-type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; at: number };
+type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; at: number };
 let CFG: Cfg | null = null;
 async function cfg(): Promise<Cfg> {
   if (CFG && Date.now() - CFG.at < 60_000) return CFG;
@@ -25,7 +25,7 @@ async function cfg(): Promise<Cfg> {
   }
   const get = (k: string) => Deno.env.get(k) || v[k] || '';
   CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
-    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', at: Date.now() };
+    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), at: Date.now() };
   return CFG;
 }
 // banco (REST do próprio Supabase, com a chave de serviço): testes do Modelo BH
@@ -436,10 +436,13 @@ async function apagarCmd(chatId: number, rest: string[]): Promise<Out> {
 // ---------- Histórico automático do top 10 e resultado da manhã ----------
 const etDate = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 async function getResults() { return fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 300_000)).then(r => r.ok ? r.json() : null).catch(() => null); }
+const ODD_EST = 1.87;
 // grava o top 10 enviado no dia (uma linha por posição), para conferir no dia seguinte
 async function recordTops(d: Data) {
   const rows: Record<string, unknown>[] = [];
-  for (const k of ['tent', 'ra']) modelTop(d, MT[k].mk).forEach((r, i) => rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta' }));
+  // odd: a das casas que achamos (mediana das casas dos EUA pela The Odds API); sem odd real, 1,87 (preço típico de abertura de prop)
+  for (const k of ['tent', 'ra']) modelTop(d, MT[k].mk).forEach((r, i) => rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta',
+    odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada' }));
   if (!rows.length) return 0;
   await sb(`top_picks?date=eq.${d.date}&status=eq.aberta`, { method: 'DELETE' }).catch(() => null);
   await sb('top_picks?on_conflict=date,list,rank', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' }, body: JSON.stringify(rows) });
@@ -452,17 +455,20 @@ async function settleTops(rows: any[], res: any) {
     let patch: Record<string, unknown>;
     if (!a || !(a[0] > 0)) patch = { status: 'void', result: null };
     else { const v = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); patch = { result: v, status: v === +r.line ? 'void' : (r.side === 'o' ? v > +r.line : v < +r.line) ? 'green' : 'red' }; }
+    patch.profit = patch.status === 'green' ? Math.round(((+r.odd || ODD_EST) - 1) * 100) / 100 : patch.status === 'red' ? -1 : 0;
     patch.settled_at = new Date().toISOString(); Object.assign(r, patch);
     await sb(`top_picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(patch) }).catch(() => null);
   }
 }
-const hitOf = (a: any[]) => { const g = a.filter(x => x.status === 'green').length, n = a.filter(x => x.status === 'green' || x.status === 'red').length; return { g, n, v: a.filter(x => x.status === 'void').length, pct: n ? Math.round(g / n * 100) : 0 }; };
+const hitOf = (a: any[]) => { const g = a.filter(x => x.status === 'green').length, n = a.filter(x => x.status === 'green' || x.status === 'red').length; const pr = a.reduce((s, x) => s + (x.status === 'green' || x.status === 'red' ? +x.profit || 0 : 0), 0); return { g, n, v: a.filter(x => x.status === 'void').length, pct: n ? Math.round(g / n * 100) : 0, pr, roi: n ? pr / n : 0 }; };
 // acumulado do top 10 automático (todas as datas conferidas)
 async function topsResumo() {
-  const all: any[] = await sb('top_picks?select=list,status&status=in.(green,red,void)&limit=5000').catch(() => []) ?? [];
+  const all: any[] = await sb('top_picks?select=date,list,status,profit,odd_src&status=in.(green,red,void)&limit=5000').catch(() => []) ?? [];
   if (!all.length) return '';
-  const t = hitOf(all.filter(x => x.list === 'tent')), r = hitOf(all.filter(x => x.list === 'ra'));
-  return `\n<b>📈 Top 10 automático (sem odd, linha de referência)</b>\n🏹 Tentativas ${t.g}/${t.n} (${t.pct}%) · 🙌 Reb+Ast ${r.g}/${r.n} (${r.pct}%)\n<i>Com odd ~1,87, lucra acima de 53,5%.</i>`;
+  const t = hitOf(all.filter(x => x.list === 'tent')), r = hitOf(all.filter(x => x.list === 'ra')), T = hitOf(all), real = hitOf(all.filter(x => x.odd_src !== 'estimada'));
+  const dias = new Set(all.map(x => x.date)).size;
+  const ln = (ic: string, lb: string, h: ReturnType<typeof hitOf>) => `${ic} ${lb}: ${h.g}/${h.n} (${h.pct}%) · <b>${u2(h.pr)}</b> · ROI ${pctS(h.roi)}`;
+  return `\n<b>📈 Teste do Modelo BH · ${dias} dia${dias > 1 ? 's' : ''} conferido${dias > 1 ? 's' : ''} (1u por entrada)</b>\n${ln('🏹', 'Tentativas', t)}\n${ln('🙌', 'Reb+Ast', r)}\n${ln('📊', 'Total', T)}${real.n ? `\n<i>Só com odd real das casas: ${real.g}/${real.n} · ${u2(real.pr)} · ROI ${pctS(real.roi)}</i>` : ''}`;
 }
 async function morningText(chatId: number, y: string, picks: any[], res: any) {
   const parts: string[] = [];
@@ -478,12 +484,12 @@ async function morningText(chatId: number, y: string, picks: any[], res: any) {
   }
   if (picks.length) {
     const L = (k: string) => { const a = picks.filter(x => x.list === k).sort((x, z) => x.rank - z.rank); if (!a.length) return ''; const h = hitOf(a);
-      const det = a.map(x => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk}${x.result != null ? ` <i>(${n1(+x.result)})</i>` : ''}`).join('\n');
-      return `${MT[k].ic} ${k === 'tent' ? 'Tentativas' : 'Reb+Ast'}: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''}\n<blockquote expandable>${det}</blockquote>`; };
+      const det = a.map(x => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || ODD_EST)}${x.odd_src === 'estimada' ? '*' : ''}${x.result != null ? ` <i>(${n1(+x.result)})</i>` : ''}`).join('\n');
+      return `${MT[k].ic} ${k === 'tent' ? 'Tentativas' : 'Reb+Ast'}: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''} · <b>${u2(h.pr)}</b> · ROI ${pctS(h.roi)}\n<blockquote expandable>${det}</blockquote>`; };
     parts.push(`<b>📈 Top 10 do Modelo BH</b>\n${[L('tent'), L('ra')].filter(Boolean).join('\n')}` + await topsResumo());
   }
   if (!parts.length) return null;
-  return `☀️ <b>RESULTADO DE ONTEM · ${dateBR(y)}</b>\n\n` + parts.join('\n\n') + `\n\n<i>Hoje os tops saem por volta das 19h20.</i>`;
+  return `☀️ <b>RESULTADO DE ONTEM · ${dateBR(y)}</b>\n\n` + parts.join('\n\n') + `\n\n<i>* odd estimada (1,87): mercado sem odd nas nossas fontes. Hoje os tops saem por volta das 19h20.</i>`;
 }
 const MORNING_KB = () => ({ inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🧠 Modelo BH', '/modelobh')], [BTN('🏠 Menu', '/menu')]] });
 async function ontemCmd(chatId: number): Promise<Out> {
@@ -878,6 +884,15 @@ Deno.serve(async (req: Request) => {
     if (url.searchParams.get('morning') && url.searchParams.get('morning') === SECRET) {
       const r = await morningPush(url.searchParams.get('force') === '1').catch(e => ({ ok: false, erro: String(e) }));
       return new Response(JSON.stringify(r), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+    }
+    const rep = (await cfg()).report;
+    if (rep && url.searchParams.get('csv') === rep) {
+      const rows: any[] = await sb('top_picks?select=*&order=date.asc,list.asc,rank.asc&limit=10000').catch(() => []) ?? [];
+      const head = ['data', 'lista', 'posicao', 'jogador', 'time', 'adversario', 'mercado', 'lado', 'linha', 'odd', 'fonte_odd', 'chance_modelo', 'nota', 'resultado', 'status', 'lucro_u'];
+      const q = (x: unknown) => { const t = x == null ? '' : String(x); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+      const body = rows.map(r => [r.date, r.list === 'tent' ? 'Tentativas' : 'Reb+Ast', r.rank, r.name, r.team, r.opp, MK[r.mk] ?? r.mk, r.side === 'o' ? 'Mais' : 'Menos', r.line, r.odd ?? ODD_EST, r.odd_src ?? 'estimada', r.p, r.nota, r.result,
+        ({ aberta: 'Aberta', green: 'Green', red: 'Red', void: 'Anulada' } as Record<string, string>)[r.status] ?? r.status, r.status === 'aberta' ? '' : r.profit ?? '']);
+      return new Response([head, ...body].map(l => l.map(q).join(',')).join('\n'), { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
     }
     if (url.searchParams.get('setup') !== SECRET) return new Response('ok');
     // dentro do Supabase a função vê só /telegram-bot; o endereço público tem /functions/v1 na frente
