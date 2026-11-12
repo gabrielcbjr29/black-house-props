@@ -79,6 +79,8 @@ async function load() {
   if (CFG.ghToken && CFG.gistId) syncNow(true);
   initFilters();
   route();
+  // temporada passada inteira (arquivo grande e fixo): carrega depois e refaz as contas
+  fetch('data/prev.json').then(r => r.ok ? r.json() : null).catch(() => null).then(pv => { if (pv?.p && SLATE) { SLATE.prev = pv; rebuild(); route(); } });
 }
 function rebuild() {
   PROPS = buildProps(SLATE, { calib: CFG.calib });
@@ -318,7 +320,7 @@ function card({ pr, e, s }) {
     <div><small>Projeção${help('faixa')}</small><b>${fmt(e.muF)}</b><span class="book">${rangeOf(pr).join('–')}</span></div>
   </div>
   <div class="hits">${hitCell('L5', s.hits.L5, F.sample === 'L5')}${hitCell('L10', s.hits.L10, F.sample === 'L10')}${hitCell('L20', s.hits.L20, F.sample === 'L20')}${hitCell('H2H', s.hits.H2H, F.sample === 'H2H')}${s.hits.WO ? hitCell('sem ' + lastName(pr.ctx.wo.q.name), s.hits.WO, false) : hitCell('Temp.', s.hits.CUR, F.sample === 'CUR')}</div>
-  <div class="dotsrow"><span>últ. 10</span>${dots(pr, s.side, e.line)}<span>${s.streak >= 3 ? s.streak + ' seguidos' : 'hoje'}</span></div>
+  <div class="dotsrow"><span>últ. 10</span>${dots(pr, s.side, e.line)}<span>${s.streak >= 3 ? s.streak + ' seguidos' : 'hoje'}${s.hits.PS?.[1] ? ` · temp. passada ${s.hits.PS[0]}/${s.hits.PS[1]}` : ''}</span></div>
   ${pr.rank?.rank ? `<p class="deftxt">${defText(pr, s)}</p>` : ''}
   ${whyList({ pr, e, s }, 2, 1)}
   ${tags.length ? `<div class="pc-tags">${tags.join('')}</div>` : ''}
@@ -334,7 +336,7 @@ function whyList(r, nPro = 3, nCon = 2, dedup = true) {
 }
 function hc(h) { if (!h?.[1]) return '<span class="hcell">—</span>'; const r = h[0] / h[1]; return `<span class="hcell ${r >= .7 ? 'hi' : r < .5 ? 'lo' : ''}">${h[0]}/${h[1]}</span>`; }
 function table(rows) {
-  return `<div class="tablewrap"><table><thead><tr><th>Jogador</th><th>Jogo</th><th>Mercado</th><th>Linha</th><th class="r">Proj.</th><th class="r">Chance</th><th class="r">Mercado</th><th class="r">Odd</th><th class="r">EV</th><th class="r">Stake</th><th>L5</th><th>L10</th><th>L20</th><th>H2H</th><th class="r">Seq.</th><th>Def.</th><th>Nota</th><th class="r">BH</th><th></th></tr></thead><tbody>
+  return `<div class="tablewrap"><table><thead><tr><th>Jogador</th><th>Jogo</th><th>Mercado</th><th>Linha</th><th class="r">Proj.</th><th class="r">Chance</th><th class="r">Mercado</th><th class="r">Odd</th><th class="r">EV</th><th class="r">Stake</th><th>L5</th><th>L10</th><th>L20</th><th>H2H</th><th class="r">Seq.</th><th class="r" title="Projeção menos a linha, a favor do lado">Vant.</th><th title="Temporada passada inteira">T. pass.</th><th>Def.</th><th>Nota</th><th class="r">BH</th><th></th></tr></thead><tbody>
   ${rows.map(({ pr, e, s }) => { const p = pr.p, on = inSlip(pr.id, s.side), u = stakeU(s); return `<tr>
     <td><div class="tplayer">${badge(p.team, 1)}<button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="muted">${p.pos}</span>${p.status !== 'ok' ? '<span class="tag bad" title="' + esc(p.note) + '">!</span>' : ''}</div></td>
     <td class="muted">${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</td><td>${MARKETS[pr.mk].lb}</td>
@@ -342,6 +344,7 @@ function table(rows) {
     <td class="r num">${fmt(e.muF)}</td><td class="r num">${pct(s.p)}</td><td class="r num muted">${pct(s.pMkt)}</td><td class="r num">${s.odd ? fmt(s.odd, 2) + ' <span class="muted">' + esc(s.book) + '</span>' : '<span class="muted">—</span>'}</td>
     <td class="r num ${s.ev == null ? 'muted' : s.ev >= 0 ? 'pos' : 'neg'}">${sgnPct(s.ev)}</td><td class="r num">${u ? uFmt(u) : '<span class="muted">—</span>'}</td>
     <td>${hc(s.hits.L5)}</td><td>${hc(s.hits.L10)}</td><td>${hc(s.hits.L20)}</td><td>${hc(s.hits.H2H)}</td><td class="r num">${s.streak}</td>
+    <td class="r num ${s.gap >= 0 ? 'pos' : 'neg'}">${s.gap >= 0 ? '+' : '−'}${fmt(Math.abs(s.gap), 1)}</td><td>${hc(s.hits.PS)}</td>
     <td>${dvpTag(pr, s)}</td><td>${gradeChip(s.grade)}</td><td class="r">${notaChip({ pr, e, s })}</td>
     <td class="nowrap"><button class="editbtn" data-tip="${pr.id}" data-side="${s.side}">Registrar</button> <button class="addbtn" data-add="${pr.id}" data-side="${s.side}" aria-pressed="${on}">${on ? '✓' : '+'}</button></td></tr>`; }).join('')}
   </tbody></table></div>`;
@@ -1115,8 +1118,8 @@ function renderDrawer(focusEditor) {
     <div class="dbox chart"><h3>Últimos ${Math.min(20, v.length)} jogos × linha</h3>${chartSVG(pr, D.side, line)}<p class="muted" style="font-size:12.5px;margin:6px 0 0">Verde bateu “${sideLb(D.side).toLowerCase()}”, vermelho não. Adversário de hoje em laranja.${c.wo ? ` Barras com contorno: jogos sem ${esc(c.wo.q.name)}.` : ''}</p></div>
     <div class="dbox"><h3>Recortes</h3><div class="tablewrap" style="border:0"><table class="splits"><thead><tr><th>Recorte</th><th class="r">Média</th><th class="r">Acerto</th><th class="r">Jogos</th></tr></thead><tbody>
       ${splitRow('Últimos 5', v.slice(0, 5), line, D.side)}${splitRow('Últimos 10', v.slice(0, 10), line, D.side)}${splitRow('Últimos 20', v.slice(0, 20), line, D.side)}
-      ${c.wo ? splitRow(`<b>Sem ${esc(c.wo.q.name)}</b>`, pick(g => c.wo.set.has(String(g[L.gid]))), line, D.side) + splitRow(`Com ${esc(c.wo.q.name)}`, pick(g => !c.wo.set.has(String(g[L.gid]))).slice(0, 20), line, D.side) : ''}
-      ${splitRow('Temporada atual', pick(g => g[L.cur] === 1), line, D.side)}${splitRow('Em casa', pick(g => g[L.home] === 1), line, D.side)}${splitRow('Fora', pick(g => g[L.home] === 0), line, D.side)}
+      ${c.wo ? splitRow(`<b>Sem ${esc(c.wo.q.name)}</b><span class="muted"> (até 2 temporadas)</span>`, pr.woVals || pick(g => c.wo.set.has(String(g[L.gid]))), line, D.side) + splitRow(`Com ${esc(c.wo.q.name)}`, pick(g => !c.wo.set.has(String(g[L.gid]))).slice(0, 20), line, D.side) : ''}
+      ${splitRow('Temporada atual', pick(g => g[L.cur] === 1), line, D.side)}${pr.pvals?.length ? splitRow('Temporada passada', pr.pvals, line, D.side) : ''}${splitRow('Em casa', pick(g => g[L.home] === 1), line, D.side)}${splitRow('Fora', pick(g => g[L.home] === 0), line, D.side)}
       ${splitRow('Contra ' + pr.opp, pick(g => g[L.opp] === pr.opp), line, D.side)}${splitRow('Como titular', pick(g => g[L.starter] === 1), line, D.side)}${splitRow('Saindo do banco', pick(g => g[L.starter] === 0), line, D.side)}${splitRow('Com 32+ min', pick(g => g[L.min] >= 32), line, D.side)}
     </tbody></table></div></div>
     <div class="dbox"><h3>Por que essa projeção</h3><div class="factors">

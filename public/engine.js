@@ -188,7 +188,8 @@ function context(p, slate, game) {
   for (const q of cand.sort((a, b) => avgMin(playedLogs(b), 5) - avgMin(playedLogs(a), 5))) {
     const gids = p.wo?.[q.id]; if (!gids?.length) continue;
     const set = new Set(gids.map(String));
-    const woLogs = logs.filter(g => set.has(String(g[L.gid]))), withLogs = logs.filter(g => !set.has(String(g[L.gid]))).slice(0, 20);
+    // jogos sem ele: os dos 30 logs + os mais antigos que o coletor manda à parte (p.px, até 2 temporadas)
+    const woLogs = [...logs, ...(p.px || [])].filter(g => set.has(String(g[L.gid])) && g[L.min] > 0), withLogs = logs.filter(g => !set.has(String(g[L.gid]))).slice(0, 20);
     if (woLogs.length < 2 || withLogs.length < 3) continue;
     wo = { q, set, n: woLogs.length, woLogs, withLogs, mWo: mean(woLogs.map(g => g[L.min])), mWith: mean(withLogs.map(g => g[L.min])), active: q.status !== 'questionable' };
     break;
@@ -226,9 +227,13 @@ export function buildProps(slate, opts = {}) {
     const tp = slate.teams?.[p.team]?.pace, op = slate.teams?.[opp]?.pace;
     let paceRatio = tp && op ? ((tp + op) / 2) / lgPace : 1;
     if (game.total && lgTotal) paceRatio = (paceRatio + game.total / lgTotal) / 2;
+    // temporada passada inteira (public/data/prev.json, quando carregado)
+    const pvLogs = slate.prev?.p?.[p.id] || null;
     for (const mk in MARKETS) {
       const M = MARKETS[mk];
       const vals = ctx.logs.map(g => sum(M.k.map(k => BASE[k](g))));
+      const pvals = pvLogs ? pvLogs.map(g => sum(M.k.map(k => BASE[k](g)))) : null;
+      const woVals = ctx.wo ? ctx.wo.woLogs.map(g => sum(M.k.map(k => BASE[k](g)))) : null;
       const book = lines[p.id + '|' + mk];
       const avg20 = mean(vals.slice(0, 20));
       if (!book && avg20 < .6 && mk !== 'PF') continue;
@@ -283,7 +288,7 @@ export function buildProps(slate, opts = {}) {
         }
       }
       props.push({
-        id: p.id + '-' + mk, p, mk, game, opp, ctx, vals, proj, d, dist, refLine, mkt, _df: {}, model,
+        id: p.id + '-' + mk, p, mk, game, opp, ctx, vals, pvals, woVals, proj, d, dist, refLine, mkt, _df: {}, model,
         book: book || null, line: book ? book.line : refLine, lineSource: book ? 'book' : 'ref',
         factors: { base: sum(fac.map(f => f.r)) * ctx.exp, mf: mfAvg, pf: pfAvg, uf: ufAvg, paceRatio, per36: sum(fac.map(f => f.r)) * 36 },
         rank: rk
@@ -329,8 +334,10 @@ export function evaluate(pr, ov, opts = {}) {
     else if (pr.book && (ov?.line == null || ov.line === pr.book.line)) { const b = bestPrice(pr.book.books, side); if (b) { odd = b.odd; book = b.book; } }
     const ev = odd ? p * odd + F.push - 1 : null;
     const hits = { L5: cnt(v.slice(0, 5)), L10: cnt(v.slice(0, 10)), L20: cnt(v.slice(0, 20)), H2H: cnt(h2h), CUR: cnt(cur) };
-    // sem o colega que está fora hoje (histórico real)
-    if (pr.ctx.wo) hits.WO = cnt(v.filter((_, i) => pr.ctx.wo.set.has(String(logs[i][L.gid]))));
+    // temporada passada inteira (quando o prev.json está carregado)
+    if (pr.pvals?.length) hits.PS = cnt(pr.pvals);
+    // sem o colega que está fora hoje (histórico real, até 2 temporadas)
+    if (pr.ctx.wo) hits.WO = cnt(pr.woVals || v.filter((_, i) => pr.ctx.wo.set.has(String(logs[i][L.gid]))));
     const pNoPush = p / Math.max(1e-9, 1 - F.push);
     res[side] = {
       side, p, pModel, pMkt, pPush: F.push, odd, book, ev, fair: p > 0 ? 1 / pNoPush : null,
@@ -448,6 +455,9 @@ export function reasons(pr, e, side, opts = {}) {
   if (hc?.[1] >= 5 && hitR(hc) >= .65 && !(h10?.[1] >= 6 && hitR(h10) >= .7 && hc[1] <= 10)) pro.push({ w: 1.5 + hitR(hc), t: `${hc[0]} de ${hc[1]} na temporada` });
   if (hh?.[1] >= 3 && hitR(hh) >= .67) pro.push({ w: 1.5 + hitR(hh) + Math.min(hh[1], 8) / 8, t: `Contra o ${pr.opp}: ${hh[0]} de ${hh[1]}` });
   else if (hh?.[1] >= 3 && hitR(hh) <= .34) con.push({ w: 2, t: `Contra o ${pr.opp}: só ${hh[0]} de ${hh[1]}` });
+  const hp = s.hits.PS;
+  if (hp?.[1] >= 20 && hitR(hp) >= .65) pro.push({ w: 1.4 + hitR(hp), t: `Temporada passada: ${hp[0]} de ${hp[1]} ${sideTxt}` });
+  else if (hp?.[1] >= 20 && hitR(hp) <= .35) con.push({ w: 1.8, t: `Temporada passada: só ${hp[0]} de ${hp[1]} ${sideTxt}` });
   // defesa x posição
   const r = pr.rank?.rank, of = pr.rank?.of || 30, posTxt = POSPL[pr.p.pos] || 'a posição', stat = STAT_PT[pr.rank?.k] || 'essa estatística';
   if (r) {
@@ -465,7 +475,7 @@ export function reasons(pr, e, side, opts = {}) {
   // minutos e desfalques
   const c = pr.ctx;
   if (c.wo?.active && s.hits.WO?.[1] >= 2) {
-    const woV = pr.vals.filter((_, i) => c.wo.set.has(String(c.logs[i][L.gid])));
+    const woV = pr.woVals || pr.vals.filter((_, i) => c.wo.set.has(String(c.logs[i][L.gid])));
     const t = `Sem ${c.wo.q.name}: média de ${f1(mean(woV))} em ${woV.length} jogos (${s.hits.WO[0]} de ${s.hits.WO[1]} ${over ? 'acima' : 'abaixo'})`;
     (hitR(s.hits.WO) >= .6 ? pro : con).push({ w: 2.4, t });
   } else if (c.out.length && over && c.extra >= 1.5) pro.push({ w: 1.6, t: `Desfalques no time: +${f1(c.extra)} minutos esperados` });

@@ -16,7 +16,7 @@ import { fetchKalshi, DEFAULT_SERIES } from './kalshi.js';
 import { MODES, DEFAULT_BOOKS, loadState, saveState, mergeLines } from './oddsplan.js';
 import { USAGE } from './http.js';
 import { dailySummary, sendTelegram, radarAlerts } from './notify.js';
-import { buildSlate, buildResults } from './slate.js';
+import { buildSlate, buildResults, buildPrevSeason } from './slate.js';
 import { runBacktest } from './backtest.js';
 import { fetchBDLGames } from './bdl.js';
 import { fetchESPNDay, fetchESPNSummary } from './espnbox.js';
@@ -251,8 +251,12 @@ async function main() {
   }
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(slate));
+  // temporada passada inteira (só reescreve quando muda: na virada de temporada)
+  const PREV = join(dirname(OUT), 'prev.json');
+  const prevSeason = buildPrevSeason(Object.values(prev.games), prevL);
+  try { const txt = JSON.stringify(prevSeason); let old = ''; try { old = await readFile(PREV, 'utf8'); } catch { } if (old !== txt) await writeFile(PREV, txt); } catch (e) { warnings.push('prev.json falhou: ' + e.message); }
   // lista pronta para o bot do Telegram
-  try { const bd = buildBotData(slate, { w: +(env.BOT_W || .4) }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
+  try { const bd = buildBotData({ ...slate, prev: prevSeason }, { w: +(env.BOT_W || .4) }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
   catch (e) { warnings.push('bot.json falhou: ' + e.message); }
   // 7. resultados dos últimos dias: o app usa para liquidar as tips registradas (green/red/devolvida)
   await writeFile(RESULTS, JSON.stringify(buildResults([...Object.values(cur.games), ...Object.values(prev.games)], { ...prev.names, ...cur.names }, date)));

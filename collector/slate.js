@@ -37,10 +37,13 @@ export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b 
   const byPlayer = new Map();
   for (const g of games) for (const r of g.r) {
     const opp = r[RI.team] === g.h ? g.a : g.h;
-    if (!byPlayer.has(r[RI.pid])) byPlayer.set(r[RI.pid], { rows: [], logs: [] });
+    if (!byPlayer.has(r[RI.pid])) byPlayer.set(r[RI.pid], { rows: [], logs: [], all: [] });
     const P = byPlayer.get(r[RI.pid]);
     P.rows.push(r);
-    if (P.logs.length < 30) P.logs.push([g.d, opp, r[RI.team] === g.h ? 1 : 0, r[RI.min], r[RI.pts], r[RI.reb], r[RI.oreb], r[RI.ast], r[RI.stl], r[RI.blk], r[RI.tov], r[RI.pf], r[RI.fgm], r[RI.fga], r[RI.tpm], r[RI.tpa], r[RI.ftm], r[RI.fta], g.cur, r[RI.starter], g.gid]);
+    // all: as duas temporadas inteiras (para o "sem o colega"); logs: os 30 mais recentes que vão no slate
+    const lg = [g.d, opp, r[RI.team] === g.h ? 1 : 0, r[RI.min], r[RI.pts], r[RI.reb], r[RI.oreb], r[RI.ast], r[RI.stl], r[RI.blk], r[RI.tov], r[RI.pf], r[RI.fgm], r[RI.fga], r[RI.tpm], r[RI.tpa], r[RI.ftm], r[RI.fta], g.cur, r[RI.starter], g.gid];
+    if (r[RI.min] > 0) P.all.push(lg);
+    if (P.logs.length < 30) P.logs.push(lg);
   }
   const teamHasCur = new Set(cur.flatMap(g => g?.r ? [g.h, g.a] : []));
 
@@ -62,8 +65,10 @@ export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b 
     players.push({ id: String(pid), name, team, pos: inferPos(P.rows.slice(0, 40)), status, note, ...(inj?.source ? { injSrc: inj.source } : {}), logs: P.logs, ...(lu && lu.role ? { lineup: { role: lu.role, confirmed: lu.confirmed } } : {}) });
   }
 
-  // --- "sem o colega": para cada jogador fora/dúvida, os jogos recentes dos colegas em que ele
-  //     estava no elenco (jogou pelo time naquela temporada) mas não entrou em quadra
+  // --- "sem o colega": para cada jogador fora/dúvida, os jogos dos colegas (nas duas temporadas) em que ele
+  //     estava no elenco (jogou pelo time naquela temporada) mas não entrou em quadra. Até 25 jogos;
+  //     os que ficam fora dos 30 logs do jogador vão em p.px (logs extras) para o engine ter os números.
+  const allOf = new Map([...byPlayer].map(([pid, P]) => [String(pid), P.all]));
   const playedIn = new Map(), onTeam = new Map();
   for (const g of games) for (const r of g.r) {
     const pid = String(r[RI.pid]);
@@ -77,17 +82,22 @@ export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b 
     if (qm < 15) continue;
     for (const p of players) {
       if (p.team !== q.team || p.id === q.id) continue;
-      const gids = [];
-      for (const l of p.logs) {
+      const gids = [], inLogs = new Set(p.logs.map(l => String(l[20])));
+      for (const l of allOf.get(p.id) || p.logs) {
         const g = gameById.get(String(l[20])); if (!g) continue;
         const pTeam = l[2] ? g.h : g.a;
         if (pTeam !== q.team) continue;
         if (!onTeam.get(q.id)?.has(pTeam + '|' + g.cur)) continue;
-        if (!playedIn.get(q.id)?.has(String(g.gid))) gids.push(String(g.gid));
+        if (!playedIn.get(q.id)?.has(String(g.gid))) {
+          gids.push(String(g.gid));
+          if (!inLogs.has(String(g.gid)) && !(p.px ||= []).some(x => x[20] === l[20])) p.px.push(l);
+        }
+        if (gids.length >= 25) break;
       }
       if (gids.length) (p.wo ||= {})[q.id] = gids;
     }
   }
+  for (const p of players) if (p.px) p.px.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
 
   // --- ritmo e defesa por posição de cada time (temporada atual pesa mais)
   const teams = {};
@@ -179,4 +189,17 @@ export function buildResults(allGames, names = {}, date, days = 14) {
     for (const r of g.r) { S[r[RI.pid]] = [r[RI.min], r[RI.pts], r[RI.reb], r[RI.ast], r[RI.stl], r[RI.blk], r[RI.tov], r[RI.pf], r[RI.fgm], r[RI.fga], r[RI.tpm], r[RI.tpa], r[RI.ftm], r[RI.fta]]; if (names[r[RI.pid]]) nm[r[RI.pid]] = names[r[RI.pid]]; }
   }
   return { generatedAt: new Date().toISOString(), upTo: date, dates: ds, games, stats, names: nm };
+}
+
+/* Temporada passada inteira de cada jogador (public/data/prev.json), no mesmo formato dos logs do slate.
+   O arquivo só muda na virada de temporada; o app carrega à parte e o bot usa na coleta. */
+export function buildPrevSeason(prevGames, season) {
+  const p = {};
+  const games = prevGames.filter(g => g && g.r).sort((a, b) => (b.d < a.d ? -1 : b.d > a.d ? 1 : 0));
+  for (const g of games) for (const r of g.r) {
+    if (!(r[RI.min] > 0)) continue;
+    const opp = r[RI.team] === g.h ? g.a : g.h;
+    (p[String(r[RI.pid])] ||= []).push([g.d, opp, r[RI.team] === g.h ? 1 : 0, r[RI.min], r[RI.pts], r[RI.reb], r[RI.oreb], r[RI.ast], r[RI.stl], r[RI.blk], r[RI.tov], r[RI.pf], r[RI.fgm], r[RI.fga], r[RI.tpm], r[RI.tpa], r[RI.ftm], r[RI.fta], 0, r[RI.starter], g.gid]);
+  }
+  return { season, p };
 }
