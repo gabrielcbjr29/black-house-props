@@ -1,8 +1,8 @@
 // Odds reais para o teste do Modelo BH (top 10 de tentativas e de reb+ast).
 // Depois do Modelo BH rodar, pega os candidatos dos dois tops e busca na The Odds API só os jogos e mercados
 // que eles precisam (reb+ast, arremessos convertidos e lances livres tentados: os únicos desses mercados que a
-// API tem). Uma busca por jogo por dia, na primeira coleta depois das 17h de Brasília (a que vira o envio
-// diário). A linha principal entra no slate com a mediana das casas como odd ("Casas EUA (n)").
+// API tem). Cada jogo/mercado é buscado uma vez por dia, a partir da coleta das 10h de Brasília; se um
+// mercado novo entrar no top mais tarde, só ele é buscado. A linha principal entra no slate com a mediana das casas como odd ("Casas EUA (n)").
 // Tentados (total, de 3, de 2) e de 2 convertidos não existem em nenhuma API que usamos.
 import { getJSON, normName } from './http.js';
 import { MARKETS } from '../public/engine.js';
@@ -46,7 +46,7 @@ export function toSlateLines(stored, players) {
  * Busca (se for a hora) e devolve as linhas para os tops. state: data/odds-state.json (providers.tops).
  * Não gasta mais que maxCredits por dia nem deixa a conta abaixo de reserve.
  */
-export async function topOdds({ slate, key, state, now = new Date(), minHourBRT = 17, maxCredits = 24, reserve = 15, log = console.log }) {
+export async function topOdds({ slate, key, state, now = new Date(), minHourBRT = 10, maxCredits = 24, reserve = 15, log = console.log }) {
   const date = slate.meta?.date;
   const T = state.providers.tops ||= {};
   if (T.date !== date) { T.date = date; T.events = {}; T.lines = []; T.credits = 0; }
@@ -57,7 +57,9 @@ export async function topOdds({ slate, key, state, now = new Date(), minHourBRT 
     const cands = topCandidates(bot.rows).filter(r => MARKETS[r.m]?.odds && ['RA', 'FGM', 'FTA'].includes(r.m));
     const need = {}; // time da casa -> mercados
     for (const r of cands) { const home = r.home ? r.t : r.o; (need[home] ||= new Set()).add(MARKETS[r.m].odds); }
-    const pending = Object.keys(need).filter(h => !T.events[h]);
+    // só os mercados ainda não buscados de cada jogo
+    for (const h in need) for (const m of (T.events[h]?.markets || '').split(',')) need[h].delete(m);
+    const pending = Object.keys(need).filter(h => need[h].size);
     if (pending.length) {
       const events = await getJSON(`${BASE}/events?apiKey=${key}`); // grátis
       let remaining = events.__remaining ?? state.providers.oddsapi?.remaining ?? null;
@@ -70,7 +72,7 @@ export async function topOdds({ slate, key, state, now = new Date(), minHourBRT 
           const j = await getJSON(`${BASE}/events/${e.id}/odds?apiKey=${key}&bookmakers=${DEFAULT_BOOKS}&markets=${markets}&oddsFormat=decimal`);
           const used = j.__last ?? cost; T.credits += used; if (j.__remaining != null) remaining = j.__remaining;
           const got = parseEventOdds(j); T.lines.push(...got);
-          T.events[h] = { at: now.toISOString(), markets, lines: got.length };
+          T.events[h] = { at: now.toISOString(), markets: [T.events[h]?.markets, markets].filter(Boolean).join(','), lines: (T.events[h]?.lines || 0) + got.length };
           if (state.providers.oddsapi) { state.providers.oddsapi.remaining = remaining; state.providers.oddsapi.usedMonth = (state.providers.oddsapi.usedMonth || 0) + used; state.providers.oddsapi.usedToday = (state.providers.oddsapi.usedToday || 0) + used; }
         } catch (err) { log(`  tops: odds de ${h} falharam: ${err.message}`); }
       }

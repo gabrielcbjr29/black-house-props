@@ -437,15 +437,19 @@ async function apagarCmd(chatId: number, rest: string[]): Promise<Out> {
 const etDate = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 async function getResults() { return fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 300_000)).then(r => r.ok ? r.json() : null).catch(() => null); }
 const ODD_EST = 1.87;
-// grava o top 10 enviado no dia (uma linha por posição), para conferir no dia seguinte
+// grava os tops do dia (cada sugestão uma vez por lista; enquanto o jogo não começa, a sugestão é atualizada
+// com a linha e a odd mais novas). Chamado a cada atualização dos dados (pg_cron) e no envio diário.
 async function recordTops(d: Data) {
-  const rows: Record<string, unknown>[] = [];
+  const tip: Record<string, number> = {}; for (const g of d.games) tip[g.id] = Date.parse(g.utc ?? '') || 0;
+  const now = Date.now(), rows: Record<string, unknown>[] = [];
   // odd: a das casas que achamos (mediana das casas dos EUA pela The Odds API); sem odd real, 1,87 (preço típico de abertura de prop)
-  for (const k of ['tent', 'ra']) modelTop(d, MT[k].mk).forEach((r, i) => rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta',
-    odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada' }));
+  for (const k of ['tent', 'ra']) modelTop(d, MT[k].mk).forEach((r, i) => {
+    if (tip[r.g] && tip[r.g] <= now + 5 * 6e4) return; // jogo já começou: fica a última sugestão gravada
+    rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta',
+      odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', tip_utc: tip[r.g] ? new Date(tip[r.g]).toISOString() : null, updated_at: new Date(now).toISOString() });
+  });
   if (!rows.length) return 0;
-  await sb(`top_picks?date=eq.${d.date}&status=eq.aberta`, { method: 'DELETE' }).catch(() => null);
-  await sb('top_picks?on_conflict=date,list,rank', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' }, body: JSON.stringify(rows) });
+  await sb('top_picks?on_conflict=date,list,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   return rows.length;
 }
 async function settleTops(rows: any[], res: any) {
@@ -883,6 +887,15 @@ Deno.serve(async (req: Request) => {
     }
     if (url.searchParams.get('morning') && url.searchParams.get('morning') === SECRET) {
       const r = await morningPush(url.searchParams.get('force') === '1').catch(e => ({ ok: false, erro: String(e) }));
+      return new Response(JSON.stringify(r), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+    }
+    if (url.searchParams.get('record') && url.searchParams.get('record') === SECRET) {
+      CACHE = null;
+      const r = await data().then(async d => {
+        const today = etDate();
+        if (d.date !== today) return { ok: true, skip: `dados de ${d.date}, hoje é ${today}` };
+        return { ok: true, date: d.date, gen: d.gen, gravados: await recordTops(d) };
+      }).catch(e => ({ ok: false, erro: String(e) }));
       return new Response(JSON.stringify(r), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
     }
     const rep = (await cfg()).report;
