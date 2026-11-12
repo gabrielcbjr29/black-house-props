@@ -8,7 +8,7 @@ import { getJSON, normName } from './http.js';
 import { MARKETS } from '../public/engine.js';
 import { TEAM_BY_NAME, parseEventOdds } from './oddsapi.js';
 import { DEFAULT_BOOKS } from './oddsplan.js';
-import { buildBotData, topEligible } from './botdata.js';
+import { buildBotData, topEligible, c99Games } from './botdata.js';
 
 const BASE = 'https://api.the-odds-api.com/v4/sports/basketball_nba';
 export const TOP_LISTS = { tent: ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], ra: ['RA'] };
@@ -16,10 +16,10 @@ const median = a => { const s = a.filter(x => x > 1).sort((x, y) => x - y); if (
 
 /* candidatos dos tops (mesmo filtro do bot), alguns a mais porque a linha real pode mudar a ordem */
 export function topCandidates(rows, n = 15) {
-  const out = [];
+  const out = [], cov = c99Games(rows);
   for (const mk of Object.values(TOP_LISTS)) {
     const seen = new Set(); let k = 0;
-    for (const r of rows.filter(r => topEligible(r, mk)).sort((a, b) => b.sc - a.sc)) {
+    for (const r of rows.filter(r => topEligible(r, mk, cov)).sort((a, b) => b.sc - a.sc)) {
       if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (++k >= n) break;
     }
   }
@@ -54,7 +54,8 @@ export async function topOdds({ slate, key, state, now = new Date(), minHourBRT 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(now);
   if (key && date === today && hour >= minHourBRT) {
     const bot = buildBotData({ ...slate, lines: [...(slate.lines || []), ...toSlateLines(T.lines, slate.players)] }, {});
-    const cands = topCandidates(bot.rows).filter(r => MARKETS[r.m]?.odds && ['RA', 'FGM', 'FTA'].includes(r.m));
+    // quem já tem linha da 99play não precisa da The Odds API
+    const cands = topCandidates(bot.rows).filter(r => !r.c9 && MARKETS[r.m]?.odds && ['RA', 'FGM', 'FTA'].includes(r.m));
     const need = {}; // time da casa -> mercados
     for (const r of cands) { const home = r.home ? r.t : r.o; (need[home] ||= new Set()).add(MARKETS[r.m].odds); }
     // só os mercados ainda não buscados de cada jogo

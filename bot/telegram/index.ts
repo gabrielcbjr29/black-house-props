@@ -38,7 +38,7 @@ async function sb(path: string, init: RequestInit = {}) {
 }
 const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number };
 type MStat = [number, number, number[], number | null];
 type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
 type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
@@ -256,7 +256,9 @@ const MT: Record<string, { mk: string[]; title: string; cmd: string; ic: string 
 function modelTop(d: Data, mk: string[], n = 10) {
   // só jogador de rotação (24+ min) e linhas que as casas costumam abrir (mesmo critério dos cards)
   const MIN_LINE: Record<string, number> = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
-  const rows = d.rows.filter(r => r.mb && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0)).sort((a, b) => b.sc - a.sc);
+  // nos jogos em que a 99play já abriu linhas de jogador, só entra linha da 99play (é onde o usuário aposta)
+  const cov = new Set(d.rows.filter(r => r.c9).map(r => r.g));
+  const rows = d.rows.filter(r => r.mb && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0) && (r.c9 || !cov.has(r.g))).sort((a, b) => b.sc - a.sc);
   const seen = new Set<string>(), out: Row[] = [];
   for (const r of rows) { if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
   return out;
@@ -265,12 +267,15 @@ function modelTop(d: Data, mk: string[], n = 10) {
 function tops(d: Data, n = 10): Record<string, Row[]> {
   return Object.fromEntries(Object.entries(MT).map(([k, T]) => [k, modelTop(d, T.mk, n)]));
 }
-const MT_NOTE = '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
+const MT_NOTE = '\n<i>🏠 Linha e odd da 99play. 📏 Ref. = linha de referência (mediana dos últimos 15 jogos), só para comparar. Jogo sem linhas da 99play ainda usa a referência. Só jogadores de rotação (24+ min).</i>';
+// de onde vem a linha: 🏠 99play (e a referência embaixo, para comparar) ou 📏 só referência
+const lineSrc = (r: Row) => r.c9 ? `🏠 99play @${r.d ? n2(r.d) : '–'}${r.rf != null ? ` · 📏 Ref. ${n1(r.rf)}${r.rf !== r.l ? ` (99play ${r.l > r.rf ? '+' : '−'}${n1(Math.abs(r.l - r.rf))})` : ''}` : ''}` : `📏 Linha de referência${r.d ? ` · @${n2(r.d)} ${esc(r.b ?? '')}` : ' · sem odd de casa'}`;
 function compact(r: Row, i: number) {
   const over = r.s === 'o', vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
   const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
   return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
 ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
+${lineSrc(r)}
 📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}`;
 }
 function topText(d: Data, key: string) {
@@ -451,7 +456,7 @@ async function recordTops(d: Data) {
   for (const k of ['tent', 'ra']) T[k].forEach((r, i) => {
     if (tip[r.g] && tip[r.g] <= now + 5 * 6e4) return; // jogo já começou: fica a última sugestão gravada
     rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta',
-      odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', tip_utc: tip[r.g] ? new Date(tip[r.g]).toISOString() : null, updated_at: new Date(now).toISOString() });
+      ref_line: r.rf ?? null, odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', tip_utc: tip[r.g] ? new Date(tip[r.g]).toISOString() : null, updated_at: new Date(now).toISOString() });
   });
   // sem entrada repetida na mesma lista no dia: se o jogador já foi registrado nessa lista (ex.: tentados de manhã),
   // não entra de novo com outro mercado da mesma lista (ex.: lances à noite). Em listas diferentes pode.
@@ -573,7 +578,7 @@ ${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 $
   return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
-${odd}${ev}
+${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
 }
 // cartão das listas (visual de antes)
@@ -601,7 +606,7 @@ function listCard(r: Row, i: number) {
   return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
-${odd}${ev}
+${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${def}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
 }
 function header(d: Data, title: string, extra = '') {
@@ -746,7 +751,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
-  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', ' · linha de referência'); }
+  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', ' · linhas da 99play'); }
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
@@ -911,10 +916,10 @@ Deno.serve(async (req: Request) => {
     const rep = (await cfg()).report;
     if (rep && url.searchParams.get('csv') === rep) {
       const rows: any[] = await sb('top_picks?select=*&order=date.asc,list.asc,rank.asc&limit=10000').catch(() => []) ?? [];
-      const head = ['data', 'lista', 'posicao', 'jogador', 'time', 'adversario', 'mercado', 'lado', 'linha', 'odd', 'fonte_odd', 'chance_modelo', 'nota', 'resultado', 'status', 'lucro_u'];
+      const head = ['data', 'lista', 'posicao', 'jogador', 'time', 'adversario', 'mercado', 'lado', 'linha', 'odd', 'fonte_odd', 'chance_modelo', 'nota', 'resultado', 'status', 'lucro_u', 'linha_ref'];
       const q = (x: unknown) => { const t = x == null ? '' : String(x); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
       const body = rows.map(r => [r.date, r.list === 'tent' ? 'Tentativas' : 'Reb+Ast', r.rank, r.name, r.team, r.opp, MK[r.mk] ?? r.mk, r.side === 'o' ? 'Mais' : 'Menos', r.line, r.odd ?? ODD_EST, r.odd_src ?? 'estimada', r.p, r.nota, r.result,
-        ({ aberta: 'Aberta', green: 'Green', red: 'Red', void: 'Anulada' } as Record<string, string>)[r.status] ?? r.status, r.status === 'aberta' ? '' : r.profit ?? '']);
+        ({ aberta: 'Aberta', green: 'Green', red: 'Red', void: 'Anulada' } as Record<string, string>)[r.status] ?? r.status, r.status === 'aberta' ? '' : r.profit ?? '', r.ref_line ?? '']);
       return new Response([head, ...body].map(l => l.map(q).join(',')).join('\n'), { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
     }
     if (url.searchParams.get('setup') !== SECRET) return new Response('ok');

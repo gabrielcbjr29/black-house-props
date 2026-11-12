@@ -7,7 +7,10 @@ const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bol
 // movimento do mercado desde a abertura a favor (+1) ou contra (−1) do lado
 // top 10 do Modelo BH: só jogador de rotação (24+ min) e linhas que as casas costumam abrir
 export const TOP_MIN_LINE = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
-export const topEligible = (r, g) => r.mb && g.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (TOP_MIN_LINE[r.m] ?? 0);
+// cov: jogos com linhas da 99play. Nesses jogos o top só usa linha da 99play (é onde o usuário aposta);
+// jogo sem nenhuma linha da 99play ainda usa a linha de referência
+export const topEligible = (r, g, cov = null) => r.mb && g.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (TOP_MIN_LINE[r.m] ?? 0) && (r.c9 || !cov?.has(r.g));
+export const c99Games = rows => new Set(rows.filter(r => r.c9).map(r => r.g));
 // grupos das listas do bot (mesmos mercados dos comandos)
 const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['FGA', '2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV'], ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM']];
 const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt.mu - pr.mkt.openMu) / Math.max(pr.mkt.mu, 1); return Math.abs(d) >= .025 ? Math.sign(side === 'over' ? d : -d) : 0; };
@@ -43,6 +46,8 @@ export function buildBotData(slate, { w = .4 } = {}) {
       p: r3(s.p), q: r3(s.pMkt), d: odd, b: book, k: kal ? 1 : 0, e: r3(ev), gr: s.grade, l10: s.hits?.L10 || null, l20: s.hits?.L20 || null,
       ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF), mb: pr.model ? 1 : 0, mn: Math.round((pr.ctx.m5 + pr.ctx.m20) / 2),
       st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10,
+      // linha da 99play (c9) e a linha de referência (mediana dos últimos 15) para comparar
+      c9: pr.book?.books?.['99play'] ? 1 : 0, rf: pr.refLine,
       // L5, sequência atual, vantagem (projeção − linha a favor do lado), temporada passada e "sem o colega"
       l5: s.hits?.L5?.[1] ? s.hits.L5 : null, sk: s.streak || 0, ed: Math.round(s.gap * 10) / 10, tp: s.hits?.PS?.[1] ? s.hits.PS : null,
       wo: pr.ctx.wo && s.hits?.WO?.[1] >= 2 ? { q: pr.ctx.wo.q.name, h: s.hits.WO, a: Math.round(pr.woVals.reduce((a, x) => a + x, 0) / pr.woVals.length * 10) / 10, x: pr.ctx.wo.active ? 1 : 0 } : null, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
@@ -70,7 +75,8 @@ export function buildBotData(slate, { w = .4 } = {}) {
   for (const g of CARD_GROUPS) take(R.filter(r => g.includes(r.m)), 10, g.length === 1);
   take(R.filter(r => r.p >= .65 && GRADE_ORDER[r.gr] >= 3).sort((a, b) => b.p - a.p), 10);
   // top 10 do Modelo BH (sem faixa de odd: são linhas de referência, sem odd de casa)
-  for (const g of [['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']]) take(rows.filter(r => topEligible(r, g)).sort((a, b) => b.sc - a.sc), 10);
+  const cov = c99Games(rows);
+  for (const g of [['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']]) take(rows.filter(r => topEligible(r, g, cov)).sort((a, b) => b.sc - a.sc), 10);
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
