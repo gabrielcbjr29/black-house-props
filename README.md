@@ -34,6 +34,12 @@ Com o runner instalado e aparecendo como Idle, crie a variável `COLETOR` = `com
 - **Envio diário:** `/receber` assina os dois tops.
   - O Supabase (pg_cron + pg_net) chama `telegram-bot?push=<WEBHOOK_SECRET>` às 19h20 e 20h00 (só com dados da rodada das 18h30) e às 20h40 (com o que houver).
   - O envio sai uma vez por dia; a trava fica em `bot_config.PUSH_<data>`.
+- **Registro de entradas e ROI (`/banca`):**
+  - Toque em 📝 (nos tops, no envio diário, nas listas e no `/modelo`) e informe a odd que pegou: pelos botões ou respondendo `1,83`. Para outra linha, mande `1,83 3,5`; para outra stake, `1,83 2u`. O padrão é 1u.
+  - Com a linha da casa diferente, a chance do modelo é recalculada nessa linha.
+  - A entrada é conferida sozinha com `results.json`: green paga stake × (odd − 1), red perde a stake, e push (resultado igual à linha) ou jogador que não jogou é anulado.
+  - `/banca` mostra apostado, lucro, ROI, acerto, odd média e ponto de equilíbrio, quebrados por lista, mercado, lado, faixa de nota e faixa de odd. `/banca todos` junta todos os usuários e `/apagar <id>` remove um registro errado.
+  - Os dados ficam na tabela privada `bets` do Supabase.
 - **Cards em imagem no bot:**
   - Toque em 🖼️ 1…5 embaixo de qualquer lista para receber a entrada como imagem. O card traz nome, linha, odd, chance, projeção, EV, a nota, o gráfico dos últimos 10 jogos contra a linha, L10 · temporada · vs adversário, a defesa e os motivos.
   - **/cards** (ou "🖼️ Cards do dia" no menu) manda as 5 melhores num álbum; **/cards 10** manda as 10.

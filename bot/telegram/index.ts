@@ -185,6 +185,8 @@ Sem a linha, mostra a projeção e as linhas mais comuns.
       body: JSON.stringify({ chat_id: chatId, date: d.date, pid, name: m.n, team: m.t, opp: m.o, stat: STAT_KEY(st.k), line, side, p: Math.round(ps * 1000) / 1000, mu: Math.round(dist.mu * 100) / 100 }) });
     reg = `📒 Teste <b>#${r?.[0]?.id ?? ''}</b> registrado: confiro amanhã com o resultado (/testes).`;
   } catch (e) { reg = '<i>(não consegui registrar o teste agora)</i>'; }
+  const mkCode = Object.keys(MK2STAT).find(k => MK2STAT[k] === STAT_KEY(st.k));
+  if (mkCode) back.inline_keyboard.unshift([BTN(`📝 Registrar ${side === 'o' ? 'mais' : 'menos'} de ${n1(line)} (1u)`, `bm:${pid}:${mkCode}:${line}:${side}`)]);
   return { text: head + `
 <b>${st.lb} · linha ${n1(line)}</b>
 <blockquote>Projeção <b>${n1(Math.round(dist.mu * 10) / 10)}</b>${szn != null ? `  ·  temporada ${n1(Math.round(szn * 10) / 10)}` : ''}
@@ -198,7 +200,7 @@ ${reg}
 }
 
 // ---------- testes: confere sozinho com os resultados publicados ----------
-const RES_IDX: Record<string, (a: number[]) => number> = { pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
+const RES_IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
 async function settle(rows: any[]) {
   const open = rows.filter(r => !r.settled_at);
   if (!open.length) return;
@@ -268,7 +270,7 @@ ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} 
 function topText(d: Data, key: string) {
   const T = MT[key], top = modelTop(d, T.mk);
   if (!top.length) return null;
-  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE + FOOT;
+  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd.</i>' + FOOT;
 }
 const subKb = (s: { tent: boolean; ra: boolean } | null) => ({ inline_keyboard: [
   [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
@@ -303,17 +305,134 @@ async function pushDaily(force = false, minHour = 0) {
   let sent = 0;
   for (const s of subs) for (const k of ['tent', 'ra'] as const) {
     if (!s[k] || !txt[k]) continue;
+    const regs = modelTop(d, MT[k].mk).map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
     const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [[BTN('📋 Ver com detalhes', MT[k].cmd), BTN('🖼️ Cards', `/cards`)], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
+      reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
     if (r.ok) sent++;
     await new Promise(res => setTimeout(res, 60));
   }
   await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: flag, value: String(sent), updated_at: new Date().toISOString() }) }).catch(() => null);
   return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent };
 }
+// ---------- Registro de entradas (1u, odd real) e ROI ----------
+const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
+const SRC: Record<string, string> = { tent: 'Top tentativas', ra: 'Top reb+ast', modelo: '/modelo', lista: 'Outras listas' };
+const u2 = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2).replace('.', ',') + 'u';
+const pctS = (x: number) => (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';
+// chance do modelo numa linha qualquer (se o jogador estiver no Modelo BH de hoje)
+function pAt(d: Data, pid: string, stat: string, line: number, side: string) {
+  const m = d.mdl?.[pid]; if (!m) return null; const dist = modelDist(m, stat.split('+')); if (!dist) return null;
+  const po = nbOver(dist.mu, dist.k, line); return side === 'o' ? po : 1 - po;
+}
+const ODD_KB = (id: number) => ({ inline_keyboard: [
+  ['1.50', '1.60', '1.70', '1.80'].map(o => BTN(o.replace('.', ','), `bo:${id}:${o}`)),
+  ['1.85', '1.90', '2.00', '2.20'].map(o => BTN(o.replace('.', ','), `bo:${id}:${o}`)),
+  [BTN('❌ Cancelar', `bx:${id}`)]] });
+async function betStart(chatId: number, d: Data, r: Row, src: string): Promise<Out> {
+  const stat = MK2STAT[r.m]; if (!stat) return { text: 'Esse mercado ainda não pode ser registrado.', kb: { inline_keyboard: [HOME] } };
+  // cancela outro registro que ficou esperando odd
+  await sb(`bets?chat_id=eq.${chatId}&status=eq.aguardando_odd`, { method: 'DELETE' }).catch(() => null);
+  const row = (await sb('bets', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ chat_id: chatId, date: d.date, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat, line: r.l, ref_line: r.l, side: r.s, p_model: r.p, nota: r.nt ?? null, src, status: 'aguardando_odd' }) }))?.[0];
+  return { text: `<b>📝 REGISTRAR ENTRADA · 1u</b>
+<blockquote><b>${esc(r.n)}</b> <i>${r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`} · ${r.h}</i>
+${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · modelo ${pc(r.p)}${r.nt != null ? ` · nota ${r.nt}` : ''}</blockquote>
+<b>Qual odd você pegou?</b> Toque abaixo ou <b>responda com a odd</b>, por exemplo <code>1,83</code>.
+Se a linha da sua casa for outra, mande odd e linha: <code>1,83 ${n1(r.l + 1)}</code>
+Para outra stake, some as unidades: <code>1,83 2u</code>`, kb: ODD_KB(row.id), force: true };
+}
+// "1,83", "1,83 3,5", "1,83 3,5 2u"
+function parseOdd(text: string) {
+  const t = text.trim().toLowerCase().replace(/@/g, '').split(/\s+/);
+  let odd: number | null = null, line: number | null = null, stake: number | null = null;
+  for (const x of t) {
+    const u = /^(\d+([.,]\d+)?)u$/.exec(x); if (u) { stake = parseFloat(u[1].replace(',', '.')); continue; }
+    const v = parseFloat(x.replace(',', '.')); if (!Number.isFinite(v)) return null;
+    if (odd == null) odd = v; else if (line == null) line = v; else return null;
+  }
+  if (odd == null || odd < 1.01 || odd > 50) return null;
+  if (line != null && !Number.isInteger(line - .5)) line = Math.floor(line) + .5;
+  if (stake != null && (stake <= 0 || stake > 20)) stake = null;
+  return { odd, line, stake };
+}
+async function betFinish(chatId: number, id: number | null, text: string): Promise<Out | null> {
+  const q = id != null ? `bets?id=eq.${id}&chat_id=eq.${chatId}&status=eq.aguardando_odd` : `bets?chat_id=eq.${chatId}&status=eq.aguardando_odd&order=created_at.desc&limit=1`;
+  const b = (await sb(q + '&select=*').catch(() => []))?.[0];
+  if (!b) return null;
+  const v = parseOdd(text);
+  if (!v) return { text: 'Não entendi. Mande só a odd, por exemplo <code>1,83</code>, ou odd e linha: <code>1,83 3,5</code>.', kb: ODD_KB(b.id) };
+  const patch: Record<string, unknown> = { odd: v.odd, status: 'aberta' };
+  if (v.stake) patch.stake = v.stake;
+  if (v.line != null && v.line !== +b.line) {
+    patch.line = v.line;
+    const d = await data().catch(() => null); const p = d ? pAt(d, b.pid, b.stat, v.line, b.side) : null; if (p != null) patch.p_model = Math.round(p * 1000) / 1000;
+  }
+  await sb(`bets?id=eq.${b.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  const line = (patch.line as number) ?? +b.line, p = (patch.p_model as number) ?? +b.p_model, st = (patch.stake as number) ?? +b.stake;
+  const ev = p ? p * v.odd - 1 : null;
+  return { text: `✅ <b>Entrada #${b.id} registrada</b>
+<blockquote><b>${esc(b.name)}</b> · ${b.side === 'o' ? 'mais' : 'menos'} de ${n1(line)} ${MK[b.mk] ?? b.mk}
+Odd <b>${n2(v.odd)}</b> · ${n1(st)}u${p ? ` · modelo ${pc(p)}` : ''}${ev != null ? ` · EV pelo modelo ${pctS(ev)}` : ''}${line !== +b.ref_line ? `\n<i>linha da casa ${n1(line)} (referência era ${n1(+b.ref_line)})</i>` : ''}</blockquote>
+Confiro sozinho depois do jogo. Acompanhe em /banca.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🏠 Menu', '/menu')]] } };
+}
+async function settleBets(rows: any[]) {
+  const open = rows.filter(r => r.status === 'aberta');
+  if (!open.length) return;
+  const res = await fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 300_000)).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!res?.stats) return;
+  for (const r of open) {
+    if (!res.dates?.includes(r.date)) continue;
+    const a = res.stats[r.date]?.[r.pid];
+    let patch: Record<string, unknown>;
+    if (!a || !(a[0] > 0)) patch = { status: 'void', profit: 0, result: null };
+    else {
+      const v = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0);
+      const st = v === +r.line ? 'void' : (r.side === 'o' ? v > +r.line : v < +r.line) ? 'green' : 'red';
+      patch = { status: st, result: v, profit: st === 'green' ? Math.round(+r.stake * (+r.odd - 1) * 100) / 100 : st === 'red' ? -+r.stake : 0 };
+    }
+    patch.settled_at = new Date().toISOString();
+    Object.assign(r, patch);
+    try { await sb(`bets?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(patch) }); } catch { /* próxima vez */ }
+  }
+}
+function bancaResumo(rows: any[]) {
+  const done = rows.filter(r => r.status === 'green' || r.status === 'red');
+  const agg = (a: any[]) => { const st = a.reduce((s, r) => s + +r.stake, 0), pr = a.reduce((s, r) => s + +r.profit, 0), g = a.filter(r => r.status === 'green').length; return { n: a.length, st, pr, roi: st ? pr / st : 0, hit: a.length ? g / a.length : 0 }; };
+  const T = agg(done);
+  const avgOdd = done.length ? done.reduce((s, r) => s + +r.odd, 0) / done.length : 0;
+  const tab = (title: string, groups: [string, any[]][]) => {
+    const rowsT = groups.filter(([, a]) => a.length).map(([k, a]) => { const x = agg(a); return `${k.padEnd(16).slice(0, 16)} ${String(x.n).padStart(3)} ${(Math.round(x.hit * 100) + '%').padStart(4)} ${u2(x.pr).padStart(7)} ${pctS(x.roi).padStart(7)}`; });
+    return rowsT.length ? `\n<b>${title}</b>\n<pre>${'GRUPO'.padEnd(16)}   N  ACE   LUCRO     ROI\n${rowsT.join('\n')}</pre>` : '';
+  };
+  const by = (f: (r: any) => string) => { const m: Record<string, any[]> = {}; for (const r of done) (m[f(r)] ||= []).push(r); return Object.entries(m).sort((a, b) => b[1].length - a[1].length); };
+  return `<blockquote>✅ <b>${done.filter(r => r.status === 'green').length}</b> · ❌ <b>${done.filter(r => r.status === 'red').length}</b> · ➖ ${rows.filter(r => r.status === 'void').length} · ⏳ ${rows.filter(r => r.status === 'aberta').length} em aberto
+Apostado <b>${n1(Math.round(T.st * 100) / 100)}u</b> · Lucro <b>${u2(T.pr)}</b> · ROI <b>${pctS(T.roi)}</b>
+Acerto ${Math.round(T.hit * 1000) / 10}%${avgOdd ? ` · odd média ${n2(avgOdd)} (empata com ${Math.round(100 / avgOdd)}%)` : ''}</blockquote>`
+    + tab('Por lista', by(r => SRC[r.src] ?? r.src))
+    + tab('Por mercado', by(r => (MK[r.mk] ?? r.mk)))
+    + tab('Por lado', by(r => r.side === 'o' ? 'Mais de' : 'Menos de'))
+    + tab('Por nota', by(r => r.nota == null ? 'sem nota' : r.nota >= 70 ? 'nota 70+' : r.nota >= 60 ? 'nota 60–69' : 'nota <60'))
+    + tab('Por odd', by(r => +r.odd < 1.7 ? 'odd < 1,70' : +r.odd < 1.9 ? 'odd 1,70–1,89' : 'odd 1,90+'));
+}
+async function bancaCmd(chatId: number, rest: string[]): Promise<Out> {
+  const all = norm(rest[0] ?? '') === 'todos';
+  let rows: any[] = [];
+  try { rows = await sb(`bets?select=*&status=neq.aguardando_odd${all ? '' : `&chat_id=eq.${chatId}`}&order=created_at.desc&limit=2000`) ?? []; } catch { return { text: 'Não consegui ler a banca agora.', kb: { inline_keyboard: [HOME] } }; }
+  await settleBets(rows);
+  if (!rows.length) return { text: `<b>💼 BANCA DO MODELO BH</b>\nNenhuma entrada registrada ainda.\n\nNos tops (/toptentativas, /topra) e nas listas, toque em <b>📝</b> e informe a odd que você pegou. Cada entrada vale 1u e eu confiro sozinho depois do jogo.`, kb: { inline_keyboard: [[BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')], HOME] } };
+  const ic = (r: any) => r.status === 'green' ? '✅' : r.status === 'red' ? '❌' : r.status === 'void' ? '➖' : '⏳';
+  const last = rows.slice(0, 10).map(r => `${ic(r)} <code>#${r.id}</code> ${esc(r.name)} · ${r.side === 'o' ? 'mais' : 'menos'} ${n1(+r.line)} ${MK[r.mk] ?? r.mk} @${n2(+r.odd)}${r.result != null ? ` <i>(fez ${n1(+r.result)})</i>` : ''}${r.profit != null && r.status !== 'aberta' ? ` ${u2(+r.profit)}` : ''}`).join('\n');
+  const text = `<b>💼 ${all ? 'BANCA DE TODOS' : 'SUA BANCA'} · MODELO BH</b>\n` + bancaResumo(rows) + `\n\n<b>Últimas</b>\n${last}\n<i>Apagar uma entrada errada: <code>/apagar 12</code>. Amostra pequena engana: o ROI começa a dizer algo com 100+ entradas.</i>`;
+  return { text: text.length > 4000 ? text.slice(0, 3990) + '…' : text, kb: { inline_keyboard: [[BTN(all ? '👤 Só a minha' : '👥 De todos', all ? '/banca' : '/banca todos'), BTN('🔄 Atualizar', all ? '/banca todos' : '/banca')], [BTN('🏹 Top Tentativas', '/toptentativas'), BTN('🙌 Top Reb+Ast', '/topra'), BTN('🏠 Menu', '/menu')]] } };
+}
+async function apagarCmd(chatId: number, rest: string[]): Promise<Out> {
+  const id = parseInt((rest[0] ?? '').replace('#', ''), 10);
+  if (!Number.isFinite(id)) return { text: 'Diga o número da entrada: <code>/apagar 12</code> (veja os números em /banca).', kb: { inline_keyboard: [HOME] } };
+  const del = await sb(`bets?id=eq.${id}&chat_id=eq.${chatId}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } }).catch(() => null);
+  return { text: del?.length ? `🗑️ Entrada #${id} apagada.` : `Não achei a entrada #${id} entre as suas.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🏠 Menu', '/menu')]] } };
+}
 const hitTxt = (h?: [number, number] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 
-type Out = { text: string; kb?: unknown };
+type Out = { text: string; kb?: unknown; force?: boolean };
 const BTN = (text: string, data: string) => ({ text, callback_data: data.slice(0, 64) });
 const HOME = [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', 'r:1:/menu')];
 const home = (cmd: string, pg = 1) => [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', `r:${pg}:${cmd}`)];
@@ -360,7 +479,9 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
   if (pages > 1) nav.push(BTN(`${pg}/${pages}`, `p:${pg}:${cmd}`));
   if (pg < pages) nav.push(BTN('Próximas ▶', `p:${pg + 1}:${cmd}`));
   const pics = slice.map((r, i) => r.cd ? BTN(`🖼️ ${(pg - 1) * PAGE + i + 1}`, `i:${keyOf(r)}`) : null).filter(Boolean) as { text: string; callback_data: string }[];
-  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + (pics.length ? '\n<i>🖼️ toque no número para ver o card em imagem</i>' : '') + '\n' + FOOT, kb: { inline_keyboard: [...(pics.length ? [pics] : []), ...(nav.length ? [nav] : []), home(cmd, pg)] } };
+  const src = cmd.startsWith('/toptentativas') ? 'tent' : cmd.startsWith('/topra') ? 'ra' : 'lista';
+  const regs = slice.map((r, i) => BTN(`📝 ${(pg - 1) * PAGE + i + 1}`, `bet:${keyOf(r)}:${src}`));
+  return { text: header(d, title, note + (pages > 1 ? ` · página ${pg}/${pages}` : '')) + '\n' + body + '\n<i>📝 registrar a entrada (1u, com a sua odd)' + (pics.length ? ' · 🖼️ ver o card em imagem' : '') + '</i>\n' + FOOT, kb: { inline_keyboard: [regs, ...(pics.length ? [pics] : []), ...(nav.length ? [nav] : []), home(cmd, pg)] } };
 }
 const clampN = (s: string | undefined, def = 10) => { const x = parseInt(s ?? '', 10); return Number.isFinite(x) ? Math.max(1, Math.min(20, x)) : def; };
 
@@ -413,6 +534,8 @@ const HELP = `<b>📖 COMANDOS</b>
 /toptentativas · top 10 em tentativas e convertidos
 /topra · top 10 em rebotes + assistências
 /receber · receber os dois tops todo dia
+/banca · suas entradas registradas, lucro e ROI · /banca todos
+/apagar 12 · apaga uma entrada registrada errada
 /app · app completo
 
 <b>Como ler o cartão</b>
@@ -428,7 +551,7 @@ const MENU = { inline_keyboard: [
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
-  [BTN('🖼️ Cards do dia', '/cards')],
+  [BTN('💼 Banca e ROI', '/banca'), BTN('🖼️ Cards do dia', '/cards')],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -445,6 +568,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'ajuda' || cmd === 'help' || cmd === 'comandos') return { text: HELP, kb: MENU };
   if (cmd === 'testes') return testesCmd(chatId, rest);
   if (cmd === 'receber' || cmd === 'envio') return receberCmd(chatId, rest);
+  if (cmd === 'banca' || cmd === 'roi') return bancaCmd(chatId, rest);
+  if (cmd === 'apagar') return apagarCmd(chatId, rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
@@ -533,6 +658,33 @@ async function handle(update: any) {
     await TG('sendMessage', { chat_id: chatId, text: `Este bot é privado. Peça acesso ao dono e informe o seu ID: ${chatId}` });
     return;
   }
+  // registro de entrada: 📝 (bet:<chave>:<origem>), registrar do /modelo (bm:...), odd por botão (bo:id:odd), cancelar (bx:id)
+  const bt = /^(bet|bm|bo|bx):(.+)$/.exec(text);
+  if (bt) {
+    if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
+    let out: Out | null = null;
+    try {
+      if (bt[1] === 'bet' || bt[1] === 'bm') {
+        const d = await data();
+        let r: Row | undefined, src = 'modelo';
+        if (bt[1] === 'bet') { const i = bt[2].lastIndexOf(':'); src = bt[2].slice(i + 1); r = d.rows.find(x => keyOf(x) === bt[2].slice(0, i)); }
+        else {
+          const [pid, mk, line, side] = bt[2].split(':'); const m = d.mdl?.[pid];
+          const p = pAt(d, pid, MK2STAT[mk], +line, side);
+          if (m) r = { id: pid, n: m.n, t: m.t, o: m.o, home: m.home, h: m.h, m: mk, s: side as 'o' | 'u', l: +line, p: p ?? .5, nt: undefined } as unknown as Row;
+        }
+        out = r ? await betStart(chatId, d, r, src) : { text: 'Essa entrada saiu da lista na última atualização. Abra a lista de novo.', kb: { inline_keyboard: [HOME] } };
+      } else if (bt[1] === 'bo') { const [id, odd] = bt[2].split(':'); out = await betFinish(chatId, +id, odd); out ??= { text: 'Esse registro já foi concluído ou cancelado. Veja em /banca.', kb: { inline_keyboard: [HOME] } }; }
+      else { await sb(`bets?id=eq.${+bt[2]}&chat_id=eq.${chatId}&status=eq.aguardando_odd`, { method: 'DELETE' }); out = { text: 'Registro cancelado.', kb: { inline_keyboard: [HOME] } }; }
+    } catch (e) { out = { text: 'Não consegui registrar agora (' + esc(String((e as Error).message)) + ').', kb: { inline_keyboard: [HOME] } }; }
+    await TG('sendMessage', { chat_id: chatId, text: out!.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: out!.force ? { ...(out!.kb as object) } : out!.kb });
+    return;
+  }
+  // texto sem barra: pode ser a odd de um registro pendente
+  if (!text.startsWith('/') && !cq) {
+    const out = await betFinish(chatId, null, text).catch(() => null);
+    if (out) { await TG('sendMessage', { chat_id: chatId, text: out.text, parse_mode: 'HTML', reply_markup: out.kb }); return; }
+  }
   // card em imagem de uma entrada (botão 🖼️ das listas)
   const im = /^i:(.+)$/.exec(text);
   if (im) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCard(chatId, im[1]); return; }
@@ -572,7 +724,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
