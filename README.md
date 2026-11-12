@@ -21,6 +21,18 @@ A NBA bloqueia servidores de nuvem (o GitHub Actions inclusive), mas não a inte
 
 Com o runner instalado e aparecendo como Idle, crie a variável `COLETOR` = `computador` em Settings → Secrets and variables → Actions → Variables. Sem essa variável, a coleta roda na nuvem do GitHub, com a ESPN como fonte.
 
+## Novidades da versão 12 (bot mais fluido e ideias do Props.Cash)
+- **Teclado fixo no bot:** quatro botões embaixo (🔥 Hoje · 🧠 Modelo BH · 💼 Banca · ☰ Mais). Aparecem depois de mandar /start uma vez.
+- **Listas compactas:** 10 entradas por página em duas linhas (jogador, linha, chance, nota, L10 e odd). Tocando no número, a mesma mensagem vira a análise completa, com botões 📝 Registrar, 🖼️ Card e ‹ Anterior / Próxima ›. Os "por que sim / por que não" ficam num bloco que abre ao tocar.
+- **Registro na mesma mensagem:** a pergunta da odd e a confirmação trocam a mensagem em vez de criar novas.
+- **Resultado da manhã (/ontem):** às 11h05 (com novas tentativas às 12h05 e 13h35, se os resultados ainda não tiverem saído), quem recebe os tops ou registrou entrada recebe as entradas de ontem com lucro e ROI, a banca total e o acerto do top 10 de ontem.
+  - O top 10 enviado fica gravado na tabela `top_picks` e é conferido sozinho; o acumulado aparece na /banca.
+  - Os horários vêm do pg_cron do Supabase (`?morning=<WEBHOOK_SECRET>`).
+- **Mais histórico em cada entrada (bot e app):**
+  - L5, sequência atual e "vantagem" (projeção menos a linha, a favor do lado).
+  - Temporada passada inteira: arquivo `public/data/prev.json`, que só muda na virada de temporada; o app carrega depois do slate.
+  - "Sem o colega" agora olha as duas temporadas (até 25 jogos), com os logs antigos em `players[].px` do slate. Antes ficava limitado aos 30 jogos mais recentes.
+
 ## Novidades da versão 11 (ideias do PropFinder)
 - **Nota BH 0–100** em cada entrada, no app e no bot, ao lado da letra. Ela soma chance (30), valor/EV (20), acertos nos últimos 10, 20 e na temporada (25), confronto direto (5), defesa × posição (10) e mercado (10). Há descontos por dúvida, amostra curta, risco de lavada, odd abaixo de 1,40 e EV negativo. A nota nunca contradiz a letra: C vai no máximo a 55 e B a 74. O ranking do dia ordena pela nota e desempata pelo L10.
 - **Três acertos lado a lado:** temporada · últimos 10 · contra o adversário de hoje. A defesa aparece em texto, como "Defesa do BOS: 25ª de 30 contra armadores em pontos · favorável".
