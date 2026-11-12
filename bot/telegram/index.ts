@@ -261,6 +261,15 @@ function modelTop(d: Data, mk: string[], n = 10) {
   for (const r of rows) { if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
   return out;
 }
+// os dois tops sem jogador repetido: quem aparece nas duas listas fica só na entrada de nota maior,
+// e a outra lista completa com o próximo da fila
+function tops(d: Data, n = 10): Record<string, Row[]> {
+  const cand = Object.entries(MT).flatMap(([k, T]) => modelTop(d, T.mk, 60).map(r => ({ k, r })));
+  cand.sort((a, b) => b.r.sc - a.r.sc);
+  const out: Record<string, Row[]> = { tent: [], ra: [] }, used = new Set<string>();
+  for (const { k, r } of cand) { if (used.has(r.id) || out[k].length >= n) continue; used.add(r.id); out[k].push(r); }
+  return out;
+}
 const MT_NOTE = '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
 function compact(r: Row, i: number) {
   const over = r.s === 'o', vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
@@ -270,7 +279,7 @@ ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} 
 📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}`;
 }
 function topText(d: Data, key: string) {
-  const T = MT[key], top = modelTop(d, T.mk);
+  const T = MT[key], top = tops(d)[key];
   if (!top.length) return null;
   return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd.</i>' + FOOT;
 }
@@ -308,7 +317,7 @@ async function pushDaily(force = false, minHour = 0) {
   let sent = 0;
   for (const s of subs) for (const k of ['tent', 'ra'] as const) {
     if (!s[k] || !txt[k]) continue;
-    const regs = modelTop(d, MT[k].mk).map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
+    const regs = tops(d)[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
     const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
       reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
     if (r.ok) sent++;
@@ -443,11 +452,16 @@ async function recordTops(d: Data) {
   const tip: Record<string, number> = {}; for (const g of d.games) tip[g.id] = Date.parse(g.utc ?? '') || 0;
   const now = Date.now(), rows: Record<string, unknown>[] = [];
   // odd: a das casas que achamos (mediana das casas dos EUA pela The Odds API); sem odd real, 1,87 (preço típico de abertura de prop)
-  for (const k of ['tent', 'ra']) modelTop(d, MT[k].mk).forEach((r, i) => {
+  const T = tops(d);
+  for (const k of ['tent', 'ra']) T[k].forEach((r, i) => {
     if (tip[r.g] && tip[r.g] <= now + 5 * 6e4) return; // jogo já começou: fica a última sugestão gravada
     rows.push({ date: d.date, list: k, rank: i + 1, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat: MK2STAT[r.m], line: r.l, side: r.s, p: r.p, nota: r.nt ?? null, status: 'aberta',
       odd: r.d ?? ODD_EST, odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', tip_utc: tip[r.g] ? new Date(tip[r.g]).toISOString() : null, updated_at: new Date(now).toISOString() });
   });
+  // sem entrada repetida no dia: jogador que já tem outra entrada (outra lista ou outro mercado) fica com a primeira
+  const have: any[] = await sb(`top_picks?date=eq.${d.date}&select=pid,list,mk`).catch(() => []) ?? [];
+  const fresh = rows.filter(x => !have.some(h => h.pid === x.pid && (h.list !== x.list || h.mk !== x.mk)));
+  rows.length = 0; rows.push(...fresh);
   if (!rows.length) return 0;
   await sb('top_picks?on_conflict=date,list,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   return rows.length;
@@ -736,7 +750,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
-  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, modelTop(d, T.mk), `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', ' · linha de referência'); }
+  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', ' · linha de referência'); }
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
