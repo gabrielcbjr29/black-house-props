@@ -355,7 +355,7 @@ async function pushDaily(force = false, minHour = 0) {
   return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et?.regs.length ?? 0 };
 }
 // ---------- Entradas das estratégias (strategies.json gerado na coleta) ----------
-const ESTN: Record<string, string> = { valor99: 'Valor na 99play', 'under-tent': 'Under de tentativas', 'ra-valor': 'Reb+Ast com valor', 'pts-valor': 'Pontos com valor', 'desfalque-over': 'Over do substituto', 'defesa-over': 'Over x defesa fraca' };
+const ESTN: Record<string, string> = { valor99: 'Valor na 99play', 'under-tent': 'Under de arremessos', 'ra-valor': 'Reb+Ast com valor', 'desfalque-over': 'Over do substituto', 'defesa-over': 'Over x defesa fraca' };
 const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
 const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
 async function estToday(date: string) {
