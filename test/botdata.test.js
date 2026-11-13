@@ -62,7 +62,8 @@ test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dis
   // com colega de rotação fora (histórico real sem ele), a projeção mistura o modelo com a heurística
   const mOnly = f => f.model.mOnly ?? f.proj;
   assert.ok(fga && fga.model && Math.abs(mOnly(fga) - 17.25) < 1e-9, 'FGA usa o modelo');
-  if (fga.model.wo) assert.ok(Math.abs(fga.proj - ((1 - fga.model.wo) * 17.25 + fga.model.wo * fga.model.base)) < 1e-6 && fga.model.wo <= .5, 'mistura com o histórico sem o colega');
+  // (model.wo é o peso arredondado a 2 casas; a conta usa o peso exato, daí a tolerância proporcional)
+  if (fga.model.wo) assert.ok(Math.abs(fga.proj - ((1 - fga.model.wo) * 17.25 + fga.model.wo * fga.model.base)) <= .006 * Math.abs(fga.model.base - 17.25) + 1e-6 && fga.model.wo <= .5, 'mistura com o histórico sem o colega');
   else assert.ok(Math.abs(fga.proj - 17.25) < 1e-9);
   assert.ok(Math.abs(fga.d - (1 + 17.25 / 25)) < 1e-9, 'dispersão da binomial negativa');
   assert.ok(pra && pra.model && Math.abs(mOnly(pra) - 31) < 1e-9, 'combinado soma as estatísticas do modelo');
