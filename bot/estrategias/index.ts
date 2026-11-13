@@ -29,6 +29,12 @@ const hourBR = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { time
 // nomes completos dos mercados para as mensagens
 const MKN: Record<string, string> = { '2PA': 'Tentativas de 2', '2PM': 'De 2 convertidos', '3PA': 'Tentativas de 3', '3PM': 'De 3 convertidos', FGM: 'Arremessos convertidos', FTA: 'Lances livres tentados', FTM: 'Lances livres convertidos', RA: 'Reb + Ast' };
 const pct = (x: number) => (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';
+// últimos 10 em cores, do mais recente para o mais antigo: 🟩 bateu o lado, 🟥 não bateu, ⬜ empatou na linha
+function sqLine(vals: any, line: number, side: string) {
+  const v = (Array.isArray(vals) ? vals : []).slice(0, 10).map(Number); if (!v.length) return '';
+  let hit = 0; const dots = v.map(x => { const ok = side === 'o' ? x > line : x < line; if (ok) hit++; return x === line ? '⬜' : ok ? '🟩' : '🟥'; }).join('');
+  return `${dots} <b>${hit}/${v.length}</b>`;
+}
 // lista de entradas agrupada por jogo (é como você navega na 99play): jogo → jogador · mercado → lado, linha, odd, chance e EV
 export function fmtEntries(list: any[]) {
   const games = new Map<string, any[]>();
@@ -38,7 +44,7 @@ export function fmtEntries(list: any[]) {
   const blocks = order.map(([k, xs]) => `🏀 <b>${esc(k)}</b>${xs[0].tip_utc ? ' · ' + hourBR(xs[0].tip_utc) : ''}\n<blockquote>` + xs.map(x => {
     i++; regs.push({ text: `📝 ${i}`, callback_data: `bet:${x.pid}-${x.mk}-${x.side}:e.${x.strategy_id}`.slice(0, 64) });
     const ev = x.edge == null ? '' : ` · EV <b>${pct(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}`;
-    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${Math.round(+x.p * 100)}%${ev}`;
+    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${Math.round(+x.p * 100)}%${ev}${x.sq?.length ? '\n' + sqLine(x.sq, +x.line, x.side) : ''}`;
   }).join('\n') + '</blockquote>');
   return { blocks, regs, n: i };
 }
@@ -47,7 +53,7 @@ async function alert(fresh: any[], evMin: number) {
   const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
   if (!subs.length) return 0;
   const { blocks, regs, n } = fmtEntries(fresh);
-  let text = `🚨 <b>${n > 1 ? 'NOVAS ENTRADAS' : 'NOVA ENTRADA'} · MODELO BH</b>\n<i>Linha e odd da 99play agora · EV mínimo ${Math.round(evMin * 100)}% · 1u cada</i>\n\n${blocks.join('\n\n')}\n\n📝 <i>Toque no número para registrar a sua aposta. Quanto antes, melhor: a linha costuma andar até o jogo.</i>\n<i>🔞 18+ · Aposte com responsabilidade.</i>`;
+  let text = `🚨 <b>${n > 1 ? 'NOVAS ENTRADAS' : 'NOVA ENTRADA'} · MODELO BH</b>\n<i>Linha e odd da 99play agora · EV mínimo ${Math.round(evMin * 100)}% · 1u cada</i>\n\n${blocks.join('\n\n')}\n\n🟩 bateu · 🟥 não bateu nos últimos 10 (mais recente primeiro)\n📝 <i>Toque no número para registrar a sua aposta. Quanto antes, melhor: a linha costuma andar até o jogo.</i>\n<i>🔞 18+ · Aposte com responsabilidade.</i>`;
   if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '</blockquote>…';
   const kb = { inline_keyboard: [...Array.from({ length: Math.ceil(regs.length / 5) }, (_, k) => regs.slice(k * 5, k * 5 + 5)), [{ text: '🧪 Placar', callback_data: '/estrategias' }, { text: '💼 Banca', callback_data: '/banca' }]] };
   let sent = 0;

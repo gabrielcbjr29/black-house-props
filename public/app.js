@@ -1033,9 +1033,11 @@ async function syncNow(quiet) {
 const queueSync = () => { if (!CFG.ghToken) return; clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(true), 2500); };
 
 /* ---------------- FICHA DO JOGADOR ---------------- */
-function chartSVG(pr, side, line) {
-  const logs = pr.ctx.logs.slice(0, 20).reverse(), v = pr.vals.slice(0, 20).reverse();
+function chartSVG(pr, side, line, idx) {
+  idx = (idx || pr.vals.map((_, i) => i).slice(0, 20)).slice().reverse();
+  const logs = idx.map(i => pr.ctx.logs[i]), v = idx.map(i => pr.vals[i]);
   const W = 700, H = 250, pl = 30, prr = 66, pt = 22, pb = 44, n = v.length, bw = (W - pl - prr) / Math.max(n, 1);
+  if (!n) return `<div class="chart-empty">Nenhum jogo com esses filtros.</div>`;
   const muF = EVAL[pr.id].muF;
   const mx = Math.max(...v, line, muF) * 1.15 || 1;
   const y = x => pt + (H - pt - pb) * (1 - x / mx);
@@ -1058,6 +1060,41 @@ function chartSVG(pr, side, line) {
   s += `<line class="pline" x1="${pl}" x2="${W - prr + 4}" y1="${yp}" y2="${yp}"/><text class="plab" x="${W - prr + 8}" y="${tp}">Proj. ${fmt(muF)}</text>`;
   s += `<text class="axis" x="${pl}" y="${H - 3}">adversário, minutos</text>`;
   return s + '</svg>';
+}
+/* laboratório da linha (ficha do jogador): mude a linha com − e +, escolha o recorte (L5, L10, L20, temporada,
+   H2H, todos) e filtre o contexto (casa, fora, sem o colega, titular, 28+ min). O acerto e a média recalculam na hora. */
+let CH = null;
+const CH_N = [['L5', 'L5'], ['L10', 'L10'], ['L20', 'L20'], ['TEMP', 'Temporada'], ['H2H', 'H2H'], ['ALL', 'Todos']];
+function chState(pr, line) { if (!CH || CH.id !== pr.id) CH = { id: pr.id, line, n: 'L10', f: [] }; return CH; }
+function chIdx(pr, st) {
+  const lg = pr.ctx.logs, wo = pr.ctx.wo?.set, f = st.f;
+  let idx = pr.vals.map((_, i) => i).filter(i => {
+    const g = lg[i]; if (!g) return false;
+    if (f.includes('casa') && g[L.home] !== 1) return false;
+    if (f.includes('fora') && g[L.home] !== 0) return false;
+    if (f.includes('sem') && !(wo && wo.has(String(g[L.gid])))) return false;
+    if (f.includes('tit') && g[L.starter] !== 1) return false;
+    if (f.includes('min') && !(g[L.min] >= 28)) return false;
+    if (st.n === 'TEMP' && g[L.cur] !== 1) return false;
+    if (st.n === 'H2H' && g[L.opp] !== pr.opp) return false;
+    return true;
+  });
+  const cap = { L5: 5, L10: 10, L20: 20 }[st.n] ?? 30;
+  return idx.slice(0, cap);
+}
+function chartBox(pr, side) {
+  const e = EVAL[pr.id], st = chState(pr, e.line), idx = chIdx(pr, st), v = idx.map(i => pr.vals[i]);
+  const h = v.filter(x => side === 'over' ? x > st.line : x < st.line).length, rate = v.length ? h / v.length : null;
+  const c = pr.ctx, fch = (k, lb) => `<button class="chip" data-chf="${k}" aria-pressed="${st.f.includes(k)}">${lb}</button>`;
+  return `<div class="chhead">
+      <div class="chstat"><small>Acerto ${sideLb(side).toLowerCase()}</small><b class="${rate == null ? '' : rate >= .7 ? 'pos' : rate < .5 ? 'neg' : ''}">${rate == null ? '—' : Math.round(rate * 100) + '%'}</b><span class="kpisub">${h}/${v.length} jogos</span></div>
+      <div class="chstat"><small>Média</small><b>${v.length ? fmt(mean(v)) : '—'}</b><span class="kpisub">projeção ${fmt(e.muF)}</span></div>
+      <div class="chline"><small>Linha</small><div class="stepper"><button data-chl="-1" aria-label="Diminuir a linha">−</button><b>${fmt(st.line)}</b><button data-chl="1" aria-label="Aumentar a linha">+</button></div>${st.line !== e.line ? `<button class="link sm" data-chl="0">voltar a ${fmt(e.line)}</button>` : '<span class="kpisub">linha do dia</span>'}</div>
+    </div>
+    <div class="chips chrow">${CH_N.map(([k, lb]) => `<button class="chip" data-chn="${k}" aria-pressed="${st.n === k}">${lb}</button>`).join('')}</div>
+    <div class="chips chrow">${fch('casa', 'Em casa')}${fch('fora', 'Fora')}${c.wo ? fch('sem', 'Sem ' + esc(lastName(c.wo.q.name))) : ''}${fch('tit', 'Titular')}${fch('min', '28+ min')}</div>
+    ${chartSVG(pr, side, st.line, idx)}
+    <p class="muted" style="font-size:12.5px;margin:6px 0 0">Verde bateu “${sideLb(side).toLowerCase()}” na linha ${fmt(st.line)}, vermelho não. Adversário de hoje em destaque.${c.wo ? ` Barras com contorno: jogos sem ${esc(c.wo.q.name)}.` : ''} Mudar a linha aqui só mexe no gráfico; para recalcular chance e EV, use “Linha da sua casa”.</p>`;
 }
 function splitRow(lb, arr, line, side) { if (!arr.length) return `<tr><td>${lb}</td><td class="r num muted">—</td><td class="r num muted">—</td><td class="r num muted">0</td></tr>`; const h = arr.filter(v => side === 'over' ? v > line : v < line).length; return `<tr><td>${lb}</td><td class="r num">${fmt(mean(arr))}</td><td class="r">${hc([h, arr.length])}</td><td class="r num muted">${arr.length}</td></tr>`; }
 function valueBox(pr, e, s) {
@@ -1106,6 +1143,7 @@ function renderDrawer(focusEditor) {
     <div class="bigkpis"><div><small>Nota${help('nota')}</small><b>${gradeChip(s.grade)} ${notaChip({ pr, e, s })}</b></div><div><small>Chance${help('chance')}</small><b>${pct(s.p)}</b></div><div><small>${pr.model ? 'Modelo BH' : 'Projeção'}${help('proj')}</small><b>${fmt(e.muF)}</b><span class="kpisub">faixa ${rangeOf(pr).join('–')}, ${pr.ctx.logs.length} jogos</span></div><div><small>Stake${help('stake')}</small><b>${s.odd ? (stakeU(s) ? uFmt(stakeU(s)) : '0u') : '—'}</b></div></div>
     ${alerts(pr, D.side).length ? `<div class="chips">${alerts(pr, D.side).map(([t, c2]) => `<span class="tag ${c2}">${esc(t)}</span>`).join('')}</div>` : ''}
     <div class="edbtns" style="margin:0"><button class="btn primary" data-tip="${pr.id}" data-side="${D.side}">Registrar tip</button><button class="btn" data-postone="${pr.id}" data-side="${D.side}">Gerar post</button><button class="btn" data-add="${pr.id}" data-side="${D.side}" aria-pressed="${on}">${on ? 'No bilhete' : '+ Múltipla'}</button></div>
+    <div class="dbox chart"><h3>Jogos × linha</h3><div id="chBox">${chartBox(pr, D.side)}</div></div>
     ${whyBox(pr, e, s)}
     <div class="dbox"><h3>Linha da sua casa</h3>
       <div class="edrow"><label>Linha<input id="edLine" inputmode="decimal" value="${ov.line ?? ''}" placeholder="${fmt(pr.line)}"></label><label>Odd mais de<input id="edO" inputmode="decimal" value="${ov.oOver ?? ''}" placeholder="ex. 1,85"></label><label>Odd menos de<input id="edU" inputmode="decimal" value="${ov.oUnder ?? ''}" placeholder="ex. 1,95"></label></div>
@@ -1115,7 +1153,6 @@ function renderDrawer(focusEditor) {
     ${valueBox(pr, e, s)}
     ${ladderBox(pr)}
     <div class="dbox" id="aiBox" hidden><h3>Analista IA</h3><p class="muted" style="margin:0;font-size:13.5px">O Claude lê os números desta linha e escreve uma análise curta com prós, contras e veredito.</p><div class="edbtns"><button class="btn" data-ai>Pedir análise ao Claude</button></div><div class="ai" id="aiOut"></div></div>
-    <div class="dbox chart"><h3>Últimos ${Math.min(20, v.length)} jogos × linha</h3>${chartSVG(pr, D.side, line)}<p class="muted" style="font-size:12.5px;margin:6px 0 0">Verde bateu “${sideLb(D.side).toLowerCase()}”, vermelho não. Adversário de hoje em laranja.${c.wo ? ` Barras com contorno: jogos sem ${esc(c.wo.q.name)}.` : ''}</p></div>
     <div class="dbox"><h3>Recortes</h3><div class="tablewrap" style="border:0"><table class="splits"><thead><tr><th>Recorte</th><th class="r">Média</th><th class="r">Acerto</th><th class="r">Jogos</th></tr></thead><tbody>
       ${splitRow('Últimos 5', v.slice(0, 5), line, D.side)}${splitRow('Últimos 10', v.slice(0, 10), line, D.side)}${splitRow('Últimos 20', v.slice(0, 20), line, D.side)}
       ${c.wo ? splitRow(`<b>Sem ${esc(c.wo.q.name)}</b><span class="muted"> (até 2 temporadas)</span>`, pr.woVals || pick(g => c.wo.set.has(String(g[L.gid]))), line, D.side) + splitRow(`Com ${esc(c.wo.q.name)}`, pick(g => !c.wo.set.has(String(g[L.gid]))).slice(0, 20), line, D.side) : ''}
@@ -1226,9 +1263,17 @@ function bind() {
   $('#autoBtn').addEventListener('click', () => { const tg = num($('#autoOdd').value); if ($('#autoOdd').value.trim() && !(tg > 1.1)) return toast('Odd-alvo inválida (ex. 3,00)'); autoBuild(autoN, tg > 1.1 ? tg : null); });
   $('#dvpStat').addEventListener('click', e => { const b = e.target.closest('[data-dvp]'); if (b) { dvpStat = b.dataset.dvp; renderDvP(); } });
   document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-open],[data-edit],[data-add],[data-remove],[data-swap],[data-close],[data-mk],[data-dside],[data-game],[data-reset],[data-edsave],[data-edreset],[data-ai],#clearSlip,[data-tip],[data-tsave],[data-mclose],[data-tslip],[data-tipslip],[data-postslip],[data-postone],[data-daycard],[data-pcopy],[data-pdown],[data-pshare],[data-pai],#pFmt button,[data-iprev],[data-iapply],[data-tdel],[data-tpost],[data-postopen],[data-csv],[data-backup],#bFrom button,#bKind button,[data-help],[data-obclose],[data-sync],[data-goto],[data-preset-go],[data-chg],[data-seen],#searchBtn,#searchPill,[data-gameall],[data-results]'); if (!t) { if (!e.target.closest('#pop')) $('#pop').hidden = true; return; }
+    const t = e.target.closest('[data-chl],[data-chn],[data-chf],[data-open],[data-edit],[data-add],[data-remove],[data-swap],[data-close],[data-mk],[data-dside],[data-game],[data-reset],[data-edsave],[data-edreset],[data-ai],#clearSlip,[data-tip],[data-tsave],[data-mclose],[data-tslip],[data-tipslip],[data-postslip],[data-postone],[data-daycard],[data-pcopy],[data-pdown],[data-pshare],[data-pai],#pFmt button,[data-iprev],[data-iapply],[data-tdel],[data-tpost],[data-postopen],[data-csv],[data-backup],#bFrom button,#bKind button,[data-help],[data-obclose],[data-sync],[data-goto],[data-preset-go],[data-chg],[data-seen],#searchBtn,#searchPill,[data-gameall],[data-results]'); if (!t) { if (!e.target.closest('#pop')) $('#pop').hidden = true; return; }
     if (t.dataset.help) { e.preventDefault(); e.stopPropagation(); showHelp(t); return; }
     $('#pop').hidden = true;
+    if (t.dataset.chl != null || t.dataset.chn || t.dataset.chf) {
+      if (!D || !CH) return;
+      if (t.dataset.chl != null) { const d = +t.dataset.chl; CH.line = d ? Math.max(.5, CH.line + d) : EVAL[D.id].line; }
+      else if (t.dataset.chn) CH.n = t.dataset.chn;
+      else { const k = t.dataset.chf, f = CH.f.filter(x => x !== k && !(k === 'casa' && x === 'fora') && !(k === 'fora' && x === 'casa')); CH.f = CH.f.includes(k) ? f : [...f, k]; }
+      const box = $('#chBox'); if (box) box.innerHTML = chartBox(BYID[D.id], D.side);
+      return;
+    }
     if (t.dataset.open) { if (!$('#modal').hidden) closeModal(); openDrawer(t.dataset.open, t.dataset.side); }
     else if (t.dataset.edit) openDrawer(t.dataset.edit, t.dataset.side, true);
     else if (t.dataset.add) toggleSlip(t.dataset.add, t.dataset.side);

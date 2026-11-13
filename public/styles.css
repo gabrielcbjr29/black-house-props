@@ -387,7 +387,7 @@ pre.cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .axis { fill: var(--muted); font-family: var(--f); font-size: 10.5px; }
 .chart .vlab { fill: var(--ink); font-family: var(--f); font-size: 10.5px; font-weight: 700; }
-.chart .bh { fill: var(--green); } .chart .bm { fill: var(--line-2); }
+.chart .bh { fill: var(--green); } .chart .bm { fill: color-mix(in srgb, var(--bad) 70%, var(--surface)); }
 .chart rect.wo { stroke: var(--ink); stroke-width: 2; }
 .chart .lline { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .chart .pline { stroke: var(--green); stroke-width: 2; stroke-dasharray: 2 3; }
@@ -976,3 +976,18 @@ ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
 .why3 b { font-family: var(--fd); font-size: 20px; font-variant-numeric: tabular-nums; }
 .why3 .kpisub { font-size: 11.5px; color: var(--muted); }
 @media (max-width: 560px) { .whycols { grid-template-columns: 1fr; } }
+
+/* laboratório da linha (ficha do jogador) */
+.chhead { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 10px; }
+.chstat small, .chline small { display: block; font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.chstat b { font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.chstat b.pos { color: var(--green); } .chstat b.neg { color: var(--bad); }
+.chline { text-align: right; }
+.stepper { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line-2); border-radius: 999px; padding: 2px; background: var(--surface-2); margin: 2px 0; }
+.stepper button { width: 34px; height: 34px; border-radius: 999px; border: 0; background: transparent; color: var(--ink); font-size: 20px; font-weight: 700; cursor: pointer; }
+.stepper button:hover { background: var(--line); }
+.stepper b { min-width: 52px; text-align: center; font-size: 18px; font-variant-numeric: tabular-nums; }
+.link.sm { font-size: 12px; display: block; margin-left: auto; }
+.chrow { margin: 0 0 8px; gap: 6px; flex-wrap: wrap; }
+.chart-empty { padding: 28px 8px; text-align: center; color: var(--muted); font-size: 13.5px; }
+@media (max-width: 520px) { .chhead { grid-template-columns: 1fr 1fr; } .chline { grid-column: 1 / -1; text-align: left; display: flex; align-items: center; gap: 10px; } .chline small { display: none; } .link.sm { margin-left: 0; } }

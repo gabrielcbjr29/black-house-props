@@ -48,7 +48,7 @@ export function pickStrategies(bot, games = []) {
       const key = r.id + '|' + r.m; if (seen.has(key)) continue; seen.add(key);
       out.push({ strategy_id: S.id, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, side: r.s, line: r.l, odd: r.d ?? null,
         odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', p: r.p, edge: edgeOf(r) == null ? null : Math.round(edgeOf(r) * 1e4) / 1e4,
-        nota: r.nt ?? null, tip_utc: tip[r.g] || null });
+        nota: r.nt ?? null, tip_utc: tip[r.g] || null, sq: r.sq?.length ? r.sq.slice(0, 10) : null });
       if (++k >= S.max) break;
     }
   }

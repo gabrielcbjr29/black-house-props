@@ -272,17 +272,25 @@ const MT_NOTE = (d: Data) => d.rows.some(r => r.c9)
   : '\n<i>📏 Só jogadores de rotação (24+ min). Linha de referência = mediana dos últimos 15 jogos (estilo casa). Confira a linha da sua casa: se for diferente, use /modelo para ver a chance nela.</i>';
 // sequência dos últimos 10 (mais recente primeiro) e texto pronto para os inscritos
 const seq = (r: Row) => r.sq?.length ? r.sq.join('-') : '';
+// últimos 10 em cores, do mais recente para o mais antigo: 🟩 bateu o lado, 🟥 não bateu, ⬜ empatou na linha
+function sqDots(vals: number[] | null | undefined, line: number, side: string, n = 10) {
+  const v = (vals ?? []).slice(0, n).map(Number); if (!v.length) return { dots: '', hit: 0, n: 0 };
+  let hit = 0; const dots = v.map(x => { const ok = side === 'o' ? x > line : x < line; if (ok) hit++; return x === line ? '⬜' : ok ? '🟩' : '🟥'; }).join('');
+  return { dots, hit, n: v.length };
+}
+const sqLine = (vals: number[] | null | undefined, line: number, side: string) => { const q = sqDots(vals, line, side); return q.n ? `${q.dots} <b>${q.hit}/${q.n}</b>` : ''; };
 const vsTxt = (r: Row) => r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
 function shareText(r: Row, i?: number) {
   const head = i != null ? `${i}. ${r.n} (${vsTxt(r)} · ${r.h})` : `🏀 ${r.n} (${vsTxt(r)} · ${r.h})`;
-  return [head, `${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(r.l)} ${MK[r.m] ?? r.m}`, `📊 Últimos 10: ${r.l10 ? `${r.l10[0]}/${r.l10[1]}` : '–'}`, ...(seq(r) ? [`🔢 Sequência: ${seq(r)}`] : [])].join('\n');
+  const q = sqDots(r.sq, r.l, r.s);
+  return [head, `${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(r.l)} ${MK[r.m] ?? r.m}`, q.n ? `📊 Últimos ${q.n}: ${q.dots} ${q.hit}/${q.n}` : `📊 Últimos 10: ${r.l10 ? `${r.l10[0]}/${r.l10[1]}` : '–'}`, ...(seq(r) ? [`🔢 Sequência: ${seq(r)}`] : [])].join('\n');
 }
 // lista inteira para copiar (um bloco: tocar no bloco copia tudo)
 function shareList(d: Data, key: string) {
   const T = MT[key], top = tops(d)[key];
   if (!top.length) return 'Nenhuma entrada no top agora.';
   const body = top.map((r, i) => shareText(r, i + 1)).join('\n\n');
-  return `📋 <b>Texto para os inscritos</b> <i>(toque no bloco para copiar)</i>\n<pre>${esc(`${T.ic} TOP 10 MODELO BH · ${T.title}\n${dateBR(d.date)}\n\n${body}\n\n🔢 Sequência = últimos 10 jogos, do mais recente para o mais antigo.\n🔞 18+ · Aposte com responsabilidade.`)}</pre>`;
+  return `📋 <b>Texto para os inscritos</b> <i>(toque no bloco para copiar)</i>\n<pre>${esc(`${T.ic} TOP 10 MODELO BH · ${T.title}\n${dateBR(d.date)}\n\n${body}\n\n🟩 bateu · 🟥 não bateu · 🔢 sequência dos últimos 10 jogos, do mais recente para o mais antigo.\n🔞 18+ · Aposte com responsabilidade.`)}</pre>`;
 }
 // de onde vem a linha: 🏠 99play (e a referência embaixo, para comparar) ou 📏 só referência
 const lineSrc = (r: Row) => r.c9 ? `🏠 99play @${r.d ? n2(r.d) : '–'}${r.rf != null ? ` · 📏 Ref. ${n1(r.rf)}${r.rf !== r.l ? ` (99play ${r.l > r.rf ? '+' : '−'}${n1(Math.abs(r.l - r.rf))})` : ''}` : ''}` : `📏 Linha de referência${r.d ? ` · @${n2(r.d)} ${esc(r.b ?? '')}` : ' · sem odd de casa'}`;
@@ -291,7 +299,7 @@ function compact(r: Row, i: number) {
   const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
   return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
 ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
-${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n🔢 ${seq(r)}` : ''}${duvida(r)}`;
+${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n<i>🔢 ${seq(r)}</i>` : ''}${duvida(r)}`;
 }
 // colega importante em dúvida: como ele foi nos jogos sem esse colega (se o colega cair, o cenário muda)
 const duvida = (r: Row) => r.wo && !r.wo.x ? `\n🟡 ${esc(r.wo.q)} em dúvida · sem ele: ${r.wo.h[0]}/${r.wo.h[1]} ${r.s === 'o' ? 'acima' : 'abaixo'}, média ${n1(r.wo.a)}` : '';
@@ -367,7 +375,7 @@ const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
 // entradas já gravadas do dia (linha e odd do alerta), só de jogos que ainda não começaram, no formato do strategies.json
 async function estEntries(date: string) {
   const [picks, strategies] = await Promise.all([
-    sb(`strategy_picks?date=eq.${date}&status=eq.aberta&alerted=eq.true&select=strategy_id,pid,name,team,opp,mk,side,line,odd,open_line,open_odd,p,edge,tip_utc&order=edge.desc.nullslast`).catch(() => []),
+    sb(`strategy_picks?date=eq.${date}&status=eq.aberta&alerted=eq.true&select=strategy_id,pid,name,team,opp,mk,side,line,odd,open_line,open_odd,p,edge,tip_utc,sq&order=edge.desc.nullslast`).catch(() => []),
     sb('strategies?select=id,name&order=id').catch(() => [])]);
   if (!picks?.length) return null;
   return { date, strategies, picks: picks.map((x: any) => ({ ...x, line: x.open_line ?? x.line, odd: x.open_odd ?? x.odd })) };
@@ -390,7 +398,7 @@ function estText(d: Data, st: any): { text: string; regs: { text: string; callba
   const regs: { text: string; callback_data: string }[] = []; let i = 0;
   const blocks = order.map(([k, xs]) => `🏀 <b>${esc(k)}</b>${xs[0].tip_utc ? ' · ' + hourBR(xs[0].tip_utc) : ''}\n<blockquote>` + xs.map((x: any) => {
     i++; regs.push(BTN(`📝 ${i}`, `bet:${estKey(x)}:e.${x.strategy_id}`));
-    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}`;
+    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}${x.sq?.length ? '\n' + sqLine(x.sq, +x.line, x.side) : ''}`;
   }).join('\n') + '</blockquote>');
   let text = `🧪 <b>RESUMO DO DIA · MODELO BH</b>\n<i>${dateBR(d.date)} · ${i} entrada${i > 1 ? 's' : ''} em aberto · linha e odd do alerta</i>\n\n${blocks.join('\n\n')}\n\n📝 <i>Toque no número e mande a odd que você pegou (ex.: <code>1,85</code> ou <code>1,85 0,5u</code>).</i>` + FOOT;
   if (text.length > 4090) text = text.slice(0, 3990).replace(/<[^>]*$/, '') + '</blockquote>…';
@@ -706,7 +714,7 @@ function card(r: Row, i: number) {
   // histórico em janelas (estilo hit rate): recente, temporada, temporada passada e confronto
   const hits = `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}
 📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${r.o} ${hitTxt(r.hh)}
-${seq(r) ? `🔢 Sequência: <code>${seq(r)}</code>\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
+${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
@@ -735,7 +743,7 @@ function listCard(r: Row, i: number) {
   const ev = r.e == null ? '' : ` · EV <b>${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%</b>`;
   const nota = r.nt != null ? ` · Nota <b>${r.nt}</b>` : '';
   // três acertos lado a lado: últimos 10 · temporada · contra o adversário
-  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${seq(r) ? `\n🔢 Seq.: ${seq(r)}` : ''}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
+  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)} · <i>${seq(r)}</i>` : ''}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
