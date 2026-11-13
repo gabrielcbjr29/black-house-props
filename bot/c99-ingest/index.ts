@@ -26,8 +26,7 @@ Deno.serve(async (req: Request) => {
     if (!Array.isArray(p?.events) || typeof p?.details !== 'object') return json({ ok: false, erro: 'formato' }, 400);
     const nm = Object.values(p.details as Record<string, any>).reduce((a: number, d: any) => a + (d?.childMarkets?.length || 0), 0);
     await sb('c99_snapshots', { method: 'POST', body: JSON.stringify({ n_events: p.events.length, n_markets: nm, payload: p }) });
-    // guarda só as últimas 3 dias de fotos
-    await sb(`c99_snapshots?taken_at=lt.${new Date(Date.now() - 3 * 864e5).toISOString()}`, { method: 'DELETE' }).catch(() => null);
+    // guarda todas as fotos: são o histórico de linhas reais da 99play para testar estratégias (backtest e CLV)
     return json({ ok: true, jogos: p.events.length, mercados: nm });
   } catch (e) { return json({ ok: false, erro: String((e as Error).message) }, 500); }
 });
