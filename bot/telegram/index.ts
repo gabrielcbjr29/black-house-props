@@ -367,7 +367,7 @@ const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
 // entradas já gravadas do dia (linha e odd do alerta), só de jogos que ainda não começaram, no formato do strategies.json
 async function estEntries(date: string) {
   const [picks, strategies] = await Promise.all([
-    sb(`strategy_picks?date=eq.${date}&status=eq.aberta&select=strategy_id,pid,name,team,opp,mk,side,line,odd,open_line,open_odd,p,edge,tip_utc&order=first_at.asc`).catch(() => []),
+    sb(`strategy_picks?date=eq.${date}&status=eq.aberta&alerted=eq.true&select=strategy_id,pid,name,team,opp,mk,side,line,odd,open_line,open_odd,p,edge,tip_utc&order=edge.desc.nullslast`).catch(() => []),
     sb('strategies?select=id,name&order=id').catch(() => [])]);
   if (!picks?.length) return null;
   return { date, strategies, picks: picks.map((x: any) => ({ ...x, line: x.open_line ?? x.line, odd: x.open_odd ?? x.odd })) };
@@ -377,26 +377,24 @@ async function estToday(date: string) {
   return st?.date === date ? st : null;
 }
 // mensagem do envio diário: entradas de hoje de cada estratégia (só jogos que ainda não começaram), numeradas, com 📝
+// nomes completos dos mercados para as mensagens do modelo por mercado
+const MKN: Record<string, string> = { '2PA': 'Tentativas de 2', '2PM': 'De 2 convertidos', '3PA': 'Tentativas de 3', '3PM': 'De 3 convertidos', FGM: 'Arremessos convertidos', FTA: 'Lances livres tentados', FTM: 'Lances livres convertidos', RA: 'Reb + Ast' };
+// resumo do dia: as entradas ALERTADAS ainda em aberto, agrupadas por jogo (como se navega na 99play)
 function estText(d: Data, st: any): { text: string; regs: { text: string; callback_data: string }[] } | null {
   const now = Date.now();
   const picks = (st?.picks ?? []).filter((p: any) => !p.tip_utc || Date.parse(p.tip_utc) > now);
   if (!picks.length) return null;
-  const build = (full: boolean, max = 99) => {
-    let i = 0; const regs: { text: string; callback_data: string }[] = [], blocks: string[] = [];
-    for (const S of st.strategies) {
-      const a = picks.filter((p: any) => p.strategy_id === S.id).slice(0, max); if (!a.length) continue;
-      blocks.push(`<b>🧪 ${esc(S.name)}</b>\n` + a.map((p: any) => {
-        i++; regs.push(BTN(`📝${i}`, `bet:${estKey(p)}:e.${S.id}`));
-        return `${i}. <b>${esc(p.name)}</b> ${p.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+p.line)} ${MKS[p.mk] ?? p.mk} · ${p.odd ? '@' + n2(+p.odd) : 'sem odd'} · ${pc(+p.p)}${p.edge != null ? ' · EV ' + evS(p.edge) : ''}${full ? `\n    <i>${esc(p.team)} x ${esc(p.opp)}${p.tip_utc ? ' · ' + hourBR(p.tip_utc) : ''}</i>` : ''}`;
-      }).join('\n'));
-    }
-    const text = `<b>🧪 MODELO POR MERCADO · ENTRADAS DO DIA</b>\n<i>${dateBR(d.date)} · ${i} entradas em aberto · linha e odd da 99play no momento do alerta</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 Toque no número e mande a odd que você pegou (ex.: <code>1,85</code>; para meia unidade, <code>1,85 0,5u</code>). O ROI de cada estratégia aparece em /banca. Ainda é teste: use entrada pequena até o mercado ter 50+ entradas com ROI e CLV positivos.</i>` + FOOT;
-    return { text, regs };
-  };
-  let out = build(true);
-  if (out.text.length > 4090) out = build(false);
-  if (out.text.length > 4090) out = build(false, 3);
-  return out;
+  const games = new Map<string, any[]>();
+  for (const x of picks) { const k = [x.team, x.opp].sort().join(' x '); (games.get(k) ?? games.set(k, []).get(k)!).push(x); }
+  const order = [...games.entries()].sort((a, b) => String(a[1][0].tip_utc ?? '').localeCompare(String(b[1][0].tip_utc ?? '')));
+  const regs: { text: string; callback_data: string }[] = []; let i = 0;
+  const blocks = order.map(([k, xs]) => `🏀 <b>${esc(k)}</b>${xs[0].tip_utc ? ' · ' + hourBR(xs[0].tip_utc) : ''}\n<blockquote>` + xs.map((x: any) => {
+    i++; regs.push(BTN(`📝 ${i}`, `bet:${estKey(x)}:e.${x.strategy_id}`));
+    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}`;
+  }).join('\n') + '</blockquote>');
+  let text = `🧪 <b>RESUMO DO DIA · MODELO BH</b>\n<i>${dateBR(d.date)} · ${i} entrada${i > 1 ? 's' : ''} em aberto · linha e odd do alerta</i>\n\n${blocks.join('\n\n')}\n\n📝 <i>Toque no número e mande a odd que você pegou (ex.: <code>1,85</code> ou <code>1,85 0,5u</code>).</i>` + FOOT;
+  if (text.length > 4090) text = text.slice(0, 3990).replace(/<[^>]*$/, '') + '</blockquote>…';
+  return { text, regs };
 }
 // ---------- Registro de entradas (1u, odd real) e ROI ----------
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
@@ -625,7 +623,7 @@ async function settleStrats(rows: any[], res: any) {
   }
 }
 async function estGabarito(y: string, res: any) {
-  const rows: any[] = await sb(`strategy_picks?date=eq.${y}&select=id,date,strategy_id,pid,name,mk,stat,side,line,odd,open_line,open_odd,odd_src,status,result,profit,clv_line&order=first_at.asc`).catch(() => []) ?? [];
+  const rows: any[] = await sb(`strategy_picks?date=eq.${y}&select=id,date,strategy_id,pid,name,mk,stat,side,line,odd,open_line,open_odd,odd_src,status,result,profit,clv_line,alerted&order=first_at.asc`).catch(() => []) ?? [];
   if (!rows.length) return null;
   await settleStrats(rows, res);
   const stats: any[] = await sb('strategy_stats?select=*').catch(() => []) ?? [];
@@ -635,11 +633,11 @@ async function estGabarito(y: string, res: any) {
     for (const S of stats) {
       const a = rows.filter(x => x.strategy_id === S.id); if (!a.length) continue;
       const h = hitOf(a);
-      const lines = a.map(x => `${ic(x)} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || ODD_EST)}${x.result != null ? ` <i>(fez ${n1(+x.result)})</i>` : ''}${x.clv_line != null && +x.clv_line !== 0 ? ` · fechou ${n1(+x.line)} (CLV ${+x.clv_line > 0 ? '+' : ''}${n1(+x.clv_line)})` : ''}`).join('\n');
+      const lines = a.map(x => `${ic(x)} ${x.alerted ? "📬 " : ""}${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || ODD_EST)}${x.result != null ? ` <i>(fez ${n1(+x.result)})</i>` : ''}${x.clv_line != null && +x.clv_line !== 0 ? ` · fechou ${n1(+x.line)} (CLV ${+x.clv_line > 0 ? '+' : ''}${n1(+x.clv_line)})` : ''}`).join('\n');
       blocks.push(`<b>🧪 ${esc(S.name)}</b>: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''} · <b>${u2(h.pr)}</b>${det ? `\n<blockquote>${lines}</blockquote>` : ''}\n<i>Acumulado: ${S.n} entradas · ${u2(+S.lucro || 0)} · ROI ${S.roi == null ? '–' : pctS(+S.roi)}</i>`);
     }
-    const T = hitOf(rows);
-    return `🧪 <b>GABARITO DO MODELO POR MERCADO · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play do alerta</i>\n\n${blocks.join('\n\n')}\n\n📊 <b>Dia: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}</b>\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
+    const T = hitOf(rows), A = hitOf(rows.filter(x => x.alerted));
+    return `🧪 <b>GABARITO DO MODELO POR MERCADO · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play do alerta</i>\n\n${blocks.join('\n\n')}\n\n📬 <b>Alertadas (EV mínimo): ${A.g}/${A.n} · ${u2(A.pr)} · ROI ${pctS(A.roi)}</b>\n📊 Todas do papel: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
   };
   const text = build(true);
   return text.length <= 4090 ? text : build(false);

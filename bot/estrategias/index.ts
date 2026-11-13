@@ -26,20 +26,29 @@ const n1 = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1)).repla
 const n2 = (x: number) => x.toFixed(2).replace('.', ',');
 const MKS: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assist.', '3PM': 'de 3 conv.', PRA: 'PRA', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'arr. conv.', FGA: 'arr. tentados', '2PM': 'de 2 conv.', '2PA': 'de 2 tentados', '3PA': 'de 3 tentadas', FTM: 'LL conv.', FTA: 'LL tentados', STL: 'roubos', BLK: 'tocos', SB: 'roub+tocos', TOV: 'erros', PF: 'faltas' };
 const hourBR = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-async function alert(fresh: any[], names: Record<string, string>) {
+// nomes completos dos mercados para as mensagens
+const MKN: Record<string, string> = { '2PA': 'Tentativas de 2', '2PM': 'De 2 convertidos', '3PA': 'Tentativas de 3', '3PM': 'De 3 convertidos', FGM: 'Arremessos convertidos', FTA: 'Lances livres tentados', FTM: 'Lances livres convertidos', RA: 'Reb + Ast' };
+const pct = (x: number) => (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';
+// lista de entradas agrupada por jogo (é como você navega na 99play): jogo → jogador · mercado → lado, linha, odd, chance e EV
+export function fmtEntries(list: any[]) {
+  const games = new Map<string, any[]>();
+  for (const x of list) { const k = [x.team, x.opp].sort().join(' x '); (games.get(k) ?? games.set(k, []).get(k)!).push(x); }
+  const order = [...games.entries()].sort((a, b) => String(a[1][0].tip_utc ?? '').localeCompare(String(b[1][0].tip_utc ?? '')));
+  const regs: { text: string; callback_data: string }[] = []; let i = 0;
+  const blocks = order.map(([k, xs]) => `🏀 <b>${esc(k)}</b>${xs[0].tip_utc ? ' · ' + hourBR(xs[0].tip_utc) : ''}\n<blockquote>` + xs.map(x => {
+    i++; regs.push({ text: `📝 ${i}`, callback_data: `bet:${x.pid}-${x.mk}-${x.side}:e.${x.strategy_id}`.slice(0, 64) });
+    const ev = x.edge == null ? '' : ` · EV <b>${pct(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}`;
+    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${Math.round(+x.p * 100)}%${ev}`;
+  }).join('\n') + '</blockquote>');
+  return { blocks, regs, n: i };
+}
+async function alert(fresh: any[], evMin: number) {
   const token = await cfg('TELEGRAM_BOT_TOKEN'); if (!token || !fresh.length) return 0;
   const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
   if (!subs.length) return 0;
-  const regs: { text: string; callback_data: string }[] = [], blocks: string[] = [];
-  let i = 0;
-  for (const sid of [...new Set(fresh.map(x => x.strategy_id))]) {
-    blocks.push(`<b>🧪 ${esc(names[sid] ?? sid)}</b>\n` + fresh.filter(x => x.strategy_id === sid).map(x => {
-      i++; regs.push({ text: `📝${i}`, callback_data: `bet:${x.pid}-${x.mk}-${x.side}:e.${sid}`.slice(0, 64) });
-      return `${i}. <b>${esc(x.name)}</b> ${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} · @${n2(+x.odd)} · ${Math.round(+x.p * 100)}%${x.edge != null ? ` · EV ${x.edge >= 0 ? '+' : ''}${(x.edge * 100).toFixed(1).replace('.', ',')}%` : ''}\n    <i>${esc(x.team)} x ${esc(x.opp)}${x.tip_utc ? ' · ' + hourBR(x.tip_utc) : ''}</i>`;
-    }).join('\n'));
-  }
-  let text = `🚨 <b>NOVA${i > 1 ? 'S' : ''} ENTRADA${i > 1 ? 'S' : ''} · MODELO POR MERCADO</b>\n<i>Linha e odd da 99play agora. Quanto antes você pegar, melhor: a linha costuma andar até o jogo.</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 registra a sua entrada com a odd que você pegou. O placar conta 1u na linha e odd deste alerta.</i>\n<i>🔞 18+ · Aposte com responsabilidade.</i>`;
-  if (text.length > 4090) text = text.replace(/\n    <i>[^\n]*<\/i>/g, '').slice(0, 4090);
+  const { blocks, regs, n } = fmtEntries(fresh);
+  let text = `🚨 <b>${n > 1 ? 'NOVAS ENTRADAS' : 'NOVA ENTRADA'} · MODELO BH</b>\n<i>Linha e odd da 99play agora · EV mínimo ${Math.round(evMin * 100)}% · 1u cada</i>\n\n${blocks.join('\n\n')}\n\n📝 <i>Toque no número para registrar a sua aposta. Quanto antes, melhor: a linha costuma andar até o jogo.</i>\n<i>🔞 18+ · Aposte com responsabilidade.</i>`;
+  if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '</blockquote>…';
   const kb = { inline_keyboard: [...Array.from({ length: Math.ceil(regs.length / 5) }, (_, k) => regs.slice(k * 5, k * 5 + 5)), [{ text: '🧪 Placar', callback_data: '/estrategias' }, { text: '💼 Banca', callback_data: '/banca' }]] };
   let sent = 0;
   for (const s of subs) {
@@ -60,7 +69,7 @@ async function record(silent = false) {
   await sb('strategies?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' },
     body: JSON.stringify(st.strategies.map((s: any) => ({ id: s.id, name: s.name, descr: s.descr, markets: s.markets, updated_at: new Date().toISOString() }))) });
   const now = Date.now();
-  const have: any[] = await sb(`strategy_picks?date=eq.${st.date}&select=strategy_id,pid,mk`) ?? [];
+  const have: any[] = await sb(`strategy_picks?date=eq.${st.date}&select=strategy_id,pid,mk,alerted`) ?? [];
   const key = (x: any) => `${x.strategy_id}|${x.pid}|${x.mk}`, had = new Set(have.map(key));
   const count: Record<string, number> = {}; for (const h of have) count[h.strategy_id] = (count[h.strategy_id] || 0) + 1;
   const maxOf = Object.fromEntries(st.strategies.map((s: any) => [s.id, s.max ?? 5]));
@@ -71,14 +80,21 @@ async function record(silent = false) {
     const row = { date: st.date, ...p, stat: MK2STAT[p.mk], odd_src: p.odd_src || '99play', updated_at: new Date(now).toISOString() };
     if (had.has(key(p))) { rows.push(row); continue; }
     if ((count[p.strategy_id] || 0) >= (maxOf[p.strategy_id] ?? 5)) continue; // teto do dia já preenchido
-    count[p.strategy_id] = (count[p.strategy_id] || 0) + 1; rows.push(row); fresh.push(row);
+    count[p.strategy_id] = (count[p.strategy_id] || 0) + 1; fresh.push(row);
   }
+  // o papel grava TODAS as entradas (para medir cada faixa de EV); o alerta só manda as de EV mínimo (bot_config
+  // ALERT_EV, padrão 5%) e uma por jogador no dia: a de maior EV (mercados do mesmo jogador andam juntos)
+  const evMin = +((await cfg('ALERT_EV')) ?? .05) || .05;
+  const alertedPid = new Set(have.filter(h => h.alerted).map(h => h.pid)), best = new Map<string, any>();
+  for (const x of fresh) if ((x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
+  for (const x of fresh) x.alerted = best.get(x.pid) === x;
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
-  const names = Object.fromEntries(st.strategies.map((s: any) => [s.id, s.name]));
-  const alertas = silent ? 0 : await alert(fresh, names).catch(e => { console.error('alerta', e); return 0; });
+  if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
+  const toAlert = fresh.filter(x => x.alerted).sort((a, b) => b.edge - a.edge);
+  const alertas = silent ? 0 : await alert(toAlert, evMin).catch(e => { console.error('alerta', e); return 0; });
   const bot = await getJ('bot.json').catch(() => null);
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
-  return { ok: true, date: st.date, gravadas: rows.length, novas: fresh.length, alertas, risco: risk };
+  return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk };
 }
 // ---------- Monitor de risco: vigia as entradas já enviadas até o jogo começar (roda junto com a gravação) ----------
 // Sinais (com os dados que a coleta de hora em hora já traz, sem depender da 99play):
@@ -102,7 +118,7 @@ function pSide(m: any, stat: string, line: number, side: string) {
 const STLB: Record<string, string> = { questionable: 'em dúvida', doubtful: 'provável fora', out: 'FORA' };
 async function risco(bot: any) {
   const now = Date.now();
-  const open: any[] = (await sb(`strategy_picks?date=eq.${bot.date}&status=eq.aberta&select=id,strategy_id,pid,name,team,opp,mk,stat,side,line,odd,open_line,open_odd,p,risk,tip_utc`) ?? [])
+  const open: any[] = (await sb(`strategy_picks?date=eq.${bot.date}&status=eq.aberta&alerted=eq.true&select=id,strategy_id,pid,name,team,opp,mk,stat,side,line,odd,open_line,open_odd,p,risk,tip_utc`) ?? [])
     .filter(x => !x.tip_utc || Date.parse(x.tip_utc) > now);
   if (!open.length) return { vigiadas: 0, alertas: 0 };
   const inj = new Map<string, any>((bot.injuries ?? []).map((i: any) => [`${i.t}|${i.n}`, i]));
@@ -131,7 +147,7 @@ async function risco(bot: any) {
     const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
     const names = Object.fromEntries(((await sb('strategies?select=id,name')) ?? []).map((s: any) => [s.id, s.name]));
     let text = `⚠️ <b>ALERTA DE RISCO · ENTRADA${items.length > 1 ? 'S' : ''} JÁ ENVIADA${items.length > 1 ? 'S' : ''}</b>\n<i>O cenário mudou depois do alerta.</i>\n\n` + items.map(({ x, why }) =>
-      `<b>${esc(x.name)}</b> ${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd))}\n<i>${esc(names[x.strategy_id] ?? x.strategy_id)} · ${esc(x.team)} x ${esc(x.opp)}${x.tip_utc ? ' · ' + hourBR(x.tip_utc) : ''}</i>\n${why.map(w => '• ' + w).join('\n')}`).join('\n\n')
+      `🏀 <b>${esc(x.team)} x ${esc(x.opp)}</b>${x.tip_utc ? ' · ' + hourBR(x.tip_utc) : ''}\n<blockquote><b>${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+(x.open_line ?? x.line))}</b> · @${n2(+(x.open_odd ?? x.odd))}\n${why.map(w => '• ' + w).join('\n')}</blockquote>`).join('\n\n')
       + `\n\n<i>Se ainda não entrou, reavalie antes. Se já entrou, veja se vale proteger. O placar segue contando a entrada como foi enviada.</i>`;
     if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '…';
     for (const s of token ? subs : []) {
