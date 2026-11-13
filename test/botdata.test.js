@@ -59,9 +59,13 @@ test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dis
   const s2 = { ...slate, model: { date: slate.meta.date, players: { [p.id]: { fga: [17.25, 25], pts: [21.5, 7], reb: [5.5, 12], ast: [4, 15] } } } };
   const props = buildProps(s2, { calib: false }).filter(x => x.p.id === p.id);
   const fga = props.find(x => x.mk === 'FGA'), pra = props.find(x => x.mk === 'PRA');
-  assert.ok(fga && fga.model && Math.abs(fga.proj - 17.25) < 1e-9, 'FGA usa o modelo');
+  // com colega de rotação fora (histórico real sem ele), a projeção mistura o modelo com a heurística
+  const mOnly = f => f.model.mOnly ?? f.proj;
+  assert.ok(fga && fga.model && Math.abs(mOnly(fga) - 17.25) < 1e-9, 'FGA usa o modelo');
+  if (fga.model.wo) assert.ok(Math.abs(fga.proj - ((1 - fga.model.wo) * 17.25 + fga.model.wo * fga.model.base)) < 1e-6 && fga.model.wo <= .5, 'mistura com o histórico sem o colega');
+  else assert.ok(Math.abs(fga.proj - 17.25) < 1e-9);
   assert.ok(Math.abs(fga.d - (1 + 17.25 / 25)) < 1e-9, 'dispersão da binomial negativa');
-  assert.ok(pra && pra.model && Math.abs(pra.proj - 31) < 1e-9, 'combinado soma as estatísticas do modelo');
+  assert.ok(pra && pra.model && Math.abs(mOnly(pra) - 31) < 1e-9, 'combinado soma as estatísticas do modelo');
   const old = buildProps({ ...slate, model: { date: '1999-01-01', players: s2.model.players } }, { calib: false }).find(x => x.p.id === p.id && x.mk === 'FGA');
   assert.ok(old && !old.model, 'modelo de outro dia é ignorado');
 });
