@@ -5,41 +5,37 @@
 import { woLock } from './botdata.js';
 import { OFF_MK } from '../public/engine.js';
 
-// mercados monitorados nas estratégias (escolha do usuário em 13/11/2026; todos abertos na 99play)
-export const ARR = ['2PA', '2PM', '3PA', '3PM', 'FGM', 'FTA', 'FTM']; // arremessos: tentados e convertidos
-export const MK_EST = [...ARR, 'RA'];
+// Modelo por mercado (escolha do usuário em 13/11/2026): uma "estratégia" por mercado monitorado, com as melhores
+// entradas do Modelo BH naquele mercado, para medir na semana onde o modelo acerta e dá lucro na 99play.
+const MKT = [
+  ['2PA', 'Tentativas de 2', 'tentativas de arremesso de 2 pontos'],
+  ['2PM', 'De 2 convertidos', 'arremessos de 2 pontos convertidos'],
+  ['3PA', 'Tentativas de 3', 'tentativas de arremesso de 3 pontos'],
+  ['3PM', 'De 3 convertidos', 'arremessos de 3 pontos convertidos'],
+  ['FGM', 'Arr. convertidos', 'arremessos convertidos'],
+  ['FTA', 'LL tentados', 'tentativas de lance livre'],
+  ['FTM', 'LL convertidos', 'lances livres convertidos'],
+  ['RA', 'Reb+Ast', 'rebotes + assistências'],
+];
+export const MK_EST = MKT.map(x => x[0]);
 const edgeOf = r => r.d ? r.p * r.d - 1 : null; // valor esperado na odd real
-const hit = h => h?.[1] ? h[0] / h[1] : null;
 const rot = r => (r.mn ?? 0) >= 24 && r.st !== 'questionable';
-// toda estratégia só entra com linha e odd da 99play (a casa onde o usuário aposta; o resultado vale nessa odd)
-// e só nos mercados monitorados. Regra fixada em 13/11/2026, antes da primeira entrada gravada.
+// só entra com linha e odd da 99play (a casa onde o usuário aposta; o resultado vale nessa odd)
 const c99 = r => !!(r.c9 && r.d) && !OFF_MK.has(r.m) && MK_EST.includes(r.m);
 
-export const STRATEGIES = [
-  { id: 'valor99', name: 'Valor na 99play', markets: MK_EST, max: 6,
-    descr: 'Arremessos (tentados e convertidos de 2, de 3, lances livres e convertidos) ou reb+ast com linha e odd da 99play em que a chance do modelo dá 5%+ de valor esperado (chance 55%+, nota 55+).',
-    test: r => c99(r) && rot(r) && r.p >= .55 && r.p <= .85 && (r.nt ?? 0) >= 55 && edgeOf(r) >= .05 && !woLock(r) },
-  { id: 'under-tent', name: 'Under de arremessos sólido', markets: ARR, max: 5,
-    descr: 'Menos em arremessos (tentados e convertidos de 2, de 3, lances livres e convertidos) na 99play com chance 62%+, 7/10 ou mais nos últimos 10 e sem trava de desfalque.',
-    test: r => c99(r) && ARR.includes(r.m) && r.s === 'u' && rot(r) && r.p >= .62 && r.p <= .85 && (hit(r.l10) ?? 0) >= .7 && !woLock(r) },
-  { id: 'ra-valor', name: 'Reb+Ast com valor', markets: ['RA'], max: 4,
-    descr: 'Reb+ast na 99play com 4%+ de valor esperado, chance 55%+.',
-    test: r => c99(r) && r.m === 'RA' && rot(r) && r.p >= .55 && r.p <= .85 && edgeOf(r) >= .04 && !woLock(r) },
-  { id: 'desfalque-over', name: 'Over do substituto (desfalque)', markets: MK_EST, max: 4,
-    descr: 'Mais de na 99play (arremessos ou reb+ast), com um colega de rotação fora hoje e o jogador acima da linha em 60%+ dos jogos reais sem ele (5+ jogos).',
-    test: r => c99(r) && r.s === 'o' && r.wo?.x && r.wo.h?.[1] >= 5 && r.wo.h[0] / r.wo.h[1] >= .6 && r.p >= .55 && r.p <= .85 && (r.mn ?? 0) >= 20 && r.st !== 'questionable' },
-  { id: 'defesa-over', name: 'Over contra defesa fraca', markets: MK_EST, max: 4,
-    descr: 'Mais de na 99play (arremessos ou reb+ast) contra um adversário entre as 5 piores defesas na posição e estatística, chance 58%+.',
-    test: r => c99(r) && r.s === 'o' && r.dv?.r && r.dv.r >= r.dv.of - 4 && rot(r) && r.p >= .58 && r.p <= .85 && !woLock(r) },
-];
+export const STRATEGIES = MKT.map(([mk, name, lb]) => ({
+  id: 'm-' + mk.toLowerCase(), name, markets: [mk], max: 5,
+  descr: `As 5 melhores entradas do Modelo BH em ${lb}, com linha e odd da 99play: jogador de rotação (24+ min), chance do modelo entre 55% e 85%, sem trava de desfalque, ordem pela Nota BH.`,
+  test: r => c99(r) && r.m === mk && rot(r) && r.p >= .55 && r.p <= .85 && !woLock(r),
+}));
 
-/* entradas do dia por estratégia (uma por jogador e mercado; ordem: valor esperado, depois nota) */
+/* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */
 export function pickStrategies(bot, games = []) {
   const tip = Object.fromEntries((games || []).map(g => [g.id, g.timeUTC || g.utc || null]));
   const out = [];
   for (const S of STRATEGIES) {
     const rows = bot.rows.filter(r => { try { return S.test(r); } catch { return false; } })
-      .sort((a, b) => ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1)) || ((b.nt ?? 0) - (a.nt ?? 0)));
+      .sort((a, b) => ((b.sc ?? b.nt ?? 0) - (a.sc ?? a.nt ?? 0)) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1)));
     const seen = new Set(); let k = 0;
     for (const r of rows) {
       const key = r.id + '|' + r.m; if (seen.has(key)) continue; seen.add(key);

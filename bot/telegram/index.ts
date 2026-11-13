@@ -303,7 +303,7 @@ function topText(d: Data, key: string) {
 type Sub = { tent: boolean; ra: boolean; est: boolean };
 const subKb = (s: Sub | null) => ({ inline_keyboard: [
   [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
-  [BTN(`${s?.est ? '✅' : '⬜'} Estratégias do dia`, '/receber est')],
+  [BTN(`${s?.est ? '✅' : '⬜'} Modelo por mercado`, '/receber est')],
   [BTN('🔕 Parar de receber', '/receber parar'), BTN('🏠 Menu', '/menu')]] });
 async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
   const a = norm(rest[0] ?? '');
@@ -314,7 +314,7 @@ async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
   else if (a === 'parar') next = { tent: false, ra: false, est: false };
   else if (a === 'tent' || a === 'ra' || a === 'est') next = { ...(s ?? { tent: false, ra: false, est: false }), [a]: !(s?.[a as keyof Sub]) };
   if (JSON.stringify(next) !== JSON.stringify(s)) await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...next, updated_at: new Date().toISOString() }) });
-  const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências', next?.est && '🧪 Entradas das estratégias'].filter(Boolean);
+  const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências', next?.est && '🧪 Modelo por mercado (entradas do dia)'].filter(Boolean);
   return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, por volta das 19h (depois da atualização com escalações e lesões):\n${on.map(x => '• ' + x).join('\n')}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
 }
 // envio do dia para os inscritos (chamado pelo GitHub depois de publicar os dados)
@@ -355,7 +355,7 @@ async function pushDaily(force = false, minHour = 0) {
   return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et?.regs.length ?? 0 };
 }
 // ---------- Entradas das estratégias (strategies.json gerado na coleta) ----------
-const ESTN: Record<string, string> = { valor99: 'Valor na 99play', 'under-tent': 'Under de arremessos', 'ra-valor': 'Reb+Ast com valor', 'desfalque-over': 'Over do substituto', 'defesa-over': 'Over x defesa fraca' };
+const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast' };
 const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
 const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
 async function estToday(date: string) {
@@ -376,7 +376,7 @@ function estText(d: Data, st: any): { text: string; regs: { text: string; callba
         return `${i}. <b>${esc(p.name)}</b> ${p.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+p.line)} ${MKS[p.mk] ?? p.mk} · ${p.odd ? '@' + n2(+p.odd) : 'sem odd'} · ${pc(+p.p)}${p.edge != null ? ' · EV ' + evS(p.edge) : ''}${full ? `\n    <i>${esc(p.team)} x ${esc(p.opp)}${p.tip_utc ? ' · ' + hourBR(p.tip_utc) : ''}</i>` : ''}`;
       }).join('\n'));
     }
-    const text = `<b>🧪 ESTRATÉGIAS DO DIA</b>\n<i>${dateBR(d.date)} · ${i} entradas · cada estratégia com o próprio placar</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 Toque no número e mande a odd que você pegou (ex.: <code>1,85</code>; para meia unidade, <code>1,85 0,5u</code>). O ROI de cada estratégia aparece em /banca. Ainda é teste: use entrada pequena até a estratégia ter 50+ entradas com ROI e CLV positivos.</i>` + FOOT;
+    const text = `<b>🧪 MODELO POR MERCADO · ENTRADAS DO DIA</b>\n<i>${dateBR(d.date)} · ${i} entradas · linha e odd da 99play · cada mercado com o próprio placar</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 Toque no número e mande a odd que você pegou (ex.: <code>1,85</code>; para meia unidade, <code>1,85 0,5u</code>). O ROI de cada estratégia aparece em /banca. Ainda é teste: use entrada pequena até o mercado ter 50+ entradas com ROI e CLV positivos.</i>` + FOOT;
     return { text, regs };
   };
   let out = build(true);
@@ -527,7 +527,7 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   }
   const tab = stats.map(s => `${String(s.name).padEnd(18).slice(0, 18)} ${String(s.n).padStart(3)} ${(s.n ? Math.round(s.g / s.n * 100) + '%' : '–').padStart(4)} ${u2(+s.lucro || 0).padStart(7)} ${s.clv_linha_media == null ? '   –' : ((s.clv_linha_media >= 0 ? '+' : '') + n1(+s.clv_linha_media)).padStart(4)}`).join('\n');
   const hoje = stats.map(s => `${esc(s.name)}: <b>${picks.filter(x => x.strategy_id === s.id).length}</b>`).join(' · ');
-  return { text: `<b>🧪 FÁBRICA DE ESTRATÉGIAS</b>\n<i>Teste em papel · 1u por entrada · cada estratégia com o próprio histórico</i>\n<pre>ESTRATÉGIA          N  ACE   LUCRO  CLV\n${tab}</pre>\n<b>Entradas hoje</b>\n${hoje}\n\n<i>Uma estratégia só sai do papel com 50+ entradas, ROI positivo e CLV positivo. CLV = quanto a linha andou a nosso favor até o jogo. Toque numa estratégia para ver as entradas de hoje.</i>`, kb };
+  return { text: `<b>🧪 MODELO POR MERCADO</b>\n<i>As melhores entradas do Modelo BH em cada mercado, na linha e odd da 99play · registro automático, 1u por entrada</i>\n<pre>MERCADO             N  ACE   LUCRO  CLV\n${tab}</pre>\n<b>Entradas hoje</b>\n${hoje}\n\n<i>Um mercado só merece stake de verdade com 50+ entradas, ROI positivo e CLV positivo. CLV = quanto a linha andou a nosso favor até o jogo. Toque num mercado para ver as entradas de hoje.</i>`, kb };
 }
 // ---------- Histórico automático do top 10 e resultado da manhã ----------
 const etDate = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
@@ -624,7 +624,7 @@ async function estGabarito(y: string, res: any) {
       blocks.push(`<b>🧪 ${esc(S.name)}</b>: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''} · <b>${u2(h.pr)}</b>${det ? `\n<blockquote>${lines}</blockquote>` : ''}\n<i>Acumulado: ${S.n} entradas · ${u2(+S.lucro || 0)} · ROI ${S.roi == null ? '–' : pctS(+S.roi)}</i>`);
     }
     const T = hitOf(rows);
-    return `🧪 <b>GABARITO DAS ESTRATÉGIAS · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play</i>\n\n${blocks.join('\n\n')}\n\n📊 <b>Dia: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}</b>\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
+    return `🧪 <b>GABARITO DO MODELO POR MERCADO · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play</i>\n\n${blocks.join('\n\n')}\n\n📊 <b>Dia: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}</b>\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
   };
   const text = build(true);
   return text.length <= 4090 ? text : build(false);
@@ -823,8 +823,8 @@ const HELP = `<b>📖 COMANDOS</b>
 /banca · suas entradas registradas, lucro e ROI · /banca todos
 /apagar 12 · apaga uma entrada registrada errada
 /ontem · resultado de ontem (chega sozinho de manhã)
-/estrategias · placar da fábrica de estratégias (teste em papel)
-/gabarito · resultado de ontem de cada estratégia (chega sozinho de manhã)
+/estrategias · modelo por mercado: placar e entradas do dia
+/gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
 /app · app completo
 
 <b>Como usar as listas</b>
@@ -1076,7 +1076,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Placar das estratégias'], ['gabarito', 'Gabarito de ontem das estratégias'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
