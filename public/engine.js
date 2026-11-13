@@ -263,6 +263,10 @@ export function buildProps(slate, opts = {}) {
       const MP = MODEL?.[p.id]; let model = null;
       if (MP && M.k.every(k => MP[k])) {
         model = { proj: sum(M.k.map(k => MP[k][0])), base: proj };
+        // desfalque: o modelo dá o mesmo aumento a todo o elenco; a projeção heurística usa o histórico real
+        // SEM o colega (minutos e ritmo por minuto). Com o colega fora e 3+ jogos sem ele, mistura as duas
+        // (peso n/(n+10), no máximo 50%), para o substituto direto não ficar subestimado (e o under, otimista).
+        if (ctx.wo?.active && ctx.wo.n >= 3) { const w = Math.min(.5, ctx.wo.n / (ctx.wo.n + 10)); model.wo = Math.round(w * 100) / 100; model.mOnly = model.proj; model.proj = (1 - w) * model.proj + w * proj; }
         proj = model.proj;
         if (M.k.length === 1) d = 1 + MP[M.k[0]][0] / MP[M.k[0]][1];
       }

@@ -9,8 +9,11 @@ const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bol
 export const TOP_MIN_LINE = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
 // cov: jogos com linhas da 99play. Nesses jogos o top só usa linha da 99play (é onde o usuário aposta);
 // jogo sem nenhuma linha da 99play ainda usa a linha de referência
-export const topEligible = (r, g, cov = null) => r.mb && g.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (TOP_MIN_LINE[r.m] ?? 0) && (r.c9 || !cov?.has(r.g));
+export const topEligible = (r, g, cov = null) => r.mb && g.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (TOP_MIN_LINE[r.m] ?? 0) && (r.c9 || !cov?.has(r.g)) && !woLock(r);
 export const c99Games = rows => new Set(rows.filter(r => r.c9).map(r => r.g));
+// trava de desfalque: com um colega de rotação fora e 5+ jogos reais sem ele, se nesses jogos o lado da entrada
+// bateu menos da metade das vezes, a entrada não vai para os tops (pega o under que o histórico sem o colega desmente)
+export const woLock = r => !!(r.wo?.x && r.wo.h?.[1] >= 5 && r.wo.h[0] / r.wo.h[1] < .5);
 // grupos das listas do bot (mesmos mercados dos comandos)
 const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['FGA', '2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV'], ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM']];
 const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt.mu - pr.mkt.openMu) / Math.max(pr.mkt.mu, 1); return Math.abs(d) >= .025 ? Math.sign(side === 'over' ? d : -d) : 0; };
