@@ -247,7 +247,7 @@ input[type=range] { width: 100%; accent-color: var(--green); }
 .hit.sel b { color: var(--green); }
 .dots { display: flex; gap: 3px; align-items: flex-end; }
 .dots i { width: 100%; max-width: 22px; flex: 1; border-radius: 2px 2px 0 0; }
-.dots i.h { background: var(--green); } .dots i.m { background: var(--line-2); }
+.dots i.h { background: var(--green); } .dots i.m { background: color-mix(in srgb, var(--bad) 70%, var(--surface)); }
 .dotsrow { display: flex; align-items: flex-end; gap: 8px; font-size: 12px; color: var(--muted); }
 .dotsrow .dots { flex: 1; height: 24px; }
 .pc-tags { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -924,7 +924,7 @@ h2 { font-weight: 800; letter-spacing: -.015em; }
 .dots i { border-radius: 99px; }
 .dots i.h { background: var(--green); }
 .pcard.under .dots i.h { background: var(--gold); }
-.dots i.m { background: var(--line-2); }
+.dots i.m { background: color-mix(in srgb, var(--bad) 70%, var(--surface)); }
 .editbtn, .addbtn { border-radius: 99px; padding: 7px 13px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); }
 .editbtn:hover { border-color: var(--line-2); }
 .addbtn { background: transparent; border-color: var(--green); color: var(--green); }
@@ -991,3 +991,35 @@ ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
 .chrow { margin: 0 0 8px; gap: 6px; flex-wrap: wrap; }
 .chart-empty { padding: 28px 8px; text-align: center; color: var(--muted); font-size: 13.5px; }
 @media (max-width: 520px) { .chhead { grid-template-columns: 1fr 1fr; } .chline { grid-column: 1 / -1; text-align: left; display: flex; align-items: center; gap: 10px; } .chline small { display: none; } .link.sm { margin-left: 0; } }
+
+/* visão Lista (uma linha por entrada) */
+.lrows { display: flex; flex-direction: column; gap: 6px; }
+.lrow { display: grid; grid-template-columns: auto minmax(150px, 1.6fr) minmax(130px, 1.3fr) 70px 78px minmax(110px, 1fr) auto; align-items: center; gap: 12px;
+  width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; color: var(--ink); font: inherit; cursor: pointer;
+  box-shadow: inset 4px 0 0 var(--tc, var(--line-2)); transition: border-color .15s ease, background .15s ease; }
+.lrow:hover { border-color: var(--line-2); background: var(--surface-2); }
+.lrow.value { border-color: var(--green-line); }
+.lrow small { display: block; font-size: 12px; color: var(--muted); line-height: 1.3; }
+.lrow .bad { color: var(--bad); font-weight: 600; }
+.lr-name b { display: block; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lr-line .side { font-weight: 800; font-size: 14px; }
+.lr-odd b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.lr-odd small.pos { color: var(--green); } .lr-odd small.neg { color: var(--bad); }
+.lr-hit { text-align: right; }
+.lr-hit b { font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; }
+.lr-hit.hi b { color: var(--green); } .lr-hit.lo b { color: var(--bad); } .lr-hit.md b { color: var(--warn); }
+.lr-dots .dots { height: 30px; }
+@media (max-width: 760px) {
+  .lrow { grid-template-columns: auto 1fr auto; grid-template-areas: "b name hit" "b line odd" "dots dots dots"; row-gap: 6px; column-gap: 10px; padding: 10px 12px; }
+  .lrow > .badge { grid-area: b; align-self: start; }
+  .lr-name { grid-area: name; min-width: 0; } .lr-line { grid-area: line; } .lr-odd { grid-area: odd; text-align: right; } .lr-hit { grid-area: hit; }
+  .lr-odd small:first-child { display: none; }
+  .lr-dots { grid-area: dots; } .lr-dots .dots { height: 26px; }
+  .lr-nota { display: none; }
+}
+/* companheiros fora ou em dúvida (ficha) */
+.mates { display: flex; flex-direction: column; gap: 6px; }
+.mate { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; color: var(--ink); font: inherit; cursor: pointer; }
+.mate[aria-pressed="true"] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
+.mate small { display: block; font-size: 12px; color: var(--muted); }
+.mate .num { font-size: 16px; } .mate .num.pos { color: var(--green); } .mate .num.neg { color: var(--bad); }

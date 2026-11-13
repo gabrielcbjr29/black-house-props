@@ -48,7 +48,7 @@ function stakeU(s) {
 
 /* ---------------- estado ---------------- */
 let SLATE = null, PROPS = [], BYID = {}, EVAL = {}, OVR = {}, RESULTS = null, BT = null;
-const DEF = { q: '', games: [], groups: [], markets: [], pos: [], side: 'best', src: 'all', minGrade: 'C', sample: 'L10', minHit: 0, minProb: 0, minEV: -20, oddMin: 1.01, oddMax: 10, oddOnly: false, mktOnly: false, dvp: false, noB2B: false, noDoubt: false, noBlow: false, projGap: false, woOnly: false, steam: false, roleUp: false, sort: 'score', view: 'cards', preset: 'all' };
+const DEF = { q: '', games: [], groups: [], markets: [], pos: [], side: 'best', src: 'all', minGrade: 'C', sample: 'L10', minHit: 0, minProb: 0, minEV: -20, oddMin: 1.01, oddMax: 10, oddOnly: false, mktOnly: false, dvp: false, noB2B: false, noDoubt: false, noBlow: false, projGap: false, woOnly: false, steam: false, roleUp: false, sort: 'score', view: 'lista', preset: 'all' };
 let F = Object.assign({}, DEF, store.get('f2', {}));
 let SLIP = store.get('slip2', []);
 let TIPS = store.get('tips', []);
@@ -327,6 +327,18 @@ function card({ pr, e, s }) {
   <div class="pc-foot"><button class="editbtn" data-edit="${pr.id}" data-side="${s.side}">Minha linha</button><button class="editbtn" data-tip="${pr.id}" data-side="${s.side}">Registrar</button><span class="grow"></span><button class="addbtn" data-add="${pr.id}" data-side="${s.side}" aria-pressed="${on}">${on ? 'No bilhete' : '+ Múltipla'}</button></div>
 </article>`;
 }
+/* visão Lista: uma linha por entrada, com o acerto do recorte em destaque e o minigráfico dos últimos 10 */
+function listRow({ pr, e, s }) {
+  const p = pr.p, h = s.hits[F.sample] || s.hits.L10, r = h?.[1] ? h[0] / h[1] : null;
+  return `<button class="lrow ${s.side}${s.ev > 0 ? ' value' : ''}" data-open="${pr.id}" data-side="${s.side}" style="--tc:${teamCol(p.team)}">
+    ${badge(p.team)}<span class="lr-name"><b>${esc(p.name)}</b><small>${matchLabel(pr)} · ${brTime(pr.game.timeUTC)}${p.status !== 'ok' ? ' · <span class="bad">' + (p.status === 'questionable' ? 'dúvida' : esc(p.status)) + '</span>' : ''}</small></span>
+    <span class="lr-line"><span class="side ${s.side}">${s.side === 'over' ? 'Mais' : 'Menos'} ${fmt(e.line)}</span><small>${esc(MARKETS[pr.mk].lb)}</small></span>
+    <span class="lr-odd"><small>odd</small><b>${s.odd ? fmt(s.odd, 2) : '—'}</b>${s.ev != null ? `<small class="${s.ev >= 0 ? 'pos' : 'neg'}">EV ${sgnPct(s.ev)}</small>` : ''}</span>
+    <span class="lr-hit ${r == null ? '' : r >= .7 ? 'hi' : r < .5 ? 'lo' : 'md'}"><b>${r == null ? '—' : Math.round(r * 100) + '%'}</b><small>${h?.[1] ? h[0] + '/' + h[1] + ' ' + (F.sample === 'CUR' ? 'temp.' : F.sample) : ''}</small></span>
+    <span class="lr-dots">${dots(pr, s.side, e.line)}</span>
+    <span class="lr-nota">${notaChip({ pr, e, s })}</span>
+  </button>`;
+}
 /* lista "por que sim / por que não": no cartão sem repetir o que já aparece (acertos e defesa) */
 function whyList(r, nPro = 3, nCon = 2, dedup = true) {
   const W = why(r, 4), dup = /^(Bateu em|Defesa do|Contra o |\d+ de \d+ na temporada)/;
@@ -393,10 +405,10 @@ function renderProps() {
   syncFilterUI();
   const rows = filtered();
   $('#rCount').textContent = rows.length + (rows.length === 1 ? ' linha' : ' linhas');
-  const view = matchMedia('(max-width:760px)').matches ? 'cards' : F.view;
+  const view = matchMedia('(max-width:760px)').matches && F.view === 'table' ? 'lista' : F.view;
   const shown = rows.slice(0, LIMIT);
   if (!rows.length) $('#results').innerHTML = `<div class="panel empty"><h2>Nenhuma linha passa nesses filtros</h2><p>Afrouxe o acerto mínimo, a nota ou a faixa de odd. <button class="btn" data-reset>Limpar filtros</button></p></div>`;
-  else $('#results').innerHTML = view === 'table' ? table(shown) : `<div class="cards">${shown.map(card).join('')}</div>`;
+  else $('#results').innerHTML = view === 'table' ? table(shown) : view === 'lista' ? `<div class="lrows">${shown.map(listRow).join('')}</div>` : `<div class="cards">${shown.map(card).join('')}</div>`;
   $('#moreBtn').hidden = rows.length <= LIMIT; $('#moreBtn').textContent = `Mostrar mais (${rows.length - LIMIT})`;
   store.set('f2', F);
 }
@@ -1065,6 +1077,20 @@ function chartSVG(pr, side, line, idx) {
    H2H, todos) e filtre o contexto (casa, fora, sem o colega, titular, 28+ min). O acerto e a média recalculam na hora. */
 let CH = null;
 const CH_N = [['L5', 'L5'], ['L10', 'L10'], ['L20', 'L20'], ['TEMP', 'Temporada'], ['H2H', 'H2H'], ['ALL', 'Todos']];
+function mateImpact(pr) {
+  const p = pr.p, lg = pr.ctx.logs, v = pr.vals;
+  return SLATE.players.filter(q => q.team === p.team && q.id !== p.id && ['out', 'doubtful', 'questionable'].includes(q.status) && p.wo?.[q.id]?.length)
+    .map(q => { const set = new Set(p.wo[q.id].map(String)), wo = [], wi = []; v.forEach((x, i) => (set.has(String(lg[i]?.[L.gid])) ? wo : wi).push(x)); return { q, set, n: wo.length, avg: wo.length ? mean(wo) : null, d: wo.length && wi.length ? mean(wo) - mean(wi) : null }; })
+    .filter(x => x.n >= 1).sort((a, b) => (a.q.status === 'questionable') - (b.q.status === 'questionable') || b.n - a.n).slice(0, 6);
+}
+function matesBox(pr, side) {
+  const M = mateImpact(pr); if (!M.length) return '';
+  const st = { out: 'FORA', doubtful: 'PROV. FORA', questionable: 'DÚVIDA' };
+  return `<div class="dbox"><h3>Companheiros fora ou em dúvida</h3><div class="mates">${M.map(x => {
+    const good = x.d == null ? '' : (side === 'over' ? x.d > 0 : x.d < 0) ? 'pos' : 'neg';
+    return `<button class="mate ${x.q.status}" data-chf="sem:${x.q.id}" aria-pressed="${CH?.f.includes('sem:' + x.q.id) || false}" title="Mostrar no gráfico só os jogos sem ${esc(x.q.name)}">${badge(x.q.team, 1)}<span class="grow"><b>${esc(x.q.name)}</b><small><span class="stchip ${x.q.status}">${st[x.q.status]}</span> sem ele: média ${fmt(x.avg)} em ${x.n} ${x.n === 1 ? 'jogo' : 'jogos'}</small></span><b class="num ${good}">${x.d == null ? '—' : (x.d >= 0 ? '+' : '−') + fmt(Math.abs(x.d))}</b></button>`; }).join('')}</div>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 0">Diferença da média do jogador sem o companheiro em relação aos jogos com ele (últimos 30). Toque para ver só esses jogos no gráfico.</p></div>`;
+}
 function chState(pr, line) { if (!CH || CH.id !== pr.id) CH = { id: pr.id, line, n: 'L10', f: [] }; return CH; }
 function chIdx(pr, st) {
   const lg = pr.ctx.logs, wo = pr.ctx.wo?.set, f = st.f;
@@ -1073,6 +1099,7 @@ function chIdx(pr, st) {
     if (f.includes('casa') && g[L.home] !== 1) return false;
     if (f.includes('fora') && g[L.home] !== 0) return false;
     if (f.includes('sem') && !(wo && wo.has(String(g[L.gid])))) return false;
+    for (const k of f) if (k.startsWith('sem:')) { const gids = pr.p.wo?.[k.slice(4)]; if (!gids || !gids.map(String).includes(String(g[L.gid]))) return false; }
     if (f.includes('tit') && g[L.starter] !== 1) return false;
     if (f.includes('min') && !(g[L.min] >= 28)) return false;
     if (st.n === 'TEMP' && g[L.cur] !== 1) return false;
@@ -1092,7 +1119,7 @@ function chartBox(pr, side) {
       <div class="chline"><small>Linha</small><div class="stepper"><button data-chl="-1" aria-label="Diminuir a linha">−</button><b>${fmt(st.line)}</b><button data-chl="1" aria-label="Aumentar a linha">+</button></div>${st.line !== e.line ? `<button class="link sm" data-chl="0">voltar a ${fmt(e.line)}</button>` : '<span class="kpisub">linha do dia</span>'}</div>
     </div>
     <div class="chips chrow">${CH_N.map(([k, lb]) => `<button class="chip" data-chn="${k}" aria-pressed="${st.n === k}">${lb}</button>`).join('')}</div>
-    <div class="chips chrow">${fch('casa', 'Em casa')}${fch('fora', 'Fora')}${c.wo ? fch('sem', 'Sem ' + esc(lastName(c.wo.q.name))) : ''}${fch('tit', 'Titular')}${fch('min', '28+ min')}</div>
+    <div class="chips chrow">${fch('casa', 'Em casa')}${fch('fora', 'Fora')}${c.wo ? fch('sem', 'Sem ' + esc(lastName(c.wo.q.name))) : ''}${st.f.filter(k => k.startsWith('sem:')).map(k => { const q = SLATE.players.find(x => x.id === k.slice(4)); return q ? fch(k, 'Sem ' + esc(lastName(q.name))) : ''; }).join('')}${fch('tit', 'Titular')}${fch('min', '28+ min')}</div>
     ${chartSVG(pr, side, st.line, idx)}
     <p class="muted" style="font-size:12.5px;margin:6px 0 0">Verde bateu “${sideLb(side).toLowerCase()}” na linha ${fmt(st.line)}, vermelho não. Adversário de hoje em destaque.${c.wo ? ` Barras com contorno: jogos sem ${esc(c.wo.q.name)}.` : ''} Mudar a linha aqui só mexe no gráfico; para recalcular chance e EV, use “Linha da sua casa”.</p>`;
 }
@@ -1144,6 +1171,7 @@ function renderDrawer(focusEditor) {
     ${alerts(pr, D.side).length ? `<div class="chips">${alerts(pr, D.side).map(([t, c2]) => `<span class="tag ${c2}">${esc(t)}</span>`).join('')}</div>` : ''}
     <div class="edbtns" style="margin:0"><button class="btn primary" data-tip="${pr.id}" data-side="${D.side}">Registrar tip</button><button class="btn" data-postone="${pr.id}" data-side="${D.side}">Gerar post</button><button class="btn" data-add="${pr.id}" data-side="${D.side}" aria-pressed="${on}">${on ? 'No bilhete' : '+ Múltipla'}</button></div>
     <div class="dbox chart"><h3>Jogos × linha</h3><div id="chBox">${chartBox(pr, D.side)}</div></div>
+    <div id="matesBox">${matesBox(pr, D.side)}</div>
     ${whyBox(pr, e, s)}
     <div class="dbox"><h3>Linha da sua casa</h3>
       <div class="edrow"><label>Linha<input id="edLine" inputmode="decimal" value="${ov.line ?? ''}" placeholder="${fmt(pr.line)}"></label><label>Odd mais de<input id="edO" inputmode="decimal" value="${ov.oOver ?? ''}" placeholder="ex. 1,85"></label><label>Odd menos de<input id="edU" inputmode="decimal" value="${ov.oUnder ?? ''}" placeholder="ex. 1,95"></label></div>
@@ -1272,6 +1300,7 @@ function bind() {
       else if (t.dataset.chn) CH.n = t.dataset.chn;
       else { const k = t.dataset.chf, f = CH.f.filter(x => x !== k && !(k === 'casa' && x === 'fora') && !(k === 'fora' && x === 'casa')); CH.f = CH.f.includes(k) ? f : [...f, k]; }
       const box = $('#chBox'); if (box) box.innerHTML = chartBox(BYID[D.id], D.side);
+      const mb = $('#matesBox'); if (mb) mb.innerHTML = matesBox(BYID[D.id], D.side);
       return;
     }
     if (t.dataset.open) { if (!$('#modal').hidden) closeModal(); openDrawer(t.dataset.open, t.dataset.side); }
