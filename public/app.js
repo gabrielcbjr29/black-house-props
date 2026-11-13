@@ -1,5 +1,5 @@
 // Garrafão Props — interface. Lê data/slate.json e calcula tudo no navegador com engine.js.
-import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GRADE_ORDER, parlayProb, overProb, bestPrice, makeDist, quantile, ladder, divergence, bhScore, reasons, ODD_RANGE, inOddRange } from './engine.js';
+import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GRADE_ORDER, parlayProb, overProb, bestPrice, makeDist, quantile, ladder, divergence, bhScore, reasons, ODD_RANGE, inOddRange, OFF_MK } from './engine.js';
 import { newTip, settleTip, summarize, toCSV, clvOf, profitOf } from './tips.js';
 import { postText, drawCard, legText, WARNINGS, resultsText, drawResults } from './share.js';
 import { parseImport } from './importer.js';
@@ -83,7 +83,7 @@ async function load() {
   fetch('data/prev.json').then(r => r.ok ? r.json() : null).catch(() => null).then(pv => { if (pv?.p && SLATE) { SLATE.prev = pv; rebuild(); route(); } });
 }
 function rebuild() {
-  PROPS = buildProps(SLATE, { calib: CFG.calib });
+  PROPS = buildProps(SLATE, { calib: CFG.calib }).filter(pr => !OFF_MK.has(pr.mk));
   BYID = Object.fromEntries(PROPS.map(p => [p.id, p]));
   EVAL = {}; for (const p of PROPS) EVAL[p.id] = ev(p, OVR[p.id]);
   LADC = {}; RANGEC = {};
@@ -368,7 +368,7 @@ const PRESETS = [
 ];
 function initFilters() {
   $('#fGames').innerHTML = SLATE.games.map(g => `<button class="chip" data-v="${g.id}">${g.away} @ ${g.home}</button>`).join('');
-  $('#fMarkets').innerHTML = Object.entries(GROUPS).map(([g, lb]) => `<div class="grp"><div class="chips"><button class="chip" data-grp="${g}">${lb}</button></div><div class="chips">${Object.keys(MARKETS).filter(k => MARKETS[k].g === g).map(k => `<button class="chip" data-v="${k}" title="${esc(MARKETS[k].lb)}">${mkShort(k)}</button>`).join('')}</div></div>`).join('');
+  $('#fMarkets').innerHTML = Object.entries(GROUPS).map(([g, lb]) => `<div class="grp"><div class="chips"><button class="chip" data-grp="${g}">${lb}</button></div><div class="chips">${Object.keys(MARKETS).filter(k => MARKETS[k].g === g && !OFF_MK.has(k)).map(k => `<button class="chip" data-v="${k}" title="${esc(MARKETS[k].lb)}">${mkShort(k)}</button>`).join('')}</div></div>`).join('');
   $('#presets').innerHTML = PRESETS.map(p => `<button class="chip" data-preset="${p.id}">${p.lb}${p.d ? ` <small>${p.d}</small>` : ''}</button>`).join('');
 }
 const CHECKS = [['#fOddOnly', 'oddOnly'], ['#fMktOnly', 'mktOnly'], ['#fDvp', 'dvp'], ['#fNoB2B', 'noB2B'], ['#fNoDoubt', 'noDoubt'], ['#fNoBlow', 'noBlow'], ['#fProjGap', 'projGap'], ['#fWo', 'woOnly'], ['#fSteam', 'steam']];
@@ -562,7 +562,7 @@ function renderTrends() {
   <section class="panel third"><h2>Melhores matchups <small>defesas que mais cedem</small></h2><div class="rank">${mu.length ? mu.map((x, i) => rankItem(i, x.pr, x.s, `DEF ${x.pr.rank.rank}º<small>${STATLB[x.pr.rank.k] || ''}</small>`, `${matchLabel(x.pr)}, ${MARKETS[x.pr.mk].lb.toLowerCase()} proj. ${fmt(x.pr.proj)}`)).join('') : empty('Sem matchups extremos hoje.')}</div></section>
   <section class="panel third"><h2>Minutos em alta <small>últimos 5 × últimos 20</small></h2><div class="rank">${mins.length ? mins.map((pr, i) => rankItem(i, pr, null, `+${fmt(pr.ctx.m5 - pr.ctx.m20)} min<small>${fmt(pr.ctx.m5, 0)} nos últimos 5</small>`, `${POSLB[pr.p.pos]}, ${matchLabel(pr)}`)).join('') : empty('Ninguém com salto de minutos.')}</div></section>
   <section class="panel third"><h2>Quinteto <small>mudanças no time titular</small></h2><div class="rank">${(() => { const ch = players.filter(pr => pr.ctx.role); return ch.length ? ch.map((pr, i) => rankItem(i, pr, null, `${fmt(pr.ctx.exp, 0)} min<small>${pr.ctx.role === 'up' ? 'vira titular' : 'vai ao banco'}</small>`, `${POSLB[pr.p.pos]}, ${pr.p.lineup?.confirmed ? 'confirmado' : 'previsto'}`)).join('') : empty('Sem mudança de quinteto (ou quintetos ainda não divulgados).'); })()}</div></section>
-  <section class="panel"><h2>Líder por mercado <small>melhor linha do dia em cada um dos ${Object.keys(MARKETS).length} mercados</small></h2><div class="leaders">${leaders.map(x => `<button data-open="${x.pr.id}" data-side="${x.s.side}"><small>${MARKETS[x.pr.mk].lb}</small><b>${esc(x.pr.p.name)}</b><span>${sideLb(x.s.side).toLowerCase()} ${fmt(x.e.line)}, ${pct(x.s.p)}, ${gradeChip(x.s.grade)}</span></button>`).join('')}</div></section>`;
+  <section class="panel"><h2>Líder por mercado <small>melhor linha do dia em cada um dos ${Object.keys(MARKETS).length - OFF_MK.size} mercados</small></h2><div class="leaders">${leaders.map(x => `<button data-open="${x.pr.id}" data-side="${x.s.side}"><small>${MARKETS[x.pr.mk].lb}</small><b>${esc(x.pr.p.name)}</b><span>${sideLb(x.s.side).toLowerCase()} ${fmt(x.e.line)}, ${pct(x.s.p)}, ${gradeChip(x.s.grade)}</span></button>`).join('')}</div></section>`;
 }
 
 /* ---------------- JOGOS ---------------- */

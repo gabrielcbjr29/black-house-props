@@ -15,6 +15,8 @@ const OFFENSIVE = new Set(['pts', 'ast', 'fgm', 'fga', 'tpm', 'tpa', 'ftm', 'fta
 // quanto o ritmo do jogo afeta cada estatística
 const PACEW = { pts: 1, reb: .5, ast: .8, stl: .6, blk: .4, tov: .7, pf: .5, fgm: .9, fga: 1, tpm: .8, tpa: .9, ftm: .7, fta: .7, twom: .9, twoa: .95 };
 
+// mercados que a 99play (casa do usuário) não abre: ficam fora das listas, dos tops e das estratégias
+export const OFF_MK = new Set(['FGA']);
 export const MARKETS = {
   PTS: { lb: 'Pontos', k: ['pts'], g: 'main', odds: 'player_points' },
   REB: { lb: 'Rebotes', k: ['reb'], g: 'main', odds: 'player_rebounds' },

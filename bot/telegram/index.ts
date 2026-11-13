@@ -61,7 +61,7 @@ const GROUPS: Record<string, { mk: string[]; title: string }> = {
   tres: { mk: ['3PM'], title: 'Bolas de 3' }, triplos: { mk: ['3PM'], title: 'Bolas de 3' },
   pra: { mk: ['PRA'], title: 'Pts+Reb+Ast' }, pr: { mk: ['PR'], title: 'Pts+Reb' }, pa: { mk: ['PA'], title: 'Pts+Ast' }, ra: { mk: ['RA'], title: 'Reb+Ast' },
   combinados: { mk: ['PRA', 'PR', 'PA', 'RA'], title: 'Combinados' },
-  tentativas: { mk: ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'Tentativas e convertidos' },
+  tentativas: { mk: ['3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'Tentativas e convertidos' },
   convertidos: { mk: ['FGM', '2PM', 'FTM'], title: 'Arremessos convertidos' },
   defesa: { mk: ['STL', 'BLK', 'SB', 'TOV'], title: 'Roubos, tocos e erros' },
   roubos: { mk: ['STL'], title: 'Roubos' }, tocos: { mk: ['BLK'], title: 'Tocos' }, erros: { mk: ['TOV'], title: 'Erros' },
@@ -249,7 +249,7 @@ async function testesCmd(chatId: number, rest: string[]): Promise<Out> {
 }
 // ---------- Top 10 do Modelo BH (tentativas/convertidos e reb+ast) ----------
 const MT: Record<string, { mk: string[]; title: string; cmd: string; ic: string }> = {
-  tent: { mk: ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'TENTATIVAS E CONVERTIDOS', cmd: '/toptentativas', ic: '🏹' },
+  tent: { mk: ['3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'TENTATIVAS E CONVERTIDOS', cmd: '/toptentativas', ic: '🏹' },
   ra: { mk: ['RA'], title: 'REBOTES + ASSISTÊNCIAS', cmd: '/topra', ic: '🙌' },
 };
 // ranking: Nota BH (chance do modelo, L10/L20/temporada, confronto, defesa x posição), desempate pelo L10; um por jogador
@@ -516,7 +516,7 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   if (!picks.length) { const st = await estToday(etDate()); picks = (st?.picks ?? []).map((p: any) => ({ ...p, status: 'aberta', odd_src: p.odd ? p.odd_src : 'estimada' })); }
   const ev = (x: any) => evS(x);
   const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || 1.87)}${x.odd_src === 'estimada' ? '*' : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
-  const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('🏠 Menu', '/menu')]] };
+  const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('✅ Gabarito de ontem', '/gabarito')], [BTN('🏠 Menu', '/menu')]] };
   const S = id ? stats.find(s => s.id === id) : null;
   if (S) {
     const mine = picks.filter(x => x.strategy_id === S.id);
@@ -597,7 +597,45 @@ async function morningText(chatId: number, y: string, picks: any[], res: any) {
   if (!parts.length) return null;
   return `☀️ <b>RESULTADO DE ONTEM · ${dateBR(y)}</b>\n\n` + parts.join('\n\n') + `\n\n<i>* odd estimada (1,87): mercado sem odd nas nossas fontes. Hoje os tops saem por volta das 19h20.</i>`;
 }
-const MORNING_KB = () => ({ inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🧠 Modelo BH', '/modelobh')], [BTN('🏠 Menu', '/menu')]] });
+// gabarito das estratégias de um dia: confere cada entrada (1u na odd da 99play gravada) e mostra o acumulado de cada estratégia
+async function settleStrats(rows: any[], res: any) {
+  for (const r of rows.filter(x => x.status === 'aberta')) {
+    if (!res?.dates?.includes(r.date)) continue;
+    const a = res.stats[r.date]?.[r.pid];
+    let status = 'void', result: number | null = null;
+    if (a && a[0] > 0) { result = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); status = result === +r.line ? 'void' : (r.side === 'o' ? result > +r.line : result < +r.line) ? 'green' : 'red'; }
+    const patch = { status, result, profit: status === 'green' ? Math.round(((+r.odd || ODD_EST) - 1) * 100) / 100 : status === 'red' ? -1 : 0, settled_at: new Date().toISOString() };
+    Object.assign(r, patch);
+    await sb(`strategy_picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(patch) }).catch(() => null);
+  }
+}
+async function estGabarito(y: string, res: any) {
+  const rows: any[] = await sb(`strategy_picks?date=eq.${y}&select=id,date,strategy_id,pid,name,mk,stat,side,line,odd,odd_src,status,result,profit,clv_line&order=edge.desc.nullslast`).catch(() => []) ?? [];
+  if (!rows.length) return null;
+  await settleStrats(rows, res);
+  const stats: any[] = await sb('strategy_stats?select=*').catch(() => []) ?? [];
+  const ic = (x: any) => x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳';
+  const build = (det: boolean) => {
+    const blocks: string[] = [];
+    for (const S of stats) {
+      const a = rows.filter(x => x.strategy_id === S.id); if (!a.length) continue;
+      const h = hitOf(a);
+      const lines = a.map(x => `${ic(x)} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || ODD_EST)}${x.result != null ? ` <i>(fez ${n1(+x.result)})</i>` : ''}${x.clv_line != null && +x.clv_line !== 0 ? ` · CLV ${+x.clv_line > 0 ? '+' : ''}${n1(+x.clv_line)}` : ''}`).join('\n');
+      blocks.push(`<b>🧪 ${esc(S.name)}</b>: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''} · <b>${u2(h.pr)}</b>${det ? `\n<blockquote>${lines}</blockquote>` : ''}\n<i>Acumulado: ${S.n} entradas · ${u2(+S.lucro || 0)} · ROI ${S.roi == null ? '–' : pctS(+S.roi)}</i>`);
+    }
+    const T = hitOf(rows);
+    return `🧪 <b>GABARITO DAS ESTRATÉGIAS · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play</i>\n\n${blocks.join('\n\n')}\n\n📊 <b>Dia: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}</b>\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
+  };
+  const text = build(true);
+  return text.length <= 4090 ? text : build(false);
+}
+async function gabaritoCmd(): Promise<Out> {
+  const y = etDate(Date.now() - 864e5), res = await getResults();
+  const kb = { inline_keyboard: [[BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('🏠 Menu', '/menu')]] };
+  if (!res?.dates?.includes(y)) return { text: `Os resultados de ${dateBR(y)} ainda não saíram (a coleta das 10h traz). Tente mais tarde.`, kb };
+  return { text: (await estGabarito(y, res)) ?? `Nenhuma entrada de estratégia gravada em ${dateBR(y)}.`, kb };
+}
+const MORNING_KB = () => ({ inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🧪 Gabarito das estratégias', '/gabarito')], [BTN('🧠 Modelo BH', '/modelobh'), BTN('🏠 Menu', '/menu')]] });
 async function ontemCmd(chatId: number): Promise<Out> {
   const y = etDate(Date.now() - 864e5), res = await getResults();
   if (!res?.dates?.includes(y)) return { text: `Os resultados de ${dateBR(y)} ainda não saíram (a coleta das 10h traz). Tente mais tarde.`, kb: MORNING_KB() };
@@ -613,19 +651,26 @@ async function morningPush(force = false) {
   if (!res?.dates?.includes(y)) return { ok: true, skip: `resultados de ${y} ainda não saíram` };
   const picks: any[] = await sb(`top_picks?date=eq.${y}`).catch(() => []) ?? [];
   await settleTops(picks, res);
-  const subs: any[] = await sb('bot_subs?select=chat_id&or=(tent.eq.true,ra.eq.true)').catch(() => []) ?? [];
+  const subs: any[] = await sb('bot_subs?select=chat_id,tent,ra,est&or=(tent.eq.true,ra.eq.true,est.eq.true)').catch(() => []) ?? [];
+  const gab = await estGabarito(y, res).catch(e => { console.error('gabarito', e); return null; });
   const bettors: any[] = await sb(`bets?select=chat_id&date=eq.${y}&status=neq.aguardando_odd`).catch(() => []) ?? [];
   const chats = [...new Set([...subs, ...bettors].map(x => +x.chat_id))];
   let sent = 0;
   for (const c of chats) {
-    const text = await morningText(c, y, subs.some(x => +x.chat_id === c) ? picks : [], res);
-    if (!text) continue;
-    const r = await TG('sendMessage', { chat_id: c, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: MORNING_KB() });
-    if (r.ok) sent++;
-    await new Promise(ok => setTimeout(ok, 60));
+    const text = await morningText(c, y, subs.some(x => +x.chat_id === c && (x.tent || x.ra)) ? picks : [], res);
+    if (text) {
+      const r = await TG('sendMessage', { chat_id: c, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: MORNING_KB() });
+      if (r.ok) sent++;
+      await new Promise(ok => setTimeout(ok, 60));
+    }
+    if (gab && subs.some(x => +x.chat_id === c && x.est)) {
+      const r = await TG('sendMessage', { chat_id: c, text: gab, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('🏠 Menu', '/menu')]] } });
+      if (r.ok) sent++;
+      await new Promise(ok => setTimeout(ok, 60));
+    }
   }
   await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: flag, value: String(sent), updated_at: new Date().toISOString() }) }).catch(() => null);
-  return { ok: true, date: y, tops: picks.length, chats: chats.length, mensagens: sent };
+  return { ok: true, date: y, tops: picks.length, estrategias: !!gab, chats: chats.length, mensagens: sent };
 }
 const hitTxt = (h?: [number, number] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 
@@ -756,7 +801,7 @@ const HELP = `<b>📖 COMANDOS</b>
 <b>Por mercado</b> <i>(some um número: /rebotes 15)</i>
 /pontos /rebotes /assist /tres
 /pra /pr /pa /ra /combinados
-/tentativas · tentados (total, de 3, de 2, lances) e convertidos
+/tentativas · tentados (de 3, de 2, lances) e convertidos
 /convertidos · arremessos convertidos
 /defesa · roubos, tocos e erros
 
@@ -779,6 +824,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /apagar 12 · apaga uma entrada registrada errada
 /ontem · resultado de ontem (chega sozinho de manhã)
 /estrategias · placar da fábrica de estratégias (teste em papel)
+/gabarito · resultado de ontem de cada estratégia (chega sozinho de manhã)
 /app · app completo
 
 <b>Como usar as listas</b>
@@ -838,6 +884,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'banca' || cmd === 'roi') return bancaCmd(chatId, rest);
   if (cmd === 'apagar') return apagarCmd(chatId, rest);
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
+  if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
@@ -1029,7 +1076,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Placar das estratégias'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Placar das estratégias'], ['gabarito', 'Gabarito de ontem das estratégias'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

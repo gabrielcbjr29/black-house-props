@@ -1,6 +1,6 @@
 // Dados prontos para o bot do Telegram (public/data/bot.json).
 // O modelo roda aqui, na coleta; o bot só filtra e formata, então responde rápido.
-import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB } from '../public/engine.js';
+import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB, OFF_MK } from '../public/engine.js';
 
 const POS_PT = { G: 'armadores', F: 'alas', C: 'pivôs' };
 const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bolas de 3', stl: 'roubos', blk: 'tocos', tov: 'erros', fgm: 'arremessos convertidos', fga: 'arremessos tentados', fta: 'lances livres tentados', ftm: 'lances livres', tpa: 'bolas de 3 tentadas', twom: 'arremessos de 2', twoa: 'arremessos de 2 tentados', oreb: 'rebotes ofensivos', pf: 'faltas' };
@@ -15,7 +15,7 @@ export const c99Games = rows => new Set(rows.filter(r => r.c9).map(r => r.g));
 // bateu menos da metade das vezes, a entrada não vai para os tops (pega o under que o histórico sem o colega desmente)
 export const woLock = r => !!(r.wo?.x && r.wo.h?.[1] >= 5 && r.wo.h[0] / r.wo.h[1] < .5);
 // grupos das listas do bot (mesmos mercados dos comandos)
-const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['FGA', '2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV'], ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM']];
+const CARD_GROUPS = [['PTS'], ['REB'], ['AST'], ['3PM'], ['PRA'], ['PR'], ['PA'], ['RA'], ['2PA', '3PA', 'FTA'], ['FGM', '2PM', 'FTM'], ['STL', 'BLK', 'SB', 'TOV'], ['3PA', 'FTA', '2PA', '2PM', 'FGM']];
 const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt.mu - pr.mkt.openMu) / Math.max(pr.mkt.mu, 1); return Math.abs(d) >= .025 ? Math.sign(side === 'over' ? d : -d) : 0; };
 
 const brTime = iso => iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '';
@@ -26,7 +26,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
   const gById = Object.fromEntries(slate.games.map(g => [g.id, g]));
   const rows = [];
   for (const pr of buildProps(slate, { calib: true })) {
-    if (pr.p.status === 'out' || pr.p.status === 'doubtful') continue;
+    if (pr.p.status === 'out' || pr.p.status === 'doubtful' || OFF_MK.has(pr.mk)) continue;
     const e = evaluate(pr, null, { w });
     const s = e[e.best];
     if (GRADE_ORDER[s.grade] < 2) continue;
@@ -81,7 +81,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
   take(R.filter(r => r.p >= .65 && GRADE_ORDER[r.gr] >= 3).sort((a, b) => b.p - a.p), 10);
   // top 10 do Modelo BH (sem faixa de odd: são linhas de referência, sem odd de casa)
   const cov = c99Games(rows);
-  for (const g of [['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']]) take(rows.filter(r => topEligible(r, g, cov)).sort((a, b) => b.sc - a.sc), 10);
+  for (const g of [['3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']]) take(rows.filter(r => topEligible(r, g, cov)).sort((a, b) => b.sc - a.sc), 10);
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));

@@ -11,7 +11,7 @@ import { DEFAULT_BOOKS } from './oddsplan.js';
 import { buildBotData, topEligible, c99Games } from './botdata.js';
 
 const BASE = 'https://api.the-odds-api.com/v4/sports/basketball_nba';
-export const TOP_LISTS = { tent: ['FGA', '3PA', 'FTA', '2PA', '2PM', 'FGM'], ra: ['RA'] };
+export const TOP_LISTS = { tent: ['3PA', 'FTA', '2PA', '2PM', 'FGM'], ra: ['RA'] };
 const median = a => { const s = a.filter(x => x > 1).sort((x, y) => x - y); if (!s.length) return null; const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
 /* candidatos dos tops (mesmo filtro do bot), alguns a mais porque a linha real pode mudar a ordem */
