@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TEAM_INFO } from '../public/engine.js';
+import { TEAM_INFO, jerseySVG } from '../public/engine.js';
 
 const ROOT = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -31,6 +31,8 @@ body { width: 1080px; height: 1350px; background: #000; color: #F2F5F2; font-fam
 .brand small { display: block; font-family: MR; font-weight: 700; font-size: 17px; letter-spacing: 4px; color: #8A968E; margin-top: 6px; }
 .pill { font-family: MR; font-weight: 800; font-size: 20px; letter-spacing: 3px; padding: 12px 22px; border-radius: 99px; border: 2px solid #FFC933; color: #FFC933; }
 .who { display: flex; align-items: center; gap: 28px; margin-top: 44px; }
+.jer { flex: none; width: 128px; height: 138px; filter: drop-shadow(0 12px 24px rgba(0,0,0,.55)); }
+.jer text { font-family: BS, sans-serif; }
 .badge { flex: none; width: 132px; height: 132px; border-radius: 30px; display: grid; place-items: center; font-family: BS; font-weight: 900; font-size: 50px; color: #fff; letter-spacing: 1px; box-shadow: inset 0 0 0 3px rgba(255,255,255,.18), 0 12px 30px rgba(0,0,0,.5); }
 .name { font-family: BS; font-weight: 800; font-size: 76px; line-height: .95; letter-spacing: .5px; }
 .sub { margin-top: 10px; font-size: 26px; color: #A3AEA6; font-weight: 600; }
@@ -91,7 +93,7 @@ export function cardHTML(r, date) {
   const [, mm, dd] = date.split('-');
   return `<div class="c">
   <div class="top"><div class="brand">BLACK <b>HOUSE</b><small>PROPS NBA · ${dd}/${mm}</small></div><div class="pill">ENTRADA DO DIA</div></div>
-  <div class="who"><div class="badge" style="background:${col}">${esc(r.t)}</div>
+  <div class="who">${jerseySVG({ team: r.t, num: r.nu, name: r.n }, 2)}
     <div><div class="name">${esc(r.n)}</div><div class="sub">${esc(r.ps || '')}${r.ps ? ' · ' : ''}${vs} · ${esc(r.h)}</div></div>
     <div class="grade"><div class="g g${r.gr === 'A+' ? 'Ap' : r.gr}">${esc(r.gr)}</div><small>NOTA ${r.nt ?? '–'}</small></div></div>
   <div class="line"><span class="side ${r.s}">${over ? 'MAIS DE' : 'MENOS DE'}</span><span class="ln">${n1(r.l)}</span><span class="mk">${esc(MK[r.m] || r.m)}</span></div>

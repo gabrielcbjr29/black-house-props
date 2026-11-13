@@ -1,5 +1,5 @@
 // Garrafão Props — interface. Lê data/slate.json e calcula tudo no navegador com engine.js.
-import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GRADE_ORDER, parlayProb, overProb, bestPrice, makeDist, quantile, ladder, divergence, bhScore, reasons, ODD_RANGE, inOddRange, OFF_MK } from './engine.js';
+import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GRADE_ORDER, parlayProb, overProb, bestPrice, makeDist, quantile, ladder, divergence, bhScore, reasons, ODD_RANGE, inOddRange, OFF_MK, jerseySVG } from './engine.js';
 import { newTip, settleTip, summarize, toCSV, clvOf, profitOf } from './tips.js';
 import { postText, drawCard, legText, WARNINGS, resultsText, drawResults } from './share.js';
 import { parseImport } from './importer.js';
@@ -271,27 +271,8 @@ function valbar(s, mkt) {
 const lum = hex => { const c = String(hex).replace('#', ''); return [0, 2, 4].map(i => { const v = parseInt(c.substr(i, 2), 16) / 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((a, v, i) => a + v * [.2126, .7152, .0722][i], 0); };
 const onColor = hex => 1.05 / (lum(hex) + .05) >= 4.5 ? '#fff' : '#000';
 const badge = (t, sm) => { const bg = (TEAM_INFO[t] || ['', '#444'])[1]; return `<span class="badge${sm ? ' sm' : ''}" style="background:${bg};color:${onColor(bg)}" title="${esc((TEAM_INFO[t] || [t])[0])}">${esc(t)}</span>`; };
-// camisa estilizada do jogador (cores do time + número da camisa; sem número, as iniciais). Sem foto nem logo.
-const JER = { ATL: ['#C8102E', '#FDB927'], BOS: ['#007A33', '#FFFFFF'], BKN: ['#1F1F1F', '#FFFFFF'], CHA: ['#00788C', '#FFFFFF'], CHI: ['#CE1141', '#FFFFFF'],
-  CLE: ['#860038', '#FDBB30'], DAL: ['#00538C', '#FFFFFF'], DEN: ['#0E2240', '#FEC524'], DET: ['#1D42BA', '#FFFFFF'], GSW: ['#1D428A', '#FFC72C'],
-  HOU: ['#CE1141', '#FFFFFF'], IND: ['#002D62', '#FDBB30'], LAC: ['#1D428A', '#FFFFFF'], LAL: ['#552583', '#FDB927'], MEM: ['#12173F', '#7D9BD6'],
-  MIA: ['#98002E', '#F9A01B'], MIL: ['#00471B', '#EEE1C6'], MIN: ['#0C2340', '#78BE20'], NOP: ['#0C2340', '#B4975A'], NYK: ['#006BB6', '#F58426'],
-  OKC: ['#007AC1', '#FFFFFF'], ORL: ['#0077C0', '#C4CED4'], PHI: ['#006BB6', '#FFFFFF'], PHX: ['#1D1160', '#E56020'], POR: ['#1D1D1D', '#E03A3E'],
-  SAC: ['#5A2D81', '#FFFFFF'], SAS: ['#1A1A1A', '#C4CED4'], TOR: ['#CE1141', '#FFFFFF'], UTA: ['#3E2680', '#FFFFFF'], WAS: ['#002B5C', '#FFFFFF'] };
-const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + .05) / (y + .05); };
-const initials = n => String(n || '').replace(/\b(Jr|Sr|II|III|IV)\.?$/i, '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
-function jer(p, size) {
-  const t = p?.team, [c1, c2r] = JER[t] || [(TEAM_INFO[t] || ['', '#444'])[1], '#FFFFFF'];
-  const c2 = contrast(c1, c2r) >= 3 ? c2r : onColor(c1), num = p?.num, ini = initials(p?.name), sm = size === 1, lg = size === 2;
-  const big = num || ini, fs = String(big).length > 1 ? 40 : 46;
-  const label = `${esc(p?.name || '')}, ${esc((TEAM_INFO[t] || [t])[0])}${num ? ', camisa ' + esc(num) : ''}`;
-  return `<svg class="jer${sm ? ' sm' : lg ? ' lg' : ''}" viewBox="0 0 100 108" role="img" aria-label="${label}"><title>${label}</title>`
-    + `<path d="M28 4C34 4 38 9 50 9S66 4 72 4h2c1 12 8 20 20 22v74c0 4-3 6-7 6H13c-4 0-7-2-7-6V26c12-2 19-10 20-22z" fill="${c1}" stroke="${c2}" stroke-width="${sm ? 6 : 4}" stroke-linejoin="round"/>`
-    + `<path d="M38 6l12 16 12-16" fill="none" stroke="${c2}" stroke-width="${sm ? 6 : 4}" stroke-linejoin="round" stroke-linecap="round"/>`
-    + (sm ? '' : `<text x="50" y="40" text-anchor="middle" font-weight="800" font-size="11" letter-spacing="1.5" fill="${c2}">${esc(t || '')}</text>`)
-    + `<text x="50" y="${sm ? 88 : 84}" text-anchor="middle" font-weight="900" font-size="${sm ? fs + 8 : fs}" fill="${c2}">${esc(big)}</text>`
-    + (sm || !num ? '' : `<text x="50" y="99" text-anchor="middle" font-weight="700" font-size="8.5" letter-spacing="1" fill="${c2}" opacity=".85">${esc(ini)}</text>`) + '</svg>';
-}
+// camisa estilizada do jogador (desenho em engine.js, o mesmo dos cards do bot)
+const jer = (p, size) => jerseySVG(p, size);
 const gradeChip = g => `<span class="grade g${g === 'A+' ? 'Ap' : g}" title="Nota ${g}">${g}</span>`;
 const matchLabel = pr => pr.ctx.isHome ? `vs ${pr.opp}` : `@ ${pr.opp}`;
 const sideLb = s => s === 'over' ? 'Mais de' : 'Menos de';

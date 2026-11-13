@@ -114,6 +114,32 @@ export const TEAM_INFO = {
   SAC: ['Kings', '#5A2D81'], SAS: ['Spurs', '#5B6770'], TOR: ['Raptors', '#CE1141'], UTA: ['Jazz', '#3E2680'], WAS: ['Wizards', '#002B5C']
 };
 
+// ---------- camisa estilizada do jogador (cores do time + número da camisa; sem número, as iniciais). Sem foto nem logo.
+// Usada no app e nos cards em imagem do bot. size: 1 = pequena (só o número), 2 = grande, vazio = normal.
+export const JER = { ATL: ['#C8102E', '#FDB927'], BOS: ['#007A33', '#FFFFFF'], BKN: ['#1F1F1F', '#FFFFFF'], CHA: ['#00788C', '#FFFFFF'], CHI: ['#CE1141', '#FFFFFF'],
+  CLE: ['#860038', '#FDBB30'], DAL: ['#00538C', '#FFFFFF'], DEN: ['#0E2240', '#FEC524'], DET: ['#1D42BA', '#FFFFFF'], GSW: ['#1D428A', '#FFC72C'],
+  HOU: ['#CE1141', '#FFFFFF'], IND: ['#002D62', '#FDBB30'], LAC: ['#1D428A', '#FFFFFF'], LAL: ['#552583', '#FDB927'], MEM: ['#12173F', '#7D9BD6'],
+  MIA: ['#98002E', '#F9A01B'], MIL: ['#00471B', '#EEE1C6'], MIN: ['#0C2340', '#78BE20'], NOP: ['#0C2340', '#B4975A'], NYK: ['#006BB6', '#F58426'],
+  OKC: ['#007AC1', '#FFFFFF'], ORL: ['#0077C0', '#C4CED4'], PHI: ['#006BB6', '#FFFFFF'], PHX: ['#1D1160', '#E56020'], POR: ['#1D1D1D', '#E03A3E'],
+  SAC: ['#5A2D81', '#FFFFFF'], SAS: ['#1A1A1A', '#C4CED4'], TOR: ['#CE1141', '#FFFFFF'], UTA: ['#3E2680', '#FFFFFF'], WAS: ['#002B5C', '#FFFFFF'] };
+const xesc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const xlum = hex => { const c = String(hex).replace('#', ''); return [0, 2, 4].map(i => { const v = parseInt(c.substr(i, 2), 16) / 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((a, v, i) => a + v * [.2126, .7152, .0722][i], 0); };
+const xcontrast = (a, b) => { const [x, y] = [xlum(a), xlum(b)].sort((m, n) => n - m); return (x + .05) / (y + .05); };
+export const initials = n => String(n || '').replace(/\b(Jr|Sr|II|III|IV)\.?$/i, '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+export function jerseySVG(p, size) {
+  const t = p?.team, [c1, c2r] = JER[t] || [(TEAM_INFO[t] || ['', '#444'])[1], '#FFFFFF'];
+  const c2 = xcontrast(c1, c2r) >= 3 ? c2r : (xcontrast(c1, '#FFFFFF') >= xcontrast(c1, '#000000') ? '#FFFFFF' : '#000000');
+  const num = p?.num, ini = initials(p?.name), sm = size === 1, lg = size === 2;
+  const big = num || ini, fs = String(big).length > 1 ? 40 : 46;
+  const label = `${xesc(p?.name || '')}, ${xesc((TEAM_INFO[t] || [t])[0])}${num ? ', camisa ' + xesc(num) : ''}`;
+  return `<svg class="jer${sm ? ' sm' : lg ? ' lg' : ''}" viewBox="0 0 100 108" role="img" aria-label="${label}"><title>${label}</title>`
+    + `<path d="M28 4C34 4 38 9 50 9S66 4 72 4h2c1 12 8 20 20 22v74c0 4-3 6-7 6H13c-4 0-7-2-7-6V26c12-2 19-10 20-22z" fill="${c1}" stroke="${c2}" stroke-width="${sm ? 6 : 4}" stroke-linejoin="round"/>`
+    + `<path d="M38 6l12 16 12-16" fill="none" stroke="${c2}" stroke-width="${sm ? 6 : 4}" stroke-linejoin="round" stroke-linecap="round"/>`
+    + (sm ? '' : `<text x="50" y="40" text-anchor="middle" font-weight="800" font-size="11" letter-spacing="1.5" fill="${c2}">${xesc(t || '')}</text>`)
+    + `<text x="50" y="${sm ? 88 : 84}" text-anchor="middle" font-weight="900" font-size="${sm ? fs + 8 : fs}" fill="${c2}">${xesc(big)}</text>`
+    + (sm || !num ? '' : `<text x="50" y="99" text-anchor="middle" font-weight="700" font-size="8.5" letter-spacing="1" fill="${c2}" opacity=".85">${xesc(ini)}</text>`) + '</svg>';
+}
+
 // ---------- defesa × posição ----------
 function allowedValue(team, pos, k, slate) {
   const a = slate.teams?.[team]?.allowed?.[pos]; const lg = slate.league?.allowed?.[pos];

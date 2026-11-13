@@ -56,7 +56,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
       // L5, sequência atual, vantagem (projeção − linha a favor do lado), temporada passada e "sem o colega"
       l5: s.hits?.L5?.[1] ? s.hits.L5 : null, sk: s.streak || 0, ed: Math.round(s.gap * 10) / 10, tp: s.hits?.PS?.[1] ? s.hits.PS : null,
       wo: pr.ctx.wo && s.hits?.WO?.[1] >= 2 ? { q: pr.ctx.wo.q.name, h: s.hits.WO, a: Math.round(pr.woVals.reduce((a, x) => a + x, 0) / pr.woVals.length * 10) / 10, x: pr.ctx.wo.active ? 1 : 0 } : null, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
-      _v: () => ({ ps: POSLB[pr.p.pos] || '', v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) });
+      _v: () => ({ ps: POSLB[pr.p.pos] || '', ...(pr.p.num ? { nu: pr.p.num } : {}), v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) });
   }
   // ordem: Nota BH, desempate pelo acerto nos últimos 10
   rows.sort((a, b) => b.sc - a.sc);
