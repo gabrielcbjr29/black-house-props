@@ -1,14 +1,12 @@
 // Linhas de jogador da 99play (a casa que o usuário usa), que viram a linha principal do bot e dos tops.
 // A 99play usa o sportsbook da Altenar; a API de widget é pública (a mesma que o site chama no navegador).
 // As duas integrações do código do site (24games1 e 24games2) trazem as mesmas linhas e odds.
-// Fluxo: GetEvents (jogos da NBA) → GetEventDetails de cada jogo de hoje que ainda não começou
-// → mercados de jogador "Mais de/Menos de" → {pid, mk, line, books: {'99play': {o, u}}}.
-// Jogo que já começou mantém a última foto antes do início (state.providers.c99).
+// O leitor no PC do usuário guarda GetEvents + GetEventDetails (só mercados de jogador) no Supabase;
+// aqui viram {pid, mk, line, books: {'99play': {o, u}}}. Jogo que já começou mantém a última foto antes do início.
 import { getJSON, normName } from './http.js';
 import { TEAM_BY_NAME } from './oddsapi.js';
 
-const BASE = 'https://sb2frontend-altenar2.biahosted.com/api/widget';
-export const C99_INTEGRATION = '24games1';
+export const C99_INTEGRATION = '24games1'; // usado pelo leitor (tools/c99-reader.js)
 export const C99_BOOK = '99play';
 const NBA_CHAMP = 2980;
 // typeId do mercado de jogador na Altenar → nosso código
@@ -18,7 +16,6 @@ export const C99_MARKETS = {
   30070: 'PR', 30071: 'PA', 30072: 'PRA', 30073: 'RA', 30078: 'SB',
 };
 const OVER = 2501, UNDER = 2502;
-const qs = extra => new URLSearchParams({ culture: 'pt-BR', timezoneOffset: '180', integration: C99_INTEGRATION, deviceType: '1', numFormat: 'en-GB', countryCode: 'BR', ...extra });
 const teamOf = c => TEAM_BY_NAME[String(c?.name || '').toLowerCase()] || c?.abbreviation || null;
 
 /* jogos da NBA na 99play → [{id, start, teams: [abbr, abbr]}] */
@@ -52,30 +49,30 @@ export function parseEventLines(json, players) {
 }
 
 /**
- * Busca as linhas da 99play para os jogos de hoje. state: data/odds-state.json (providers.c99).
- * Devolve todas as linhas do dia (as novas dos jogos que não começaram + a última foto dos que já começaram).
+ * Linhas da 99play para os jogos de hoje. A 99play recusa os servidores do GitHub, então quem lê é o navegador
+ * do app Claude no computador do usuário (tarefa agendada, tools/c99-reader.js), que grava a foto no Supabase
+ * (função c99-ingest). Aqui a coleta lê a foto mais recente. state: data/odds-state.json (providers.c99).
+ * Devolve as linhas do dia: as da foto nova + a última foto dos jogos que já começaram (somem da foto nova).
  */
-export async function fetch99({ slate, state, now = new Date(), log = console.log, get = getJSON }) {
+export const C99_SNAPSHOT_URL = 'https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?latest=1';
+export async function fetch99({ slate, state, now = new Date(), log = console.log, get = getJSON, maxAgeH = 18 }) {
   const date = slate.meta?.date;
   const S = state.providers.c99 ||= {};
   if (S.date !== date) { S.date = date; S.events = {}; }
   const ours = new Map(slate.games.map(g => [[g.away, g.home].sort().join('|'), g]));
-  let events;
-  try { events = parseEvents(await get(`${BASE}/GetEvents?${qs({ eventCount: '0', sportId: '0', champIds: String(NBA_CHAMP) })}`)); }
-  catch (e) { log(`  99play: lista de jogos falhou (${e.message}); uso a última foto`); events = []; }
-  let fetched = 0, n = 0;
-  for (const ev of events) {
-    const g = ours.get(ev.teams.slice().sort().join('|')); if (!g) continue;
-    if (Date.parse(ev.start) <= now.getTime()) continue; // começou: fica a foto de antes
-    try {
-      const lines = parseEventLines(await get(`${BASE}/GetEventDetails?${qs({ eventId: String(ev.id) })}`, { timeout: 30000 }), slate.players.filter(p => p.team === g.home || p.team === g.away));
-      fetched++;
-      if (lines.length) S.events[g.id] = { at: now.toISOString(), ev: ev.id, lines };
-    } catch (e) { log(`  99play: ${g.away}@${g.home} falhou (${e.message})`); }
-  }
+  let snap = null;
+  try { snap = await get(C99_SNAPSHOT_URL, { timeout: 30000 }); } catch (e) { log(`  99play: foto indisponível (${e.message})`); }
+  const p = snap?.payload, age = snap?.taken_at ? (now.getTime() - Date.parse(snap.taken_at)) / 3600e3 : Infinity;
+  let used = 0;
+  if (p && age <= maxAgeH) {
+    for (const ev of parseEvents(p)) {
+      const g = ours.get(ev.teams.slice().sort().join('|')); if (!g || !p.details?.[ev.id]) continue;
+      const lines = parseEventLines(p.details[ev.id], slate.players.filter(x => x.team === g.home || x.team === g.away));
+      if (lines.length) { S.events[g.id] = { at: snap.taken_at, ev: ev.id, lines }; used++; }
+    }
+  } else if (p) log(`  99play: foto de ${Math.round(age)}h atrás, velha demais; uso a última guardada`);
   const all = Object.values(S.events).flatMap(x => x.lines);
-  n = all.length;
-  log(`  99play: ${fetched} jogos lidos agora, ${Object.keys(S.events).length} com linhas, ${n} linhas de jogador`);
+  log(`  99play: foto de ${snap?.taken_at ?? '—'}, ${used} jogos dela, ${Object.keys(S.events).length} com linhas, ${all.length} linhas de jogador`);
   return all;
 }
 

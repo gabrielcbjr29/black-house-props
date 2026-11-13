@@ -30,13 +30,17 @@ test('99play: linha da casa passa por cima da linha de outra fonte', () => {
   assert.ok(slate.lines.find(l => l.mk === 'PTS'));
 });
 
-test('99play: jogo que já começou fica com a última foto', async () => {
+test('99play: lê a foto do Supabase e guarda a de jogo que já começou', async () => {
   const slate = { meta: { date: '2026-11-12' }, players, games: [{ id: 'g1', home: 'WAS', away: 'DET' }] };
-  const evs = { events: [{ id: 7, champId: 2980, competitorIds: [1, 2], startDate: '2026-11-13T00:00:00Z' }], competitors: [{ id: 1, name: 'Washington Wizards' }, { id: 2, name: 'Detroit Pistons' }] };
-  assert.equal(parseEvents(evs)[0].teams.join(), 'WAS,DET');
-  const state = { providers: {} }, get = async u => (u.includes('GetEvents') ? evs : det);
-  assert.equal((await fetch99({ slate, state, get, now: new Date('2026-11-12T20:00:00Z'), log: () => {} })).length, 2);
-  let called = 0;
-  const after = await fetch99({ slate, state, get: async u => { called++; return u.includes('GetEvents') ? evs : { childMarkets: [] }; }, now: new Date('2026-11-13T01:00:00Z'), log: () => {} });
-  assert.equal(after.length, 2); assert.equal(called, 1);
+  const payload = { events: [{ id: 7, champId: 2980, competitorIds: [1, 2], startDate: '2026-11-13T00:00:00Z' }], competitors: [{ id: 1, name: 'Washington Wizards' }, { id: 2, name: 'Detroit Pistons' }], details: { 7: det } };
+  assert.equal(parseEvents(payload)[0].teams.join(), 'WAS,DET');
+  const state = { providers: {} };
+  const L = await fetch99({ slate, state, get: async () => ({ taken_at: '2026-11-12T20:00:00Z', payload }), now: new Date('2026-11-12T21:00:00Z'), log: () => {} });
+  assert.equal(L.length, 2);
+  // foto nova sem o jogo (já começou): fica a anterior
+  const after = await fetch99({ slate, state, get: async () => ({ taken_at: '2026-11-13T01:00:00Z', payload: { events: [], competitors: [], details: {} } }), now: new Date('2026-11-13T01:10:00Z'), log: () => {} });
+  assert.equal(after.length, 2);
+  // foto velha é ignorada
+  const st2 = { providers: {} };
+  assert.equal((await fetch99({ slate, state: st2, get: async () => ({ taken_at: '2026-11-11T00:00:00Z', payload }), now: new Date('2026-11-12T21:00:00Z'), log: () => {} })).length, 0);
 });
