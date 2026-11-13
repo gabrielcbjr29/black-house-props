@@ -355,7 +355,7 @@ async function pushDaily(force = false, minHour = 0) {
   return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et?.regs.length ?? 0 };
 }
 // ---------- Entradas das estratégias (strategies.json gerado na coleta) ----------
-const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast' };
+const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast', 'reserva-under': 'Under de reserva' };
 const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
 const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
 async function estToday(date: string) {
