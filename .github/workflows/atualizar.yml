@@ -3,17 +3,15 @@
 # Com o runner próprio instalado no seu computador, crie a variável COLETOR = computador em
 # Settings → Secrets and variables → Actions → Variables: a coleta passa a sair pela sua internet
 # de casa e usa as fontes oficiais da NBA. A PUBLICAÇÃO do site sempre roda na nuvem.
-# Horários (Brasília): 10h (abertura), 15h, 18h30, 20h30 (quintetos e linhas mais perto do fechamento)
-# e 22h (jogos da costa oeste). Também roda quando você clica em "Run workflow".
+# Horários (Brasília): de hora em hora, das 9h25 às 23h25, 15 minutos depois de cada leitura das linhas da
+# 99play (feita no computador do usuário às :10). Assim o modelo roda logo que a linha abre ou muda, e as
+# entradas novas viram alerta no bot. Também roda quando você clica em "Run workflow" e a cada push.
 name: Atualizar dados e publicar
 
 on:
   schedule:
-    - cron: '0 13 * * *'
-    - cron: '0 18 * * *'
-    - cron: '30 21 * * *'
-    - cron: '30 23 * * *'
-    - cron: '0 1 * * *'
+    - cron: '25 12-23 * * *'
+    - cron: '25 0-2 * * *'
   workflow_dispatch:
     inputs:
       odds_agora:

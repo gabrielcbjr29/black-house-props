@@ -315,14 +315,20 @@ async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
   else if (a === 'tent' || a === 'ra' || a === 'est') next = { ...(s ?? { tent: false, ra: false, est: false }), [a]: !(s?.[a as keyof Sub]) };
   if (JSON.stringify(next) !== JSON.stringify(s)) await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...next, updated_at: new Date().toISOString() }) });
   const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências', next?.est && '🧪 Modelo por mercado (entradas do dia)'].filter(Boolean);
-  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, por volta das 19h (depois da atualização com escalações e lesões):\n${on.map(x => '• ' + x).join('\n')}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
+  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, cerca de 2h30 antes do primeiro jogo (em dia de jogo cedo, mais cedo):\n${on.map(x => '• ' + x).join('\n')}${next?.est ? '\n\n🚨 No modelo por mercado, cada entrada nova também chega na hora, em alerta, assim que o modelo aponta (de 9h às 23h).' : ''}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
 }
 // envio do dia para os inscritos (chamado pelo GitHub depois de publicar os dados)
 // minHour: só envia se os dados foram gerados depois dessa hora (Brasília) — espera a rodada das 18h30
-async function pushDaily(force = false, minHour = 0) {
+// lead: envia só quando faltar até `lead` minutos para o primeiro jogo do dia (fim de semana com jogo cedo
+// recebe mais cedo); o pg_cron chama a cada 30 min e a trava PUSH_<data> garante um envio por dia
+async function pushDaily(force = false, minHour = 0, lead = 0) {
   CACHE = null;
   const d = await data();
   const flag = `PUSH_${d.date}`;
+  if (!force && lead) {
+    const first = Math.min(...d.games.map(g => Date.parse(g.utc ?? '') || Infinity));
+    if (Number.isFinite(first) && Date.now() < first - lead * 6e4) return { ok: true, skip: `cedo: primeiro jogo às ${hourBR(new Date(first).toISOString())}` };
+  }
   if (!force) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     if (d.date !== today) return { ok: true, skip: `dados de ${d.date}, hoje é ${today}` };
@@ -333,7 +339,7 @@ async function pushDaily(force = false, minHour = 0) {
   const gravados = await recordTops(d).catch(e => { console.error('top_picks', e); return 0; });
   const subs: ({ chat_id: number } & Sub)[] = await sb('bot_subs?select=chat_id,tent,ra,est&or=(tent.eq.true,ra.eq.true,est.eq.true)') ?? [];
   const txt = { tent: topText(d, 'tent'), ra: topText(d, 'ra') };
-  const et = estText(d, await estToday(d.date));
+  const et = estText(d, await estEntries(d.date));
   let sent = 0;
   for (const s of subs) {
     for (const k of ['tent', 'ra'] as const) {
@@ -358,6 +364,14 @@ async function pushDaily(force = false, minHour = 0) {
 const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast', 'reserva-under': 'Under de reserva' };
 const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
 const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
+// entradas já gravadas do dia (linha e odd do alerta), só de jogos que ainda não começaram, no formato do strategies.json
+async function estEntries(date: string) {
+  const [picks, strategies] = await Promise.all([
+    sb(`strategy_picks?date=eq.${date}&status=eq.aberta&select=strategy_id,pid,name,team,opp,mk,side,line,odd,open_line,open_odd,p,edge,tip_utc&order=first_at.asc`).catch(() => []),
+    sb('strategies?select=id,name&order=id').catch(() => [])]);
+  if (!picks?.length) return null;
+  return { date, strategies, picks: picks.map((x: any) => ({ ...x, line: x.open_line ?? x.line, odd: x.open_odd ?? x.odd })) };
+}
 async function estToday(date: string) {
   const st = await fetch(APP_URL + 'data/strategies.json?t=' + Math.floor(Date.now() / 120_000)).then(r => r.ok ? r.json() : null).catch(() => null);
   return st?.date === date ? st : null;
@@ -376,7 +390,7 @@ function estText(d: Data, st: any): { text: string; regs: { text: string; callba
         return `${i}. <b>${esc(p.name)}</b> ${p.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+p.line)} ${MKS[p.mk] ?? p.mk} · ${p.odd ? '@' + n2(+p.odd) : 'sem odd'} · ${pc(+p.p)}${p.edge != null ? ' · EV ' + evS(p.edge) : ''}${full ? `\n    <i>${esc(p.team)} x ${esc(p.opp)}${p.tip_utc ? ' · ' + hourBR(p.tip_utc) : ''}</i>` : ''}`;
       }).join('\n'));
     }
-    const text = `<b>🧪 MODELO POR MERCADO · ENTRADAS DO DIA</b>\n<i>${dateBR(d.date)} · ${i} entradas · linha e odd da 99play · cada mercado com o próprio placar</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 Toque no número e mande a odd que você pegou (ex.: <code>1,85</code>; para meia unidade, <code>1,85 0,5u</code>). O ROI de cada estratégia aparece em /banca. Ainda é teste: use entrada pequena até o mercado ter 50+ entradas com ROI e CLV positivos.</i>` + FOOT;
+    const text = `<b>🧪 MODELO POR MERCADO · ENTRADAS DO DIA</b>\n<i>${dateBR(d.date)} · ${i} entradas em aberto · linha e odd da 99play no momento do alerta</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 Toque no número e mande a odd que você pegou (ex.: <code>1,85</code>; para meia unidade, <code>1,85 0,5u</code>). O ROI de cada estratégia aparece em /banca. Ainda é teste: use entrada pequena até o mercado ter 50+ entradas com ROI e CLV positivos.</i>` + FOOT;
     return { text, regs };
   };
   let out = build(true);
@@ -509,13 +523,13 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   let stats: any[] = [], picks: any[] = [];
   try {
     stats = await sb('strategy_stats?select=*&order=lucro.desc.nullslast') ?? [];
-    picks = await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,pid,name,mk,side,line,odd,odd_src,p,edge,status&order=edge.desc.nullslast`) ?? [];
+    picks = await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,pid,name,mk,side,line,odd,open_line,open_odd,odd_src,p,edge,status&order=first_at.asc`) ?? [];
   } catch { return { text: 'Não consegui ler as estratégias agora.', kb: { inline_keyboard: [HOME] } }; }
   if (!stats.length) return { text: 'Nenhuma estratégia cadastrada ainda.', kb: { inline_keyboard: [HOME] } };
   // antes da primeira gravação do dia, mostra a lista de hoje direto da coleta
   if (!picks.length) { const st = await estToday(etDate()); picks = (st?.picks ?? []).map((p: any) => ({ ...p, status: 'aberta', odd_src: p.odd ? p.odd_src : 'estimada' })); }
   const ev = (x: any) => evS(x);
-  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || 1.87)}${x.odd_src === 'estimada' ? '*' : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
+  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || 1.87)}${x.odd_src === 'estimada' ? '*' : ''}${x.open_line != null && +x.open_line !== +x.line ? ` <i>(agora ${n1(+x.line)})</i>` : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
   const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('✅ Gabarito de ontem', '/gabarito')], [BTN('🏠 Menu', '/menu')]] };
   const S = id ? stats.find(s => s.id === id) : null;
   if (S) {
@@ -595,22 +609,23 @@ async function morningText(chatId: number, y: string, picks: any[], res: any) {
     parts.push(`<b>📈 Top 10 do Modelo BH</b>\n${[L('tent'), L('ra')].filter(Boolean).join('\n')}` + await topsResumo());
   }
   if (!parts.length) return null;
-  return `☀️ <b>RESULTADO DE ONTEM · ${dateBR(y)}</b>\n\n` + parts.join('\n\n') + `\n\n<i>* odd estimada (1,87): mercado sem odd nas nossas fontes. Hoje os tops saem por volta das 19h20.</i>`;
+  return `☀️ <b>RESULTADO DE ONTEM · ${dateBR(y)}</b>\n\n` + parts.join('\n\n') + `\n\n<i>* odd estimada (1,87): mercado sem odd nas nossas fontes. Hoje o resumo sai cerca de 2h30 antes do primeiro jogo.</i>`;
 }
 // gabarito das estratégias de um dia: confere cada entrada (1u na odd da 99play gravada) e mostra o acumulado de cada estratégia
 async function settleStrats(rows: any[], res: any) {
   for (const r of rows.filter(x => x.status === 'aberta')) {
     if (!res?.dates?.includes(r.date)) continue;
     const a = res.stats[r.date]?.[r.pid];
+    const L = +(r.open_line ?? r.line), O = +(r.open_odd ?? r.odd) || ODD_EST; // entrada: linha e odd do alerta
     let status = 'void', result: number | null = null;
-    if (a && a[0] > 0) { result = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); status = result === +r.line ? 'void' : (r.side === 'o' ? result > +r.line : result < +r.line) ? 'green' : 'red'; }
-    const patch = { status, result, profit: status === 'green' ? Math.round(((+r.odd || ODD_EST) - 1) * 100) / 100 : status === 'red' ? -1 : 0, settled_at: new Date().toISOString() };
+    if (a && a[0] > 0) { result = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); status = result === L ? 'void' : (r.side === 'o' ? result > L : result < L) ? 'green' : 'red'; }
+    const patch = { status, result, profit: status === 'green' ? Math.round((O - 1) * 100) / 100 : status === 'red' ? -1 : 0, settled_at: new Date().toISOString() };
     Object.assign(r, patch);
     await sb(`strategy_picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(patch) }).catch(() => null);
   }
 }
 async function estGabarito(y: string, res: any) {
-  const rows: any[] = await sb(`strategy_picks?date=eq.${y}&select=id,date,strategy_id,pid,name,mk,stat,side,line,odd,odd_src,status,result,profit,clv_line&order=edge.desc.nullslast`).catch(() => []) ?? [];
+  const rows: any[] = await sb(`strategy_picks?date=eq.${y}&select=id,date,strategy_id,pid,name,mk,stat,side,line,odd,open_line,open_odd,odd_src,status,result,profit,clv_line&order=first_at.asc`).catch(() => []) ?? [];
   if (!rows.length) return null;
   await settleStrats(rows, res);
   const stats: any[] = await sb('strategy_stats?select=*').catch(() => []) ?? [];
@@ -620,11 +635,11 @@ async function estGabarito(y: string, res: any) {
     for (const S of stats) {
       const a = rows.filter(x => x.strategy_id === S.id); if (!a.length) continue;
       const h = hitOf(a);
-      const lines = a.map(x => `${ic(x)} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || ODD_EST)}${x.result != null ? ` <i>(fez ${n1(+x.result)})</i>` : ''}${x.clv_line != null && +x.clv_line !== 0 ? ` · CLV ${+x.clv_line > 0 ? '+' : ''}${n1(+x.clv_line)}` : ''}`).join('\n');
+      const lines = a.map(x => `${ic(x)} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || ODD_EST)}${x.result != null ? ` <i>(fez ${n1(+x.result)})</i>` : ''}${x.clv_line != null && +x.clv_line !== 0 ? ` · fechou ${n1(+x.line)} (CLV ${+x.clv_line > 0 ? '+' : ''}${n1(+x.clv_line)})` : ''}`).join('\n');
       blocks.push(`<b>🧪 ${esc(S.name)}</b>: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''} · <b>${u2(h.pr)}</b>${det ? `\n<blockquote>${lines}</blockquote>` : ''}\n<i>Acumulado: ${S.n} entradas · ${u2(+S.lucro || 0)} · ROI ${S.roi == null ? '–' : pctS(+S.roi)}</i>`);
     }
     const T = hitOf(rows);
-    return `🧪 <b>GABARITO DO MODELO POR MERCADO · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play</i>\n\n${blocks.join('\n\n')}\n\n📊 <b>Dia: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}</b>\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
+    return `🧪 <b>GABARITO DO MODELO POR MERCADO · ${dateBR(y)}</b>\n<i>1u por entrada, na linha e odd da 99play do alerta</i>\n\n${blocks.join('\n\n')}\n\n📊 <b>Dia: ${T.g}/${T.n} · ${u2(T.pr)} · ROI ${pctS(T.roi)}</b>\n<i>CLV = quanto a linha andou a nosso favor até o jogo começar.${det ? '' : ' Entrada por entrada: aba Estratégias da planilha.'}</i>`;
   };
   const text = build(true);
   return text.length <= 4090 ? text : build(false);
@@ -1042,7 +1057,7 @@ Deno.serve(async (req: Request) => {
   if (!TOKEN || !SECRET) return new Response('Falta configurar TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET (tabela bot_config ou segredos da função).', { status: 500 });
   if (req.method === 'GET') {
     if (url.searchParams.get('push') && url.searchParams.get('push') === SECRET) {
-      const r = await pushDaily(url.searchParams.get('force') === '1', +(url.searchParams.get('min') || 0)).catch(e => ({ ok: false, erro: String(e) }));
+      const r = await pushDaily(url.searchParams.get('force') === '1', +(url.searchParams.get('min') || 0), +(url.searchParams.get('lead') || 0)).catch(e => ({ ok: false, erro: String(e) }));
       return new Response(JSON.stringify(r), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
     }
     if (url.searchParams.get('morning') && url.searchParams.get('morning') === SECRET) {
