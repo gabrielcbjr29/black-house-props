@@ -300,19 +300,21 @@ function topText(d: Data, key: string) {
   if (!top.length) return null;
   return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE(d) + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd. 🔢 = sequência dos últimos 10 (mais recente primeiro).</i>' + FOOT;
 }
-const subKb = (s: { tent: boolean; ra: boolean } | null) => ({ inline_keyboard: [
+type Sub = { tent: boolean; ra: boolean; est: boolean };
+const subKb = (s: Sub | null) => ({ inline_keyboard: [
   [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
+  [BTN(`${s?.est ? '✅' : '⬜'} Estratégias do dia`, '/receber est')],
   [BTN('🔕 Parar de receber', '/receber parar'), BTN('🏠 Menu', '/menu')]] });
 async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
   const a = norm(rest[0] ?? '');
-  let s: { tent: boolean; ra: boolean } | null = null;
-  try { s = (await sb(`bot_subs?chat_id=eq.${chatId}&select=tent,ra`))?.[0] ?? null; } catch { return { text: 'Não consegui acessar as inscrições agora.', kb: { inline_keyboard: [HOME] } }; }
+  let s: Sub | null = null;
+  try { s = (await sb(`bot_subs?chat_id=eq.${chatId}&select=tent,ra,est`))?.[0] ?? null; } catch { return { text: 'Não consegui acessar as inscrições agora.', kb: { inline_keyboard: [HOME] } }; }
   let next = s;
-  if (!a) next = s ?? { tent: true, ra: true };
-  else if (a === 'parar') next = { tent: false, ra: false };
-  else if (a === 'tent' || a === 'ra') next = { ...(s ?? { tent: false, ra: false }), [a]: !(s?.[a as 'tent' | 'ra']) };
+  if (!a) next = s ?? { tent: true, ra: true, est: true };
+  else if (a === 'parar') next = { tent: false, ra: false, est: false };
+  else if (a === 'tent' || a === 'ra' || a === 'est') next = { ...(s ?? { tent: false, ra: false, est: false }), [a]: !(s?.[a as keyof Sub]) };
   if (JSON.stringify(next) !== JSON.stringify(s)) await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...next, updated_at: new Date().toISOString() }) });
-  const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências'].filter(Boolean);
+  const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências', next?.est && '🧪 Entradas das estratégias'].filter(Boolean);
   return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, por volta das 19h (depois da atualização com escalações e lesões):\n${on.map(x => '• ' + x).join('\n')}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
 }
 // envio do dia para os inscritos (chamado pelo GitHub depois de publicar os dados)
@@ -329,23 +331,65 @@ async function pushDaily(force = false, minHour = 0) {
     const done = await sb(`bot_config?key=eq.${flag}&select=key`).catch(() => []); if (done?.length) return { ok: true, skip: 'já enviado hoje' };
   }
   const gravados = await recordTops(d).catch(e => { console.error('top_picks', e); return 0; });
-  const subs: { chat_id: number; tent: boolean; ra: boolean }[] = await sb('bot_subs?select=chat_id,tent,ra&or=(tent.eq.true,ra.eq.true)') ?? [];
+  const subs: ({ chat_id: number } & Sub)[] = await sb('bot_subs?select=chat_id,tent,ra,est&or=(tent.eq.true,ra.eq.true,est.eq.true)') ?? [];
   const txt = { tent: topText(d, 'tent'), ra: topText(d, 'ra') };
+  const et = estText(d, await estToday(d.date));
   let sent = 0;
-  for (const s of subs) for (const k of ['tent', 'ra'] as const) {
-    if (!s[k] || !txt[k]) continue;
-    const regs = tops(d)[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
-    const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('📤 Texto p/ inscritos', 'cp:' + k)], [BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
-    if (r.ok) sent++;
-    await new Promise(res => setTimeout(res, 60));
+  for (const s of subs) {
+    for (const k of ['tent', 'ra'] as const) {
+      if (!s[k] || !txt[k]) continue;
+      const regs = tops(d)[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
+      const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('📤 Texto p/ inscritos', 'cp:' + k)], [BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
+      if (r.ok) sent++;
+      await new Promise(res => setTimeout(res, 60));
+    }
+    if (s.est && et) {
+      const r = await TG('sendMessage', { chat_id: s.chat_id, text: et.text, parse_mode: 'HTML', disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [...chunk(et.regs, 5), [BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
+      if (r.ok) sent++;
+      await new Promise(res => setTimeout(res, 60));
+    }
   }
   await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: flag, value: String(sent), updated_at: new Date().toISOString() }) }).catch(() => null);
-  return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados };
+  return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et?.regs.length ?? 0 };
+}
+// ---------- Entradas das estratégias (strategies.json gerado na coleta) ----------
+const ESTN: Record<string, string> = { valor99: 'Valor na 99play', 'under-tent': 'Under de tentativas', 'ra-valor': 'Reb+Ast com valor', 'pts-valor': 'Pontos com valor', 'desfalque-over': 'Over do substituto', 'defesa-over': 'Over x defesa fraca' };
+const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
+const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
+async function estToday(date: string) {
+  const st = await fetch(APP_URL + 'data/strategies.json?t=' + Math.floor(Date.now() / 120_000)).then(r => r.ok ? r.json() : null).catch(() => null);
+  return st?.date === date ? st : null;
+}
+// mensagem do envio diário: entradas de hoje de cada estratégia (só jogos que ainda não começaram), numeradas, com 📝
+function estText(d: Data, st: any): { text: string; regs: { text: string; callback_data: string }[] } | null {
+  const now = Date.now();
+  const picks = (st?.picks ?? []).filter((p: any) => !p.tip_utc || Date.parse(p.tip_utc) > now);
+  if (!picks.length) return null;
+  const build = (full: boolean, max = 99) => {
+    let i = 0; const regs: { text: string; callback_data: string }[] = [], blocks: string[] = [];
+    for (const S of st.strategies) {
+      const a = picks.filter((p: any) => p.strategy_id === S.id).slice(0, max); if (!a.length) continue;
+      blocks.push(`<b>🧪 ${esc(S.name)}</b>\n` + a.map((p: any) => {
+        i++; regs.push(BTN(`📝${i}`, `bet:${estKey(p)}:e.${S.id}`));
+        return `${i}. <b>${esc(p.name)}</b> ${p.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+p.line)} ${MKS[p.mk] ?? p.mk} · ${p.odd ? '@' + n2(+p.odd) : 'sem odd'} · ${pc(+p.p)}${p.edge != null ? ' · EV ' + evS(p.edge) : ''}${full ? `\n    <i>${esc(p.team)} x ${esc(p.opp)}${p.tip_utc ? ' · ' + hourBR(p.tip_utc) : ''}</i>` : ''}`;
+      }).join('\n'));
+    }
+    const text = `<b>🧪 ESTRATÉGIAS DO DIA</b>\n<i>${dateBR(d.date)} · ${i} entradas · cada estratégia com o próprio placar</i>\n\n${blocks.join('\n\n')}\n\n<i>📝 Toque no número e mande a odd que você pegou (ex.: <code>1,85</code>; para meia unidade, <code>1,85 0,5u</code>). O ROI de cada estratégia aparece em /banca. Ainda é teste: use entrada pequena até a estratégia ter 50+ entradas com ROI e CLV positivos.</i>` + FOOT;
+    return { text, regs };
+  };
+  let out = build(true);
+  if (out.text.length > 4090) out = build(false);
+  if (out.text.length > 4090) out = build(false, 3);
+  return out;
 }
 // ---------- Registro de entradas (1u, odd real) e ROI ----------
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const SRC: Record<string, string> = { tent: 'Top tentativas', ra: 'Top reb+ast', modelo: '/modelo', lista: 'Outras listas' };
+// origem "e.<estratégia>": entrada registrada a partir de uma estratégia
+const srcName = (s: string) => SRC[s] ?? (s?.startsWith('e.') ? '🧪 ' + (ESTN[s.slice(2)] ?? s.slice(2)) : s);
+const srcCmd = (s: string) => SRC_CMD[s] ?? (s?.startsWith('e.') ? '/estrategias ' + s.slice(2) : '');
 const u2 = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2).replace('.', ',') + 'u';
 const pctS = (x: number) => (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';
 // chance do modelo numa linha qualquer (se o jogador estiver no Modelo BH de hoje)
@@ -401,7 +445,7 @@ async function betFinish(chatId: number, id: number | null, text: string): Promi
   return { text: `✅ <b>Entrada #${b.id} registrada</b>
 <blockquote><b>${esc(b.name)}</b> · ${b.side === 'o' ? 'mais' : 'menos'} de ${n1(line)} ${MK[b.mk] ?? b.mk}
 Odd <b>${n2(v.odd)}</b> · ${n1(st)}u${p ? ` · modelo ${pc(p)}` : ''}${ev != null ? ` · EV pelo modelo ${pctS(ev)}` : ''}${line !== +b.ref_line ? `\n<i>linha da casa ${n1(line)} (referência era ${n1(+b.ref_line)})</i>` : ''}</blockquote>
-Confiro sozinho depois do jogo e te conto de manhã. Acompanhe em /banca.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), ...(SRC_CMD[b.src] ? [BTN('◀ Voltar ao top', SRC_CMD[b.src])] : []), BTN('🏠 Menu', '/menu')]] } };
+Confiro sozinho depois do jogo e te conto de manhã. Acompanhe em /banca.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), ...(srcCmd(b.src) ? [BTN('◀ Voltar', srcCmd(b.src))] : []), BTN('🏠 Menu', '/menu')]] } };
 }
 async function settleBets(rows: any[]) {
   const open = rows.filter(r => r.status === 'aberta');
@@ -436,7 +480,7 @@ function bancaResumo(rows: any[]) {
   return `<blockquote>✅ <b>${done.filter(r => r.status === 'green').length}</b> · ❌ <b>${done.filter(r => r.status === 'red').length}</b> · ➖ ${rows.filter(r => r.status === 'void').length} · ⏳ ${rows.filter(r => r.status === 'aberta').length} em aberto
 Apostado <b>${n1(Math.round(T.st * 100) / 100)}u</b> · Lucro <b>${u2(T.pr)}</b> · ROI <b>${pctS(T.roi)}</b>
 Acerto ${Math.round(T.hit * 1000) / 10}%${avgOdd ? ` · odd média ${n2(avgOdd)} (empata com ${Math.round(100 / avgOdd)}%)` : ''}</blockquote>`
-    + tab('Por lista', by(r => SRC[r.src] ?? r.src))
+    + tab('Por lista', by(r => srcName(r.src)))
     + tab('Por mercado', by(r => (MK[r.mk] ?? r.mk)))
     + tab('Por lado', by(r => r.side === 'o' ? 'Mais de' : 'Menos de'))
     + tab('Por nota', by(r => r.nota == null ? 'sem nota' : r.nota >= 70 ? 'nota 70+' : r.nota >= 60 ? 'nota 60–69' : 'nota <60'))
@@ -465,17 +509,21 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   let stats: any[] = [], picks: any[] = [];
   try {
     stats = await sb('strategy_stats?select=*&order=lucro.desc.nullslast') ?? [];
-    picks = await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,name,mk,side,line,odd,odd_src,p,edge,status&order=edge.desc.nullslast`) ?? [];
+    picks = await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,pid,name,mk,side,line,odd,odd_src,p,edge,status&order=edge.desc.nullslast`) ?? [];
   } catch { return { text: 'Não consegui ler as estratégias agora.', kb: { inline_keyboard: [HOME] } }; }
   if (!stats.length) return { text: 'Nenhuma estratégia cadastrada ainda.', kb: { inline_keyboard: [HOME] } };
-  const ev = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';
-  const pickLn = (x: any) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd)}${x.odd_src === 'estimada' ? '*' : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
+  // antes da primeira gravação do dia, mostra a lista de hoje direto da coleta
+  if (!picks.length) { const st = await estToday(etDate()); picks = (st?.picks ?? []).map((p: any) => ({ ...p, status: 'aberta', odd_src: p.odd ? p.odd_src : 'estimada' })); }
+  const ev = (x: any) => evS(x);
+  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || 1.87)}${x.odd_src === 'estimada' ? '*' : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
   const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('🏠 Menu', '/menu')]] };
   const S = id ? stats.find(s => s.id === id) : null;
   if (S) {
     const mine = picks.filter(x => x.strategy_id === S.id);
     const descr = (await sb(`strategies?id=eq.${S.id}&select=descr`).catch(() => []))?.[0]?.descr ?? '';
-    return { text: `<b>🧪 ${esc(S.name)}</b> <i>(${S.status})</i>\n<i>${esc(descr)}</i>\n<blockquote>Conferidas <b>${S.n}</b> · ✅ ${S.g} · ❌ ${S.r} · ➖ ${S.v}\nLucro <b>${u2(+S.lucro || 0)}</b> · ROI <b>${S.roi == null ? '–' : pctS(+S.roi)}</b> · odd média ${S.odd_media ? n2(+S.odd_media) : '–'}\nCLV médio ${S.clv_linha_media == null ? '–' : (S.clv_linha_media >= 0 ? '+' : '') + n1(+S.clv_linha_media)} · EV médio ${ev(S.edge_medio == null ? null : +S.edge_medio)}</blockquote>\n<b>Hoje</b>\n${mine.length ? mine.map(pickLn).join('\n') : 'Nenhuma entrada hoje (ou ainda não gravada: a gravação roda a cada 30 min).'}\n<i>* odd estimada (1,87). Teste em papel: 1u por entrada, sem stake real.</i>`, kb };
+    const regs = mine.map((x, i) => x.status === 'aberta' && x.pid ? BTN(`📝${i + 1}`, `be:${estKey(x)}:e.${S.id}`) : null).filter(Boolean) as { text: string; callback_data: string }[];
+    return { text: `<b>🧪 ${esc(S.name)}</b> <i>(${S.status})</i>\n<i>${esc(descr)}</i>\n<blockquote>Conferidas <b>${S.n}</b> · ✅ ${S.g} · ❌ ${S.r} · ➖ ${S.v}\nLucro <b>${u2(+S.lucro || 0)}</b> · ROI <b>${S.roi == null ? '–' : pctS(+S.roi)}</b> · odd média ${S.odd_media ? n2(+S.odd_media) : '–'}\nCLV médio ${S.clv_linha_media == null ? '–' : (S.clv_linha_media >= 0 ? '+' : '') + n1(+S.clv_linha_media)} · EV médio ${ev(S.edge_medio == null ? null : +S.edge_medio)}</blockquote>\n<b>Hoje</b>\n${mine.length ? mine.map((x, i) => pickLn(x, i + 1)).join('\n') : 'Nenhuma entrada hoje.'}\n<i>* odd estimada (1,87). O placar é teste em papel (1u por entrada).${regs.length ? ' 📝 registra a sua entrada real com a odd que você pegou.' : ''}</i>`,
+      kb: { inline_keyboard: [...chunk(regs, 5), ...kb.inline_keyboard] } };
   }
   const tab = stats.map(s => `${String(s.name).padEnd(18).slice(0, 18)} ${String(s.n).padStart(3)} ${(s.n ? Math.round(s.g / s.n * 100) + '%' : '–').padStart(4)} ${u2(+s.lucro || 0).padStart(7)} ${s.clv_linha_media == null ? '   –' : ((s.clv_linha_media >= 0 ? '+' : '') + n1(+s.clv_linha_media)).padStart(4)}`).join('\n');
   const hoje = stats.map(s => `${esc(s.name)}: <b>${picks.filter(x => x.strategy_id === s.id).length}</b>`).join(' · ');
@@ -726,7 +774,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /testes · seus testes conferidos · /testes todos
 /toptentativas · top 10 em tentativas e convertidos
 /topra · top 10 em rebotes + assistências
-/receber · receber os dois tops todo dia
+/receber · receber os tops e as estratégias todo dia
 /banca · suas entradas registradas, lucro e ROI · /banca todos
 /apagar 12 · apaga uma entrada registrada errada
 /ontem · resultado de ontem (chega sozinho de manhã)
