@@ -1,0 +1,47 @@
+# Relógio da coleta: dispara "Atualizar dados e publicar" de hora em hora, aos :50 (Brasília, das 9h50 às 23h50),
+# 15 minutos depois de cada leitura das linhas da 99play (:35). O agendamento próprio do GitHub (schedule) atrasa
+# horas ou pula horários; este relógio fica esperando dentro de um job e se dispara de novo a cada hora
+# (workflow_dispatch com o GITHUB_TOKEN pode disparar outro workflow). O schedule abaixo só religa a corrente
+# se ela parar por algum motivo; com cancel-in-progress, sempre fica um relógio só.
+name: Relógio da coleta
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */2 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: relogio
+  cancel-in-progress: true
+
+jobs:
+  tic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Espera o próximo :50 e dispara a coleta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          m=$((10#$(date -u +%M))); s=$((10#$(date -u +%S)))
+          wait=$(( ((50 - m + 60) % 60) * 60 - s ))
+          if [ $wait -lt 60 ]; then wait=$((wait + 3600)); fi
+          echo "esperando $wait s (até o próximo :50)"
+          sleep $wait
+          h=$((10#$(TZ=America/Sao_Paulo date +%H)))
+          if [ $h -ge 9 ] && [ $h -le 23 ]; then
+            gh api -X POST "repos/$REPO/actions/workflows/atualizar.yml/dispatches" -f ref=main && echo "coleta disparada às $(TZ=America/Sao_Paulo date +%H:%M)"
+          else
+            echo "fora do horário ($h h em Brasília): sem coleta"
+          fi
+      - name: Agenda o próximo relógio
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh api -X POST "repos/$REPO/actions/workflows/relogio.yml/dispatches" -f ref=main
