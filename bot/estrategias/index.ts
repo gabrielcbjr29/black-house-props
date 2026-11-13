@@ -76,7 +76,71 @@ async function record(silent = false) {
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   const names = Object.fromEntries(st.strategies.map((s: any) => [s.id, s.name]));
   const alertas = silent ? 0 : await alert(fresh, names).catch(e => { console.error('alerta', e); return 0; });
-  return { ok: true, date: st.date, gravadas: rows.length, novas: fresh.length, alertas };
+  const bot = await getJ('bot.json').catch(() => null);
+  const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
+  return { ok: true, date: st.date, gravadas: rows.length, novas: fresh.length, alertas, risco: risk };
+}
+// ---------- Monitor de risco: vigia as entradas já enviadas até o jogo começar (roda junto com a gravação) ----------
+// Sinais (com os dados que a coleta de hora em hora já traz, sem depender da 99play):
+//   jogador ficou em dúvida ou fora · colega importante passou a estar fora (muda minutos e volume) ·
+//   a chance do modelo na linha da entrada virou para o outro lado ou caiu 10+ pontos.
+// Cada entrada guarda os sinais já vistos (risk); só sinal novo vira alerta. Na primeira passada, só registra.
+function nbOver(mu: number, k: number, line: number) {
+  mu = Math.max(mu, .01); const thr = Math.floor(line);
+  if (k > 400) { let p = Math.exp(-mu), c = 0; for (let x = 0; x <= thr; x++) { c += p; p *= mu / (x + 1); } return Math.max(0, Math.min(1, 1 - c)); }
+  let p = Math.pow(k / (k + mu), k), c = 0; const q = mu / (k + mu);
+  for (let x = 0; x <= thr; x++) { c += p; p *= (x + k) / (x + 1) * q; }
+  return Math.max(0, Math.min(1, 1 - c));
+}
+function pSide(m: any, stat: string, line: number, side: string) {
+  const parts = String(stat).split('+').map(k => m?.s?.[k]); if (!parts.length || parts.some(x => !x)) return null;
+  const mu = parts.reduce((a: number, x: any) => a + x[0], 0);
+  let k = parts[0][1];
+  if (parts.length > 1) { const v = parts.reduce((a: number, x: any) => a + x[0] + x[0] * x[0] / x[1], 0) * 1.1; k = v > mu ? mu * mu / (v - mu) : 500; }
+  const po = nbOver(mu, k, line); return side === 'o' ? po : 1 - po;
+}
+const STLB: Record<string, string> = { questionable: 'em dúvida', doubtful: 'provável fora', out: 'FORA' };
+async function risco(bot: any) {
+  const now = Date.now();
+  const open: any[] = (await sb(`strategy_picks?date=eq.${bot.date}&status=eq.aberta&select=id,strategy_id,pid,name,team,opp,mk,stat,side,line,odd,open_line,open_odd,p,risk,tip_utc`) ?? [])
+    .filter(x => !x.tip_utc || Date.parse(x.tip_utc) > now);
+  if (!open.length) return { vigiadas: 0, alertas: 0 };
+  const inj = new Map<string, any>((bot.injuries ?? []).map((i: any) => [`${i.t}|${i.n}`, i]));
+  const items: { x: any; why: string[] }[] = [];
+  for (const x of open) {
+    const L = +(x.open_line ?? x.line), conds: Record<string, string> = {};
+    const own = inj.get(`${x.team}|${x.name}`)?.st;
+    if (own && STLB[own]) conds['st:' + own] = own === 'out' ? `${esc(x.name)} está <b>FORA</b> hoje (se não jogar, a aposta costuma ser anulada; confira a regra da casa)` : `${esc(x.name)} está <b>${STLB[own]}</b> para o jogo`;
+    for (const r of (bot.rows ?? []).filter((r: any) => r.id === x.pid && r.wo?.x)) {
+      conds['wo:' + r.wo.q] = `<b>${esc(r.wo.q)}</b> está fora hoje: sem ele, ${esc(x.name)} teve média de ${n1(+r.wo.a)} em ${r.wo.h?.[1] ?? '?'} jogos (linha da entrada ${n1(L)})`;
+    }
+    const pn = pSide(bot.mdl?.[x.pid], x.stat, L, x.side);
+    if (pn != null) {
+      if (pn < .5) conds['p:virou'] = `O modelo agora dá <b>${Math.round(pn * 100)}%</b> para o nosso lado na linha ${n1(L)} (era ${Math.round(+x.p * 100)}%): virou para o outro lado`;
+      else if (+x.p - pn >= .1) conds['p:caiu'] = `O modelo caiu para <b>${Math.round(pn * 100)}%</b> na linha ${n1(L)} (era ${Math.round(+x.p * 100)}%)`;
+    }
+    const keys = Object.keys(conds), seen = x.risk == null ? null : new Set(String(x.risk).split('|').filter(Boolean));
+    const fresh = seen ? keys.filter(k => !seen.has(k) && !(k === 'p:caiu' && seen.has('p:virou'))) : [];
+    const patch: Record<string, unknown> = { p_now: pn == null ? null : Math.round(pn * 1000) / 1000 };
+    if (seen == null || fresh.length) patch.risk = [...new Set([...(seen ?? []), ...keys])].join('|');
+    if (fresh.length) { patch.risk_at = new Date(now).toISOString(); items.push({ x, why: fresh.map(k => conds[k]) }); }
+    await sb(`strategy_picks?id=eq.${x.id}`, { method: 'PATCH', body: JSON.stringify(patch) }).catch(() => null);
+  }
+  let alertas = 0;
+  if (items.length) {
+    const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
+    const names = Object.fromEntries(((await sb('strategies?select=id,name')) ?? []).map((s: any) => [s.id, s.name]));
+    let text = `⚠️ <b>ALERTA DE RISCO · ENTRADA${items.length > 1 ? 'S' : ''} JÁ ENVIADA${items.length > 1 ? 'S' : ''}</b>\n<i>O cenário mudou depois do alerta.</i>\n\n` + items.map(({ x, why }) =>
+      `<b>${esc(x.name)}</b> ${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd))}\n<i>${esc(names[x.strategy_id] ?? x.strategy_id)} · ${esc(x.team)} x ${esc(x.opp)}${x.tip_utc ? ' · ' + hourBR(x.tip_utc) : ''}</i>\n${why.map(w => '• ' + w).join('\n')}`).join('\n\n')
+      + `\n\n<i>Se ainda não entrou, reavalie antes. Se já entrou, veja se vale proteger. O placar segue contando a entrada como foi enviada.</i>`;
+    if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '…';
+    for (const s of token ? subs : []) {
+      const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: '🧪 Placar', callback_data: '/estrategias' }, { text: '💼 Banca', callback_data: '/banca' }]] } }) }).then(r => r.json()).catch(() => null);
+      if (r?.ok) alertas++;
+    }
+  }
+  return { vigiadas: open.length, novos_riscos: items.length, alertas };
 }
 async function settle() {
   const res = await getJ('results.json'); if (!res?.stats) return { ok: false, erro: 'results.json indisponível' };
