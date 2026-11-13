@@ -291,8 +291,10 @@ function compact(r: Row, i: number) {
   const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
   return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
 ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
-${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n🔢 ${seq(r)}` : ''}`;
+${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n🔢 ${seq(r)}` : ''}${duvida(r)}`;
 }
+// colega importante em dúvida: como ele foi nos jogos sem esse colega (se o colega cair, o cenário muda)
+const duvida = (r: Row) => r.wo && !r.wo.x ? `\n🟡 ${esc(r.wo.q)} em dúvida · sem ele: ${r.wo.h[0]}/${r.wo.h[1]} ${r.s === 'o' ? 'acima' : 'abaixo'}, média ${n1(r.wo.a)}` : '';
 function topText(d: Data, key: string) {
   const T = MT[key], top = tops(d)[key];
   if (!top.length) return null;
@@ -456,6 +458,28 @@ async function apagarCmd(chatId: number, rest: string[]): Promise<Out> {
   if (!Number.isFinite(id)) return { text: 'Diga o número da entrada: <code>/apagar 12</code> (veja os números em /banca).', kb: { inline_keyboard: [HOME] } };
   const del = await sb(`bets?id=eq.${id}&chat_id=eq.${chatId}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } }).catch(() => null);
   return { text: del?.length ? `🗑️ Entrada #${id} apagada.` : `Não achei a entrada #${id} entre as suas.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🏠 Menu', '/menu')]] } };
+}
+// ---------- Fábrica de estratégias (teste em papel; função estrategias + tabelas strategies/strategy_picks) ----------
+async function estrategiasCmd(rest: string[]): Promise<Out> {
+  const id = rest.join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  let stats: any[] = [], picks: any[] = [];
+  try {
+    stats = await sb('strategy_stats?select=*&order=lucro.desc.nullslast') ?? [];
+    picks = await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,name,mk,side,line,odd,odd_src,p,edge,status&order=edge.desc.nullslast`) ?? [];
+  } catch { return { text: 'Não consegui ler as estratégias agora.', kb: { inline_keyboard: [HOME] } }; }
+  if (!stats.length) return { text: 'Nenhuma estratégia cadastrada ainda.', kb: { inline_keyboard: [HOME] } };
+  const ev = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (x * 100).toFixed(1).replace('.', ',') + '%';
+  const pickLn = (x: any) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd)}${x.odd_src === 'estimada' ? '*' : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
+  const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('🏠 Menu', '/menu')]] };
+  const S = id ? stats.find(s => s.id === id) : null;
+  if (S) {
+    const mine = picks.filter(x => x.strategy_id === S.id);
+    const descr = (await sb(`strategies?id=eq.${S.id}&select=descr`).catch(() => []))?.[0]?.descr ?? '';
+    return { text: `<b>🧪 ${esc(S.name)}</b> <i>(${S.status})</i>\n<i>${esc(descr)}</i>\n<blockquote>Conferidas <b>${S.n}</b> · ✅ ${S.g} · ❌ ${S.r} · ➖ ${S.v}\nLucro <b>${u2(+S.lucro || 0)}</b> · ROI <b>${S.roi == null ? '–' : pctS(+S.roi)}</b> · odd média ${S.odd_media ? n2(+S.odd_media) : '–'}\nCLV médio ${S.clv_linha_media == null ? '–' : (S.clv_linha_media >= 0 ? '+' : '') + n1(+S.clv_linha_media)} · EV médio ${ev(S.edge_medio == null ? null : +S.edge_medio)}</blockquote>\n<b>Hoje</b>\n${mine.length ? mine.map(pickLn).join('\n') : 'Nenhuma entrada hoje (ou ainda não gravada: a gravação roda a cada 30 min).'}\n<i>* odd estimada (1,87). Teste em papel: 1u por entrada, sem stake real.</i>`, kb };
+  }
+  const tab = stats.map(s => `${String(s.name).padEnd(18).slice(0, 18)} ${String(s.n).padStart(3)} ${(s.n ? Math.round(s.g / s.n * 100) + '%' : '–').padStart(4)} ${u2(+s.lucro || 0).padStart(7)} ${s.clv_linha_media == null ? '   –' : ((s.clv_linha_media >= 0 ? '+' : '') + n1(+s.clv_linha_media)).padStart(4)}`).join('\n');
+  const hoje = stats.map(s => `${esc(s.name)}: <b>${picks.filter(x => x.strategy_id === s.id).length}</b>`).join(' · ');
+  return { text: `<b>🧪 FÁBRICA DE ESTRATÉGIAS</b>\n<i>Teste em papel · 1u por entrada · cada estratégia com o próprio histórico</i>\n<pre>ESTRATÉGIA          N  ACE   LUCRO  CLV\n${tab}</pre>\n<b>Entradas hoje</b>\n${hoje}\n\n<i>Uma estratégia só sai do papel com 50+ entradas, ROI positivo e CLV positivo. CLV = quanto a linha andou a nosso favor até o jogo. Toque numa estratégia para ver as entradas de hoje.</i>`, kb };
 }
 // ---------- Histórico automático do top 10 e resultado da manhã ----------
 const etDate = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
@@ -622,7 +646,7 @@ function listCard(r: Row, i: number) {
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
 ${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
-${hits}${def}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
+${hits}${def}${duvida(r)}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
 }
 function header(d: Data, title: string, extra = '') {
   return `<b>${title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}${d.demo ? ' · demonstração' : ''}${extra}</i>\n`;
@@ -706,6 +730,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /banca · suas entradas registradas, lucro e ROI · /banca todos
 /apagar 12 · apaga uma entrada registrada errada
 /ontem · resultado de ontem (chega sozinho de manhã)
+/estrategias · placar da fábrica de estratégias (teste em papel)
 /app · app completo
 
 <b>Como usar as listas</b>
@@ -726,7 +751,7 @@ const MENU = { inline_keyboard: [
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
-  [BTN('💼 Banca e ROI', '/banca'), BTN('🖼️ Cards do dia', '/cards')],
+  [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -742,7 +767,7 @@ const HOJE = { inline_keyboard: [
 const MODELO_HUB = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Chance de uma linha', '/modelo'), BTN('📒 Meus testes', '/testes')],
-  [BTN('☀️ Resultado de ontem', '/ontem'), BTN('📬 Envio diário', '/receber')], [BTN('💼 Banca e ROI', '/banca'), BTN('🏠 Menu', '/menu')]] };
+  [BTN('☀️ Resultado de ontem', '/ontem'), BTN('📬 Envio diário', '/receber')], [BTN('🧪 Estratégias', '/estrategias'), BTN('💼 Banca e ROI', '/banca')], [BTN('🏠 Menu', '/menu')]] };
 
 async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   const [rawCmd, ...rest] = text.trim().split(/\s+/);
@@ -764,6 +789,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'receber' || cmd === 'envio') return receberCmd(chatId, rest);
   if (cmd === 'banca' || cmd === 'roi') return bancaCmd(chatId, rest);
   if (cmd === 'apagar') return apagarCmd(chatId, rest);
+  if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
@@ -955,7 +981,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Placar das estratégias'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
