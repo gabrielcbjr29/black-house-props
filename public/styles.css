@@ -1011,7 +1011,7 @@ ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
 .lr-dots .dots { height: 30px; }
 @media (max-width: 760px) {
   .lrow { grid-template-columns: auto 1fr auto; grid-template-areas: "b name hit" "b line odd" "dots dots dots"; row-gap: 6px; column-gap: 10px; padding: 10px 12px; }
-  .lrow > .badge { grid-area: b; align-self: start; }
+  .lrow > .badge, .lrow > .jer { grid-area: b; align-self: start; }
   .lr-name { grid-area: name; min-width: 0; } .lr-line { grid-area: line; } .lr-odd { grid-area: odd; text-align: right; } .lr-hit { grid-area: hit; }
   .lr-odd small:first-child { display: none; }
   .lr-dots { grid-area: dots; } .lr-dots .dots { height: 26px; }
@@ -1023,3 +1023,12 @@ ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
 .mate[aria-pressed="true"] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
 .mate small { display: block; font-size: 12px; color: var(--muted); }
 .mate .num { font-size: 16px; } .mate .num.pos { color: var(--green); } .mate .num.neg { color: var(--bad); }
+
+/* ---------- camisa estilizada do jogador (no lugar do selo do time nos pontos de jogador) ---------- */
+.jer { width: 34px; height: 37px; flex: none; display: block; overflow: visible; filter: drop-shadow(0 2px 4px rgba(0,0,0,.35)); font-family: inherit; font-stretch: 85%; }
+.jer.sm { width: 24px; height: 26px; filter: none; }
+.jer.lg { width: 58px; height: 63px; }
+.jer text { font-family: inherit; }
+.gt-stack .jer, .hg-stack .jer { margin-left: -6px; }
+.gt-stack .jer:first-child { margin-left: 0; }
+@media (max-width: 640px) { .jer.lg { width: 48px; height: 52px; } }

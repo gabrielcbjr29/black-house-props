@@ -49,6 +49,25 @@ async function loadHist(label) {
 }
 async function saveHist(h) { await mkdir(HIST, { recursive: true }); await writeFile(join(HIST, h.season + '.json'), JSON.stringify(h)); }
 
+/* Número da camisa: os boxscores guardados antes de 13/11/2026 não tinham o número. Para os times de hoje, relê os
+   3 jogos mais recentes do time que ainda têm jogador sem número (só uma vez por jogo; fica em h.numDone). */
+async function backfillNums(h, teams, fetcher) {
+  h.nums ||= {}; h.numDone ||= [];
+  const done = new Set(h.numDone), todo = [];
+  const games = Object.values(h.games).sort((a, b) => (b.d || '').localeCompare(a.d || ''));
+  for (const t of teams) {
+    for (const g of games.filter(g => g.h === t || g.a === t).slice(0, 3)) {
+      if (done.has(g.gid) || todo.includes(g)) continue;
+      if (g.r.some(r => r[1] === t && !h.nums[r[0]])) todo.push(g);
+    }
+  }
+  if (!todo.length) return;
+  log(`  números das camisas: relendo ${todo.length} boxscores…`);
+  const res = await pool(todo.slice(0, 60), CONC, fetcher);
+  res.forEach((r, i) => { if (r && !r.__error && r.nums) { Object.assign(h.nums, r.nums); h.numDone.push(todo[i].gid); } });
+  await saveHist(h);
+}
+
 async function fill(h, ids, what) {
   const todo = ids.filter(id => !h.games[id] && !h.missing.includes(id));
   if (!todo.length) { log(`  ${what}: nada novo`); return 0; }
@@ -59,7 +78,7 @@ async function fill(h, ids, what) {
     if (!r || r.__error) continue;
     if (r.missing) { h.missing.push(r.gid); continue; }
     if (r.notFinal) continue;
-    const { names, ...g } = r; h.games[g.gid] = g; Object.assign(h.names, names); got++;
+    const { names, nums, ...g } = r; h.games[g.gid] = g; Object.assign(h.names, names); Object.assign(h.nums ||= {}, nums); got++;
   }
   const errs = res.filter(r => r?.__error).length;
   if (errs) log(`    aviso: ${errs} boxscores falharam (tentaremos de novo na próxima execução)`);
@@ -91,7 +110,7 @@ async function espnSeason(label, anchor, from, before) {
       if (!r || r.__error) { errs++; continue; }
       if (r.missing) { h.missing.push(r.gid); continue; }
       if (r.notFinal) continue;
-      const { names, ...g } = r; h.games[g.gid] = g; Object.assign(h.names, names);
+      const { names, nums, ...g } = r; h.games[g.gid] = g; Object.assign(h.names, names); Object.assign(h.nums ||= {}, nums);
     }
     if (errs) log(`    aviso: ${errs} boxscores da ESPN falharam (tentaremos de novo na próxima execução)`);
   }
@@ -135,7 +154,7 @@ async function main() {
   if (!schedule.length && !useESPN) {
     // sem calendário: testa IDs em sequência até achar vários seguidos inexistentes
     curIds = []; let miss = 0;
-    for (let i = 1; i <= 1230 && miss < 12; i++) { const id = gameId(startYear, i); if (cur.games[id]) { curIds.push(id); miss = 0; continue; } const r = await fetchBoxscore(id).catch(() => null); if (r && !r.missing && !r.notFinal) { const { names, ...g } = r; cur.games[id] = g; Object.assign(cur.names, names); curIds.push(id); miss = 0; } else miss++; }
+    for (let i = 1; i <= 1230 && miss < 12; i++) { const id = gameId(startYear, i); if (cur.games[id]) { curIds.push(id); miss = 0; continue; } const r = await fetchBoxscore(id).catch(() => null); if (r && !r.missing && !r.notFinal) { const { names, nums, ...g } = r; cur.games[id] = g; Object.assign(cur.names, names); Object.assign(cur.nums ||= {}, nums); curIds.push(id); miss = 0; } else miss++; }
   }
   if (!useESPN) {
     await fill(cur, curIds, `temporada ${curL}`);
@@ -157,6 +176,11 @@ async function main() {
     catch (e) { warnings.push('BALLDONTLIE falhou: ' + e.message); }
   }
   log(`  jogos em ${date}: ${today.length}`);
+  try {
+    const tt = [...new Set(today.flatMap(g => [g.home, g.away]))];
+    if (useESPN) await backfillNums(cur, tt, g => fetchESPNSummary(g.gid.slice(1), g.d));
+    else await backfillNums(cur, tt, g => fetchBoxscore(g.gid));
+  } catch (e) { log('  aviso: números das camisas: ' + e.message); }
   const yTeams = new Set([...schedule.filter(g => g.date === y), ...bdlY, ...Object.values(cur.games).filter(g => g.d === y).map(g => ({ home: g.h, away: g.a }))].flatMap(g => [g.home, g.away]));
 
   // 4. lesões e linhas do jogo (ESPN)
@@ -229,7 +253,7 @@ async function main() {
   // 6. slate (a coleta anterior do mesmo dia guarda a linha de abertura)
   let prevSlate = null; try { prevSlate = JSON.parse(await readFile(OUT, 'utf8')); } catch { }
   const slate = buildSlate({ date, season: curL, cur: Object.values(cur.games), prev: Object.values(prev.games), today, b2b: yTeams, injuries, gameOdds, oddsLines, lineups, prevSlate,
-    names: { ...prev.names, ...cur.names }, sources, warnings });
+    names: { ...prev.names, ...cur.names }, nums: { ...prev.nums, ...cur.nums }, sources, warnings });
   // backtest 1x por dia → calibração automática das chances por mercado
   const BT = join(ROOT, 'public', 'data', 'backtest.json');
   let bt = null; try { bt = JSON.parse(await readFile(BT, 'utf8')); } catch { }

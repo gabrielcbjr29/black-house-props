@@ -5,9 +5,9 @@ import { parseScoreboardOdds, parseInjuries } from '../collector/espn.js';
 import { parseEventOdds } from '../collector/oddsapi.js';
 import { mergeLines } from '../collector/oddsplan.js';
 
-const pl = (id, name, pos, starter, min, s) => ({ status: 'ACTIVE', personId: id, name, position: pos, starter, played: '1', statistics: { minutes: min, points: s[0], reboundsTotal: s[1], reboundsOffensive: 1, assists: s[2], steals: 1, blocks: 0, turnovers: 2, foulsPersonal: 3, fieldGoalsMade: s[3], fieldGoalsAttempted: s[4], threePointersMade: s[5], threePointersAttempted: s[6], freeThrowsMade: s[7], freeThrowsAttempted: s[8] } });
+const pl = (id, name, pos, starter, min, s, jerseyNum) => ({ status: 'ACTIVE', personId: id, name, jerseyNum, position: pos, starter, played: '1', statistics: { minutes: min, points: s[0], reboundsTotal: s[1], reboundsOffensive: 1, assists: s[2], steals: 1, blocks: 0, turnovers: 2, foulsPersonal: 3, fieldGoalsMade: s[3], fieldGoalsAttempted: s[4], threePointersMade: s[5], threePointersAttempted: s[6], freeThrowsMade: s[7], freeThrowsAttempted: s[8] } });
 const BOX = { game: { gameId: '0022600001', gameEt: '2026-10-21T19:30:00-04:00', gameStatus: 3,
-  homeTeam: { teamTricode: 'BOS', score: 110, statistics: { fieldGoalsAttempted: 88, freeThrowsAttempted: 20, reboundsOffensive: 10, turnoversTotal: 12, minutes: 'PT240M00.00S' }, players: [pl(1, 'Jaylen Brown', 'SF', '1', 'PT35M30.00S', [28, 6, 4, 10, 20, 3, 8, 5, 6]), { personId: 9, name: 'DNP', played: '0', statistics: { minutes: 'PT00M00.00S' } }] },
+  homeTeam: { teamTricode: 'BOS', score: 110, statistics: { fieldGoalsAttempted: 88, freeThrowsAttempted: 20, reboundsOffensive: 10, turnoversTotal: 12, minutes: 'PT240M00.00S' }, players: [pl(1, 'Jaylen Brown', 'SF', '1', 'PT35M30.00S', [28, 6, 4, 10, 20, 3, 8, 5, 6], '7'), { personId: 9, name: 'DNP', played: '0', statistics: { minutes: 'PT00M00.00S' } }] },
   awayTeam: { teamTricode: 'NYK', score: 104, statistics: { fieldGoalsAttempted: 90, freeThrowsAttempted: 18, reboundsOffensive: 12, turnoversTotal: 14, minutes: 'PT240M00.00S' }, players: [pl(2, 'Jalen Brunson', 'PG', '1', 'PT36M00.00S', [30, 3, 8, 11, 22, 2, 6, 6, 7]), pl(3, 'Bench Guy', '', '0', 'PT12M06.00S', [4, 2, 1, 2, 5, 0, 2, 0, 0])] } } };
 
 test('boxscore da NBA vira linhas compactas', () => {
@@ -19,6 +19,7 @@ test('boxscore da NBA vira linhas compactas', () => {
   assert.equal(jb[13], 10); assert.equal(jb[14], 20); assert.equal(jb[15], 3); assert.equal(jb[16], 8); assert.equal(jb[12], 3, 'faltas');
   assert.equal(g.r.find(r => r[0] === 3)[2], null, 'reserva sem posição');
   assert.ok(Math.abs(g.ph - (88 + .44 * 20 - 10 + 12)) < .11);
+  assert.deepEqual(g.nums, { 1: '7' }, 'número da camisa só de quem tem');
   assert.equal(parseBoxscore({ game: { ...BOX.game, gameStatus: 2 } }).notFinal, true);
 });
 test('auxiliares', () => {

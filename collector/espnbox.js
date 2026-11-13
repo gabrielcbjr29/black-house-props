@@ -35,7 +35,7 @@ export function parseESPNSummary(j, dateET) {
   const home = comp.competitors?.find(x => x.homeAway === 'home'), away = comp.competitors?.find(x => x.homeAway === 'away');
   if (!home || !away) return null;
   const H = espnAbbr(home.team?.abbreviation), A = espnAbbr(away.team?.abbreviation);
-  const rows = [], names = {}, minBy = {};
+  const rows = [], names = {}, nums = {}, minBy = {};
   for (const P of box.players || []) {
     const T = espnAbbr(P.team?.abbreviation); const st = P.statistics?.[0]; if (!st) continue;
     const k = st.keys || [];
@@ -48,6 +48,7 @@ export function parseESPNSummary(j, dateET) {
       const [fgm, fga] = pair('fieldGoalsMade-fieldGoalsAttempted'), [tpm, tpa] = pair('threePointFieldGoalsMade-threePointFieldGoalsAttempted'), [ftm, fta] = pair('freeThrowsMade-freeThrowsAttempted');
       const pid = +a.athlete?.id; if (!pid) continue;
       names[pid] = a.athlete.displayName || a.athlete.fullName || String(pid);
+      if (/^\d{1,2}$/.test(String(a.athlete.jersey ?? '').trim())) nums[pid] = String(a.athlete.jersey).trim();
       minBy[T] = (minBy[T] || 0) + min;
       rows.push([pid, T, posCode(a.athlete.position?.abbreviation), a.starter ? 1 : 0, Math.round(min * 10) / 10,
         n('points'), n('rebounds'), n('offensiveRebounds'), n('assists'), n('steals'), n('blocks'), n('turnovers'), n('fouls'), fgm, fga, tpm, tpa, ftm, fta]);
@@ -61,7 +62,7 @@ export function parseESPNSummary(j, dateET) {
     return (fga || 0) + .44 * (fta || 0) - (+s('offensiveRebounds') || 0) + (+(s('totalTurnovers') ?? s('turnovers')) || 0);
   };
   return { gid: 'e' + comp.id, d: dateET, h: H, a: A, hs: +home.score || 0, as: +away.score || 0, gm: Math.round(((minBy[H] || 240) / 5) * 10) / 10,
-    ph: Math.round(poss(H) * 10) / 10, pa: Math.round(poss(A) * 10) / 10, r: rows, names };
+    ph: Math.round(poss(H) * 10) / 10, pa: Math.round(poss(A) * 10) / 10, r: rows, names, nums };
 }
 export async function fetchESPNSummary(eid, dateET) {
   const j = await getJSON(`${B}/summary?event=${eid}`, { retries: 2, quiet404: true });

@@ -34,7 +34,7 @@ const etDate = iso => (iso || '').slice(0, 10);
 export function parseBoxscore(json) {
   const g = json?.game; if (!g || !g.homeTeam || !g.awayTeam) return null;
   if (g.gameStatus !== 3) return { gid: g.gameId, notFinal: true };
-  const rows = [], names = {};
+  const rows = [], names = {}, nums = {};
   const team = (T, side) => {
     const st = T.statistics || {};
     const poss = (st.fieldGoalsAttempted || 0) + 0.44 * (st.freeThrowsAttempted || 0) - (st.reboundsOffensive || 0) + (st.turnoversTotal ?? st.turnovers ?? 0);
@@ -42,6 +42,7 @@ export function parseBoxscore(json) {
       const s = pl.statistics || {}; const min = parseMinutes(s.minutes);
       if (!(pl.played === '1' || min > 0)) continue;
       names[pl.personId] = pl.name || `${pl.firstName} ${pl.familyName}`;
+      if (pl.jerseyNum != null && /^\d{1,2}$/.test(String(pl.jerseyNum).trim())) nums[pl.personId] = String(pl.jerseyNum).trim();
       rows.push([pl.personId, T.teamTricode, posCode(pl.position), pl.starter === '1' ? 1 : 0, Math.round(min * 10) / 10,
         s.points || 0, s.reboundsTotal || 0, s.reboundsOffensive || 0, s.assists || 0, s.steals || 0, s.blocks || 0, s.turnovers || 0, s.foulsPersonal || 0,
         s.fieldGoalsMade || 0, s.fieldGoalsAttempted || 0, s.threePointersMade || 0, s.threePointersAttempted || 0, s.freeThrowsMade || 0, s.freeThrowsAttempted || 0]);
@@ -51,7 +52,7 @@ export function parseBoxscore(json) {
   const h = team(g.homeTeam), a = team(g.awayTeam);
   const gmin = (h.min || 240) / 5;
   return { gid: g.gameId, d: etDate(g.gameEt || g.gameTimeLocal || g.gameTimeUTC), h: g.homeTeam.teamTricode, a: g.awayTeam.teamTricode,
-    hs: g.homeTeam.score, as: g.awayTeam.score, gm: Math.round(gmin * 10) / 10, ph: Math.round(h.poss * 10) / 10, pa: Math.round(a.poss * 10) / 10, r: rows, names };
+    hs: g.homeTeam.score, as: g.awayTeam.score, gm: Math.round(gmin * 10) / 10, ph: Math.round(h.poss * 10) / 10, pa: Math.round(a.poss * 10) / 10, r: rows, names, nums };
 }
 
 export async function fetchBoxscore(id) {

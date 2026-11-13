@@ -29,7 +29,7 @@ function inferPos(rows) {
  * @param {object} o.gameOdds "AWY@HOM" → {spread, total}
  * @param {object[]} o.oddsLines [{name, mk, line, books}]
  */
-export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b = new Set(), injuries = {}, gameOdds = {}, oddsLines = [], names = {}, lineups = {}, prevSlate = null, sources = {}, warnings = [] }) {
+export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b = new Set(), injuries = {}, gameOdds = {}, oddsLines = [], names = {}, nums = {}, lineups = {}, prevSlate = null, sources = {}, warnings = [] }) {
   const games = [...cur.map(g => ({ ...g, cur: 1 })), ...prev.map(g => ({ ...g, cur: 0 }))].filter(g => g && g.r && g.d < date).sort((a, b) => b.d < a.d ? -1 : b.d > a.d ? 1 : 0);
   const todayTeams = new Set(today.flatMap(g => [g.home, g.away]));
 
@@ -62,7 +62,7 @@ export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b 
     const lu = lineups[String(pid)];
     let status = inj?.status && inj.status !== 'probable' ? inj.status : 'ok', note = inj?.note || '';
     if (lu?.inactive) { status = 'out'; note = note || 'inativo no quinteto da NBA'; }
-    players.push({ id: String(pid), name, team, pos: inferPos(P.rows.slice(0, 40)), status, note, ...(inj?.source ? { injSrc: inj.source } : {}), logs: P.logs, ...(lu && lu.role ? { lineup: { role: lu.role, confirmed: lu.confirmed } } : {}) });
+    players.push({ id: String(pid), name, team, ...(nums[pid] ? { num: nums[pid] } : {}), pos: inferPos(P.rows.slice(0, 40)), status, note, ...(inj?.source ? { injSrc: inj.source } : {}), logs: P.logs, ...(lu && lu.role ? { lineup: { role: lu.role, confirmed: lu.confirmed } } : {}) });
   }
 
   // --- "sem o colega": para cada jogador fora/dúvida, os jogos dos colegas (nas duas temporadas) em que ele

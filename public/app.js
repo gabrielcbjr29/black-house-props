@@ -271,6 +271,27 @@ function valbar(s, mkt) {
 const lum = hex => { const c = String(hex).replace('#', ''); return [0, 2, 4].map(i => { const v = parseInt(c.substr(i, 2), 16) / 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((a, v, i) => a + v * [.2126, .7152, .0722][i], 0); };
 const onColor = hex => 1.05 / (lum(hex) + .05) >= 4.5 ? '#fff' : '#000';
 const badge = (t, sm) => { const bg = (TEAM_INFO[t] || ['', '#444'])[1]; return `<span class="badge${sm ? ' sm' : ''}" style="background:${bg};color:${onColor(bg)}" title="${esc((TEAM_INFO[t] || [t])[0])}">${esc(t)}</span>`; };
+// camisa estilizada do jogador (cores do time + número da camisa; sem número, as iniciais). Sem foto nem logo.
+const JER = { ATL: ['#C8102E', '#FDB927'], BOS: ['#007A33', '#FFFFFF'], BKN: ['#1F1F1F', '#FFFFFF'], CHA: ['#00788C', '#FFFFFF'], CHI: ['#CE1141', '#FFFFFF'],
+  CLE: ['#860038', '#FDBB30'], DAL: ['#00538C', '#FFFFFF'], DEN: ['#0E2240', '#FEC524'], DET: ['#1D42BA', '#FFFFFF'], GSW: ['#1D428A', '#FFC72C'],
+  HOU: ['#CE1141', '#FFFFFF'], IND: ['#002D62', '#FDBB30'], LAC: ['#1D428A', '#FFFFFF'], LAL: ['#552583', '#FDB927'], MEM: ['#12173F', '#7D9BD6'],
+  MIA: ['#98002E', '#F9A01B'], MIL: ['#00471B', '#EEE1C6'], MIN: ['#0C2340', '#78BE20'], NOP: ['#0C2340', '#B4975A'], NYK: ['#006BB6', '#F58426'],
+  OKC: ['#007AC1', '#FFFFFF'], ORL: ['#0077C0', '#C4CED4'], PHI: ['#006BB6', '#FFFFFF'], PHX: ['#1D1160', '#E56020'], POR: ['#1D1D1D', '#E03A3E'],
+  SAC: ['#5A2D81', '#FFFFFF'], SAS: ['#1A1A1A', '#C4CED4'], TOR: ['#CE1141', '#FFFFFF'], UTA: ['#3E2680', '#FFFFFF'], WAS: ['#002B5C', '#FFFFFF'] };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + .05) / (y + .05); };
+const initials = n => String(n || '').replace(/\b(Jr|Sr|II|III|IV)\.?$/i, '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+function jer(p, size) {
+  const t = p?.team, [c1, c2r] = JER[t] || [(TEAM_INFO[t] || ['', '#444'])[1], '#FFFFFF'];
+  const c2 = contrast(c1, c2r) >= 3 ? c2r : onColor(c1), num = p?.num, ini = initials(p?.name), sm = size === 1, lg = size === 2;
+  const big = num || ini, fs = String(big).length > 1 ? 40 : 46;
+  const label = `${esc(p?.name || '')}, ${esc((TEAM_INFO[t] || [t])[0])}${num ? ', camisa ' + esc(num) : ''}`;
+  return `<svg class="jer${sm ? ' sm' : lg ? ' lg' : ''}" viewBox="0 0 100 108" role="img" aria-label="${label}"><title>${label}</title>`
+    + `<path d="M28 4C34 4 38 9 50 9S66 4 72 4h2c1 12 8 20 20 22v74c0 4-3 6-7 6H13c-4 0-7-2-7-6V26c12-2 19-10 20-22z" fill="${c1}" stroke="${c2}" stroke-width="${sm ? 6 : 4}" stroke-linejoin="round"/>`
+    + `<path d="M38 6l12 16 12-16" fill="none" stroke="${c2}" stroke-width="${sm ? 6 : 4}" stroke-linejoin="round" stroke-linecap="round"/>`
+    + (sm ? '' : `<text x="50" y="40" text-anchor="middle" font-weight="800" font-size="11" letter-spacing="1.5" fill="${c2}">${esc(t || '')}</text>`)
+    + `<text x="50" y="${sm ? 88 : 84}" text-anchor="middle" font-weight="900" font-size="${sm ? fs + 8 : fs}" fill="${c2}">${esc(big)}</text>`
+    + (sm || !num ? '' : `<text x="50" y="99" text-anchor="middle" font-weight="700" font-size="8.5" letter-spacing="1" fill="${c2}" opacity=".85">${esc(ini)}</text>`) + '</svg>';
+}
 const gradeChip = g => `<span class="grade g${g === 'A+' ? 'Ap' : g}" title="Nota ${g}">${g}</span>`;
 const matchLabel = pr => pr.ctx.isHome ? `vs ${pr.opp}` : `@ ${pr.opp}`;
 const sideLb = s => s === 'over' ? 'Mais de' : 'Menos de';
@@ -310,7 +331,7 @@ function card({ pr, e, s }) {
   const p = pr.p, on = inSlip(pr.id, s.side), u = stakeU(s);
   const tags = [...alerts(pr, s.side).map(([t, c]) => `<span class="tag ${c}">${esc(t)}</span>`)].filter(Boolean);
   return `<article class="pcard${s.ev > 0 ? ' value' : ''} ${s.side}" style="--tc:${teamCol(p.team)}">
-  <div class="pc-head">${badge(p.team)}<div class="pc-name"><button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="sub">${POSLB[p.pos]} ${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</span></div>${notaChip({ pr, e, s })}${gradeChip(s.grade)}</div>
+  <div class="pc-head">${jer(p)}<div class="pc-name"><button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="sub">${POSLB[p.pos]} ${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</span></div>${notaChip({ pr, e, s })}${gradeChip(s.grade)}</div>
   <div class="pc-line"><span class="side ${s.side}">${sideLb(s.side)}</span><span class="lnum">${fmt(e.line)}</span><span class="mk">${MARKETS[pr.mk].lb}</span>${srcTag(pr)}</div>
   ${valbar(s)}
   <div class="pc-kpis">
@@ -331,7 +352,7 @@ function card({ pr, e, s }) {
 function listRow({ pr, e, s }) {
   const p = pr.p, h = s.hits[F.sample] || s.hits.L10, r = h?.[1] ? h[0] / h[1] : null;
   return `<button class="lrow ${s.side}${s.ev > 0 ? ' value' : ''}" data-open="${pr.id}" data-side="${s.side}" style="--tc:${teamCol(p.team)}">
-    ${badge(p.team)}<span class="lr-name"><b>${esc(p.name)}</b><small>${matchLabel(pr)} · ${brTime(pr.game.timeUTC)}${p.status !== 'ok' ? ' · <span class="bad">' + (p.status === 'questionable' ? 'dúvida' : esc(p.status)) + '</span>' : ''}</small></span>
+    ${jer(p)}<span class="lr-name"><b>${esc(p.name)}</b><small>${matchLabel(pr)} · ${brTime(pr.game.timeUTC)}${p.status !== 'ok' ? ' · <span class="bad">' + (p.status === 'questionable' ? 'dúvida' : esc(p.status)) + '</span>' : ''}</small></span>
     <span class="lr-line"><span class="side ${s.side}">${s.side === 'over' ? 'Mais' : 'Menos'} ${fmt(e.line)}</span><small>${esc(MARKETS[pr.mk].lb)}</small></span>
     <span class="lr-odd"><small>odd</small><b>${s.odd ? fmt(s.odd, 2) : '—'}</b>${s.ev != null ? `<small class="${s.ev >= 0 ? 'pos' : 'neg'}">EV ${sgnPct(s.ev)}</small>` : ''}</span>
     <span class="lr-hit ${r == null ? '' : r >= .7 ? 'hi' : r < .5 ? 'lo' : 'md'}"><b>${r == null ? '—' : Math.round(r * 100) + '%'}</b><small>${h?.[1] ? h[0] + '/' + h[1] + ' ' + (F.sample === 'CUR' ? 'temp.' : F.sample) : ''}</small></span>
@@ -350,7 +371,7 @@ function hc(h) { if (!h?.[1]) return '<span class="hcell">—</span>'; const r =
 function table(rows) {
   return `<div class="tablewrap"><table><thead><tr><th>Jogador</th><th>Jogo</th><th>Mercado</th><th>Linha</th><th class="r">Proj.</th><th class="r">Chance</th><th class="r">Mercado</th><th class="r">Odd</th><th class="r">EV</th><th class="r">Stake</th><th>L5</th><th>L10</th><th>L20</th><th>H2H</th><th class="r">Seq.</th><th class="r" title="Projeção menos a linha, a favor do lado">Vant.</th><th title="Temporada passada inteira">T. pass.</th><th>Def.</th><th>Nota</th><th class="r">BH</th><th></th></tr></thead><tbody>
   ${rows.map(({ pr, e, s }) => { const p = pr.p, on = inSlip(pr.id, s.side), u = stakeU(s); return `<tr>
-    <td><div class="tplayer">${badge(p.team, 1)}<button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="muted">${p.pos}</span>${p.status !== 'ok' ? '<span class="tag bad" title="' + esc(p.note) + '">!</span>' : ''}</div></td>
+    <td><div class="tplayer">${jer(p, 1)}<button class="link" data-open="${pr.id}" data-side="${s.side}">${esc(p.name)}</button><span class="muted">${p.pos}</span>${p.status !== 'ok' ? '<span class="tag bad" title="' + esc(p.note) + '">!</span>' : ''}</div></td>
     <td class="muted">${matchLabel(pr)}, ${brTime(pr.game.timeUTC)}</td><td>${MARKETS[pr.mk].lb}</td>
     <td><span class="side ${s.side}" style="font-size:12px">${s.side === 'over' ? '+' : '−'} ${fmt(e.line)}</span> ${srcTag(pr)}</td>
     <td class="r num">${fmt(e.muF)}</td><td class="r num">${pct(s.p)}</td><td class="r num muted">${pct(s.pMkt)}</td><td class="r num">${s.odd ? fmt(s.odd, 2) + ' <span class="muted">' + esc(s.book) + '</span>' : '<span class="muted">—</span>'}</td>
@@ -516,9 +537,9 @@ function renderSummary() {
       <div class="ch-legend"><span><i class="lg-area"></i>Chance do modelo</span><span><i class="lg-line"></i>Chance que a odd cobra</span><span class="muted">Toque num ponto para abrir a ficha</span></div>
     </section>
     <div class="dside">
-      <section class="dpanel"><h3>Melhores da rodada</h3>${tops.length ? `<div class="plist">${tops.map(x => `<button class="prow" data-open="${x.pr.id}" data-side="${x.s.side}">${badge(x.pr.p.team)}<span class="grow"><b>${esc(x.pr.p.name)}</b><small>${sideLb(x.s.side)} ${fmt(x.e.line)} ${MARKETS[x.pr.mk].lb.toLowerCase()}</small></span>${gradeChip(x.s.grade)}</button>`).join('')}</div>` : '<p class="muted">Nenhuma linha com nota A hoje.</p>'}</section>
-      <section class="dpanel"><h3>Desfalques <small>${outs.length ? '' : 'nenhum listado'}</small></h3>${outs.length ? `<div class="plist">${outs.map(p => { const pr = PROPS.find(x => x.p.id === p.id); return `<button class="prow"${pr ? ` data-open="${pr.id}" data-side="${EVAL[pr.id].best}"` : ' data-goto="jogos"'}>${badge(p.team)}<span class="grow"><b>${esc(p.name)}</b><small>${esc(p.note || TEAM_INFO[p.team]?.[0] || '')}</small></span><span class="stchip ${p.status}">${stLb[p.status] || p.status}</span></button>`; }).join('')}</div>` : ''}</section>
-      <button class="gtile" data-preset-go="top"><span class="gt-stack">${tops.slice(0, 4).map(x => badge(x.pr.p.team)).join('')}</span><b>${strong.length}</b><span>${strong.length === 1 ? 'linha' : 'linhas'} com nota A ou A+${withOdd ? `, ${withOdd} com valor na odd de hoje` : ''}</span></button>
+      <section class="dpanel"><h3>Melhores da rodada</h3>${tops.length ? `<div class="plist">${tops.map(x => `<button class="prow" data-open="${x.pr.id}" data-side="${x.s.side}">${jer(x.pr.p)}<span class="grow"><b>${esc(x.pr.p.name)}</b><small>${sideLb(x.s.side)} ${fmt(x.e.line)} ${MARKETS[x.pr.mk].lb.toLowerCase()}</small></span>${gradeChip(x.s.grade)}</button>`).join('')}</div>` : '<p class="muted">Nenhuma linha com nota A hoje.</p>'}</section>
+      <section class="dpanel"><h3>Desfalques <small>${outs.length ? '' : 'nenhum listado'}</small></h3>${outs.length ? `<div class="plist">${outs.map(p => { const pr = PROPS.find(x => x.p.id === p.id); return `<button class="prow"${pr ? ` data-open="${pr.id}" data-side="${EVAL[pr.id].best}"` : ' data-goto="jogos"'}>${jer(p)}<span class="grow"><b>${esc(p.name)}</b><small>${esc(p.note || TEAM_INFO[p.team]?.[0] || '')}</small></span><span class="stchip ${p.status}">${stLb[p.status] || p.status}</span></button>`; }).join('')}</div>` : ''}</section>
+      <button class="gtile" data-preset-go="top"><span class="gt-stack">${tops.slice(0, 4).map(x => jer(x.pr.p)).join('')}</span><b>${strong.length}</b><span>${strong.length === 1 ? 'linha' : 'linhas'} com nota A ou A+${withOdd ? `, ${withOdd} com valor na odd de hoje` : ''}</span></button>
     </div>
   </div>
   ${CHG_OPEN && ch.length ? `<section class="changes dpanel" aria-label="O que mudou"><div class="ch-head"><h2>O que mudou ${CHG_BASE === 'visit' ? 'desde a sua última visita' : 'desde a abertura do mercado'}</h2><button class="btn sm" data-seen>Marcar como visto</button></div><div class="ch-list">${ch.slice(0, 10).map(changeItem).join('')}</div>${ch.length > 10 ? `<p class="muted" style="margin:6px 0 0;font-size:13px">e mais ${ch.length - 10}.</p>` : ''}</section>` : ''}`;
@@ -536,7 +557,7 @@ function openSearch() {
     const byP = new Map(); for (const x of bestRows()) { const k = x.pr.p.id; if (!byP.has(k) || score(x) > score(byP.get(k))) byP.set(k, x); }
     let rows = [...byP.values()]; if (q) rows = rows.filter(x => norm(x.pr.p.name).includes(q) || norm(x.pr.p.team) === q || norm(TEAM_INFO[x.pr.p.team]?.[0] || '').includes(q));
     rows = rows.sort((a, b) => score(b) - score(a)).slice(0, 8);
-    $('#qsList').innerHTML = rows.length ? rows.map(x => `<button role="option" data-open="${x.pr.id}" data-side="${x.s.side}">${badge(x.pr.p.team, 1)}<span class="grow"><b>${esc(x.pr.p.name)}</b><span class="muted"> ${matchLabel(x.pr)}, ${brTime(x.pr.game.timeUTC)}</span></span><span class="side ${x.s.side}">${sideLb(x.s.side)} ${fmt(x.e.line)}</span><span class="qs-mk">${mkShort(x.pr.mk)}</span>${gradeChip(x.s.grade)}</button>`).join('') : '<p class="muted" style="margin:6px 0">Nenhum jogador de hoje com esse nome.</p>';
+    $('#qsList').innerHTML = rows.length ? rows.map(x => `<button role="option" data-open="${x.pr.id}" data-side="${x.s.side}">${jer(x.pr.p, 1)}<span class="grow"><b>${esc(x.pr.p.name)}</b><span class="muted"> ${matchLabel(x.pr)}, ${brTime(x.pr.game.timeUTC)}</span></span><span class="side ${x.s.side}">${sideLb(x.s.side)} ${fmt(x.e.line)}</span><span class="qs-mk">${mkShort(x.pr.mk)}</span>${gradeChip(x.s.grade)}</button>`).join('') : '<p class="muted" style="margin:6px 0">Nenhum jogador de hoje com esse nome.</p>';
   };
   $('#qsInput').addEventListener('input', draw);
   $('#qsInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#qsList [data-open]')?.click(); } if (e.key === 'ArrowDown') { e.preventDefault(); $('#qsList [data-open]')?.focus(); } });
@@ -546,7 +567,7 @@ function openSearch() {
 
 /* ---------------- TENDÊNCIAS ---------------- */
 function rankItem(i, pr, s, right, sub) {
-  return `<button data-open="${pr.id}" data-side="${s ? s.side : EVAL[pr.id].best}"><span class="n${i < 3 ? ' top' : ''}">${i + 1}</span>${badge(pr.p.team, 1)}<span class="who"><b>${esc(pr.p.name)}</b><span>${sub}</span></span><span class="right">${right}</span></button>`;
+  return `<button data-open="${pr.id}" data-side="${s ? s.side : EVAL[pr.id].best}"><span class="n${i < 3 ? ' top' : ''}">${i + 1}</span>${jer(pr.p, 1)}<span class="who"><b>${esc(pr.p.name)}</b><span>${sub}</span></span><span class="right">${right}</span></button>`;
 }
 function bestRows() { return PROPS.map(pr => { const e = EVAL[pr.id]; return { pr, e, s: e[e.best] }; }); }
 function byPlayerBest(list, n) { const seen = new Set(), out = []; for (const x of list) { if (seen.has(x.pr.p.id)) continue; seen.add(x.pr.p.id); out.push(x); if (out.length >= n) break; } return out; }
@@ -597,7 +618,7 @@ function renderGames() {
         <div class="gteam">${badge(g.home)}<span>${esc(TEAM_INFO[g.home]?.[0] || g.home)}</span><small>Mandante${g.b2b.includes(g.home) ? ', B2B' : ''}</small></div>
       </div>
       <div class="gnums"><div><small>Handicap</small><b>${fav ? fav + ' −' + fmt(Math.abs(g.spread)) : '—'}</b>${mv(g.openSpread, g.spread)}</div><div><small>Total</small><b>${fmt(g.total)}</b>${mv(g.openTotal, g.total)}</div><div><small>Ritmo</small><b>${paceLb}${pace ? ' <span class="muted" style="font-size:12px">' + fmt(pace) + '</span>' : ''}</b></div></div>
-      <div class="gsec"><h4>Desfalques e alertas</h4><div class="inj">${[...inRot.map(p => `<div>${badge(p.team, 1)}<span>${esc(p.name)}</span><span class="tag ${p.status === 'out' ? 'bad' : 'warn'}">${{ out: 'Fora', doubtful: 'Provável fora', questionable: 'Dúvida' }[p.status] || p.status}${p.note ? ': ' + esc(p.note) : ''}</span>${p.injSrc ? `<span class="muted" style="font-size:11px">${esc(p.injSrc)}</span>` : ''}</div>`), ...extra.map(i => `<div>${badge(i.team, 1)}<span>${esc(i.name)}</span><span class="tag bad">Fora${i.note ? ': ' + esc(i.note) : ''}</span></div>`)].join('') || '<span class="muted">Nenhum desfalque listado</span>'}
+      <div class="gsec"><h4>Desfalques e alertas</h4><div class="inj">${[...inRot.map(p => `<div>${jer(p, 1)}<span>${esc(p.name)}</span><span class="tag ${p.status === 'out' ? 'bad' : 'warn'}">${{ out: 'Fora', doubtful: 'Provável fora', questionable: 'Dúvida' }[p.status] || p.status}${p.note ? ': ' + esc(p.note) : ''}</span>${p.injSrc ? `<span class="muted" style="font-size:11px">${esc(p.injSrc)}</span>` : ''}</div>`), ...extra.map(i => `<div>${badge(i.team, 1)}<span>${esc(i.name)}</span><span class="tag bad">Fora${i.note ? ': ' + esc(i.note) : ''}</span></div>`)].join('') || '<span class="muted">Nenhum desfalque listado</span>'}
         ${g.b2b.length ? `<div><span class="tag warn">Back-to-back</span><span class="muted">${g.b2b.join(', ')} jogou ontem</span></div>` : ''}
         ${Math.abs(g.spread ?? 0) >= 10 ? `<div><span class="tag warn">Risco de lavada</span><span class="muted">titulares podem sair cedo</span></div>` : ''}</div></div>
       <div class="gsec"><h4>Melhores linhas do jogo</h4><div class="toplist">${top.length ? top.map(({ pr, e, s }) => `<button data-open="${pr.id}" data-side="${s.side}">${gradeChip(s.grade)}<span class="grow"><b>${esc(pr.p.name)}</b>, ${sideLb(s.side).toLowerCase()} ${fmt(e.line)} ${MARKETS[pr.mk].lb.toLowerCase()}</span><span class="num">${pct(s.p)}</span></button>`).join('') : '<span class="muted">Nenhuma linha A ou A+ neste jogo</span>'}</div></div>
@@ -619,7 +640,7 @@ function renderDvP() {
   const mkFor = { pts: 'PTS', reb: 'REB', ast: 'AST', tpm: '3PM', tpa: '3PA', twom: '2PM', twoa: '2PA', fgm: 'FGM', fga: 'FGA', ftm: 'FTM', fta: 'FTA', stl: 'STL', blk: 'BLK', tov: 'TOV', pf: 'PF' }[dvpStat];
   const seen = new Set();
   const tg = PROPS.filter(pr => pr.mk === mkFor).map(pr => ({ pr, r: dvpRank(SLATE, pr.opp, pr.p.pos, dvpStat) })).filter(x => x.r.rank >= x.r.of - 7).sort((a, b) => b.r.rank - a.r.rank || b.pr.proj - a.pr.proj).filter(x => !seen.has(x.pr.p.id) && seen.add(x.pr.p.id));
-  $('#dvpTargets').innerHTML = tg.length ? tg.slice(0, 14).map(({ pr, r }) => { const e = EVAL[pr.id]; return `<button data-open="${pr.id}" data-side="over">${badge(pr.p.team, 1)}<span class="grow"><b>${esc(pr.p.name)}</b> ${matchLabel(pr)}, linha ${fmt(e.line)}</span><span class="tag good">${r.rank}º</span>${gradeChip(e.over.grade)}</button>`; }).join('') : '<span class="muted">Nenhum alvo forte hoje nesta estatística.</span>';
+  $('#dvpTargets').innerHTML = tg.length ? tg.slice(0, 14).map(({ pr, r }) => { const e = EVAL[pr.id]; return `<button data-open="${pr.id}" data-side="over">${jer(pr.p, 1)}<span class="grow"><b>${esc(pr.p.name)}</b> ${matchLabel(pr)}, linha ${fmt(e.line)}</span><span class="tag good">${r.rank}º</span>${gradeChip(e.over.grade)}</button>`; }).join('') : '<span class="muted">Nenhum alvo forte hoje nesta estatística.</span>';
 }
 
 /* ---------------- MÚLTIPLA ---------------- */
@@ -635,7 +656,7 @@ function renderSlip() {
   $('#fab').hidden = !SLIP.length || state.view === 'multipla'; $('#fabN').textContent = SLIP.length;
   if (state.view !== 'multipla') return;
   const gcount = {}; legs.forEach(l => gcount[l.pr.game.id] = (gcount[l.pr.game.id] || 0) + 1);
-  $('#legs').innerHTML = legs.length ? legs.map(({ pr, e, s }) => `<div class="leg">${badge(pr.p.team, 1)}<div class="grow"><b>${esc(pr.p.name)}</b>, <span class="side ${s.side}" style="font-size:11.5px">${sideLb(s.side)} ${fmt(e.line)}</span> ${MARKETS[pr.mk].lb}
+  $('#legs').innerHTML = legs.length ? legs.map(({ pr, e, s }) => `<div class="leg">${jer(pr.p, 1)}<div class="grow"><b>${esc(pr.p.name)}</b>, <span class="side ${s.side}" style="font-size:11.5px">${sideLb(s.side)} ${fmt(e.line)}</span> ${MARKETS[pr.mk].lb}
       <div class="muted" style="font-size:12.5px">${matchLabel(pr)}, chance ${pct(s.p)}, ${s.odd ? fmt(s.odd, 2) + ' na ' + esc(s.book) : 'sem odd'} ${gcount[pr.game.id] > 1 ? '<span class="tag warn">mesmo jogo</span>' : ''}</div></div>${gradeChip(s.grade)}<button class="x" data-swap="${pr.id}" data-side="${s.side}" aria-label="Trocar perna de ${esc(pr.p.name)}" title="Trocar por outra linha forte">↻</button><button class="x" data-remove="${pr.id}" data-side="${s.side}" aria-label="Remover perna">×</button></div>`).join('')
     : `<div class="empty"><h2>Bilhete vazio</h2><p>Toque em “+ Múltipla” nas props ou use “Montar automaticamente”.</p><a class="btn" href="#props">Ir para as props</a></div>`;
   if (!legs.length) { $('#slipSum').innerHTML = '<h2>Resumo</h2><p class="muted" style="margin:0">A odd, a chance combinada e a melhor casa aparecem aqui.</p>'; return; }
@@ -701,7 +722,7 @@ function openTipModal(id, side) {
   const u = stakeU(s) || 1;
   openModal(`<div class="mhead"><h2>Registrar tip</h2><button class="dclose" data-mclose aria-label="Fechar">×</button></div>
   <div class="mbody">
-    <div class="tipsum">${badge(pr.p.team)}<div><b>${esc(pr.p.name)}</b>, ${matchLabel(pr)}<div><span class="side ${side}">${sideLb(side)} ${fmt(e.line)}</span> ${MARKETS[pr.mk].lb}</div></div></div>
+    <div class="tipsum">${jer(pr.p)}<div><b>${esc(pr.p.name)}</b>, ${matchLabel(pr)}<div><span class="side ${side}">${sideLb(side)} ${fmt(e.line)}</span> ${MARKETS[pr.mk].lb}</div></div></div>
     <div class="kvline"><span>Chance ${pct(s.p)}</span><span>Odd justa ${fmt(s.fair, 2)}</span><span>Nota ${s.grade}</span>${s.ev != null ? `<span>EV ${sgnPct(s.ev)}</span>` : ''}</div>
     <div class="edrow"><label>Casa<input id="tBook" list="bookList" value="${esc(ov.book || (s.book && s.book !== 'Sua casa' ? s.book : CFG.defBook))}"></label><label>Linha<input id="tLine" inputmode="decimal" value="${fmt(e.line)}"></label><label>Odd<input id="tOdd" inputmode="decimal" value="${s.odd ? fmt(s.odd, 2) : ''}" placeholder="ex. 1,85"></label></div>
     <div class="edrow" style="margin-top:8px"><label>Stake (u)<input id="tUnits" inputmode="decimal" value="${fmt(u, 2)}"></label><label style="grid-column:span 2">Comentário (opcional)<input id="tNote" maxlength="140" placeholder="ex. matchup + sem o titular"></label></div>
@@ -1088,7 +1109,7 @@ function matesBox(pr, side) {
   const st = { out: 'FORA', doubtful: 'PROV. FORA', questionable: 'DÚVIDA' };
   return `<div class="dbox"><h3>Companheiros fora ou em dúvida</h3><div class="mates">${M.map(x => {
     const good = x.d == null ? '' : (side === 'over' ? x.d > 0 : x.d < 0) ? 'pos' : 'neg';
-    return `<button class="mate ${x.q.status}" data-chf="sem:${x.q.id}" aria-pressed="${CH?.f.includes('sem:' + x.q.id) || false}" title="Mostrar no gráfico só os jogos sem ${esc(x.q.name)}">${badge(x.q.team, 1)}<span class="grow"><b>${esc(x.q.name)}</b><small><span class="stchip ${x.q.status}">${st[x.q.status]}</span> sem ele: média ${fmt(x.avg)} em ${x.n} ${x.n === 1 ? 'jogo' : 'jogos'}</small></span><b class="num ${good}">${x.d == null ? '—' : (x.d >= 0 ? '+' : '−') + fmt(Math.abs(x.d))}</b></button>`; }).join('')}</div>
+    return `<button class="mate ${x.q.status}" data-chf="sem:${x.q.id}" aria-pressed="${CH?.f.includes('sem:' + x.q.id) || false}" title="Mostrar no gráfico só os jogos sem ${esc(x.q.name)}">${jer(x.q, 1)}<span class="grow"><b>${esc(x.q.name)}</b><small><span class="stchip ${x.q.status}">${st[x.q.status]}</span> sem ele: média ${fmt(x.avg)} em ${x.n} ${x.n === 1 ? 'jogo' : 'jogos'}</small></span><b class="num ${good}">${x.d == null ? '—' : (x.d >= 0 ? '+' : '−') + fmt(Math.abs(x.d))}</b></button>`; }).join('')}</div>
     <p class="muted" style="font-size:12.5px;margin:6px 0 0">Diferença da média do jogador sem o companheiro em relação aos jogos com ele (últimos 30). Toque para ver só esses jogos no gráfico.</p></div>`;
 }
 function chState(pr, line) { if (!CH || CH.id !== pr.id) CH = { id: pr.id, line, n: 'L10', f: [] }; return CH; }
@@ -1159,7 +1180,7 @@ function renderDrawer(focusEditor) {
   const on = inSlip(pr.id, D.side); const ov = OVR[pr.id] || {};
   const f = pr.factors, c = pr.ctx;
   $('#drawer').innerHTML = `
-  <div class="dhead" style="--tc:${teamCol(p.team)}">${badge(p.team)}<div class="grow"><h2 id="dName">${esc(p.name)}</h2><div class="sub">${POSLB[p.pos]} do ${esc(TEAM_INFO[p.team]?.[0] || p.team)}, ${matchLabel(pr)} às ${brTime(pr.game.timeUTC)}. ${fmt(c.exp, 0)} minutos esperados${c.rest != null ? ', ' + (c.rest <= 0 ? 'jogou ontem' : c.rest + (c.rest === 1 ? ' dia' : ' dias') + ' de descanso') : ''}.</div></div><button class="dclose" data-close aria-label="Fechar">×</button></div>
+  <div class="dhead" style="--tc:${teamCol(p.team)}">${jer(p, 2)}<div class="grow"><h2 id="dName">${esc(p.name)}</h2><div class="sub">${POSLB[p.pos]} do ${esc(TEAM_INFO[p.team]?.[0] || p.team)}, ${matchLabel(pr)} às ${brTime(pr.game.timeUTC)}. ${fmt(c.exp, 0)} minutos esperados${c.rest != null ? ', ' + (c.rest <= 0 ? 'jogou ontem' : c.rest + (c.rest === 1 ? ' dia' : ' dias') + ' de descanso') : ''}.</div></div><button class="dclose" data-close aria-label="Fechar">×</button></div>
   <div class="dbody">
     <div class="mktchips">${mks.map(x => `<button class="chip" data-mk="${x.id}" aria-pressed="${x.id === pr.id}">${mkShort(x.mk)}</button>`).join('')}</div>
     <div class="eyebrow">${MARKETS[pr.mk].lb} ${srcTag(pr)}</div>
