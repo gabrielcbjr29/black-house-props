@@ -4,3 +4,5 @@ node_modules/
 public/data/cards/
 model/out/
 __pycache__/
+public/data/relatorio.pdf
+public/data/relatorio.html

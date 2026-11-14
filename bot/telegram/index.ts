@@ -87,6 +87,18 @@ const inRange = (r: Row) => { const o = oddOf(r); return o >= ODD_MIN - 1e-9 && 
 const RANGE_TXT = ' · odds 1,40–3,50';
 // cards em imagem (gerados no publicar do GitHub Pages)
 const keyOf = (r: Row) => `${r.id}-${r.m}-${r.s}`;
+// PDF do dia (scripts/relatorio.mjs, gerado em toda coleta)
+const pdfUrl = (d: Data) => `${APP_URL}data/relatorio.pdf?v=${encodeURIComponent(d.gen)}`;
+async function sendPdf(chatId: number, d?: Data | null) {
+  d ??= await data().catch(() => null);
+  if (!d) { await TG('sendMessage', { chat_id: chatId, text: 'Não consegui ler os dados agora. Tente de novo em instantes.' }); return false; }
+  const hr = new Date(d.gen).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+  const r = await TG('sendDocument', { chat_id: chatId, document: pdfUrl(d), parse_mode: 'HTML',
+    caption: `📄 <b>Melhores entradas do dia</b> · ${d.date.split('-').reverse().slice(0, 2).join('/')}\n<i>Dados das ${hr}. Por mercado, duplo-duplo, triplo-duplo, entradas do método e múltiplas.</i>\n🔞 18+ · Aposte com responsabilidade`,
+    reply_markup: { inline_keyboard: [[BTN('🔄 PDF atualizado', '/pdf'), BTN('🧪 Estratégias', '/estrategias')], [HOME[0]]] } });
+  if (!r.ok) await TG('sendMessage', { chat_id: chatId, text: 'O PDF de hoje ainda está sendo gerado. Tente de novo em alguns minutos.' });
+  return !!r.ok;
+}
 const cardUrl = (d: Data, r: Row) => `${APP_URL}data/cards/${keyOf(r)}.jpg?v=${encodeURIComponent(d.gen)}`;
 function caption(r: Row) {
   const vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
@@ -358,6 +370,7 @@ async function pushDaily(force = false, minHour = 0, lead = 0) {
       if (r.ok) sent++;
       await new Promise(res => setTimeout(res, 60));
     }
+    if (await sendPdf(s.chat_id, d)) sent++;
     if (s.est && et) {
       const r = await TG('sendMessage', { chat_id: s.chat_id, text: et.text, parse_mode: 'HTML', disable_web_page_preview: true,
         reply_markup: { inline_keyboard: [...chunk(et.regs, 5), [BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
@@ -867,6 +880,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
+  [BTN('📄 PDF do dia', '/pdf')],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -878,7 +892,7 @@ const HOJE = { inline_keyboard: [
   [BTN('🔥 Top do dia', '/top'), BTN('💰 Valor', '/valor'), BTN('🛡️ Seguras', '/seguras')],
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
-  [BTN('🖼️ Cards do dia', '/cards'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('☰ Todos os mercados', '/menu')]] };
+  [BTN('🖼️ Cards do dia', '/cards'), BTN('📄 PDF do dia', '/pdf'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('☰ Todos os mercados', '/menu')]] };
 const MODELO_HUB = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Chance de uma linha', '/modelo'), BTN('📒 Meus testes', '/testes')],
@@ -1040,6 +1054,7 @@ async function handle(update: any) {
   const im = /^i:(.+)$/.exec(text);
   if (im) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCard(chatId, im[1]); return; }
   // /cards: as melhores do dia em imagem (sempre mensagens novas)
+  if (/^\/(pdf|relatorio)(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Enviando o PDF…' }); await sendPdf(chatId); return; }
   if (/^\/cards(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCards(chatId, text.split(/\s+/)[1]); return; }
   // página (p:2:/top 20) e atualizar (repete o comando que gerou a mensagem)
   let page = 1;
@@ -1097,7 +1112,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
