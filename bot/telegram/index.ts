@@ -335,7 +335,7 @@ async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
   else if (a === 'tent' || a === 'ra' || a === 'est') next = { ...(s ?? { tent: false, ra: false, est: false }), [a]: !(s?.[a as keyof Sub]) };
   if (JSON.stringify(next) !== JSON.stringify(s)) await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...next, updated_at: new Date().toISOString() }) });
   const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências', next?.est && '🧪 Modelo por mercado (entradas do dia)'].filter(Boolean);
-  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, cerca de 2h30 antes do primeiro jogo (em dia de jogo cedo, mais cedo):\n${on.map(x => '• ' + x).join('\n')}${next?.est ? '\n\n🚨 No modelo por mercado, cada entrada nova também chega na hora, em alerta, assim que o modelo aponta (de 9h às 23h).' : ''}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
+  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, cerca de 2h30 antes do primeiro jogo (em dia de jogo cedo, mais cedo):\n${on.map(x => '• ' + x).join('\n')}${next?.est ? '\n\n🚨 No modelo por mercado, cada entrada nova também chega na hora, em alerta, desde a abertura das linhas (de madrugada, sem som). O PDF do dia vai junto do resumo.' : ''}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
 }
 // envio do dia para os inscritos (chamado pelo GitHub depois de publicar os dados)
 // minHour: só envia se os dados foram gerados depois dessa hora (Brasília) — espera a rodada das 18h30
@@ -1008,6 +1008,10 @@ async function handle(update: any) {
     await TG('sendMessage', { chat_id: chatId, text: `Este bot é privado. Peça acesso ao dono e informe o seu ID: ${chatId}` });
     return;
   }
+  // todo usuário novo já entra recebendo tudo (tops, modelo por mercado e alertas); ele desliga em /receber.
+  // ignore-duplicates: quem já tem inscrição (inclusive desligada) não muda
+  await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
+    body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
   // teclado fixo (botões de baixo): vira comando
   if (!cq && KBMAP[text.trim()]) text = KBMAP[text.trim()];
   // /start: liga o teclado fixo (uma mensagem curta) e mostra o início
