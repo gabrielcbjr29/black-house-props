@@ -48,19 +48,67 @@ export function fmtEntries(list: any[]) {
   }).join('\n') + '</blockquote>');
   return { blocks, regs, n: i };
 }
-async function alert(fresh: any[], evMin: number) {
+// ---------- alerta completo: uma mensagem por entrada, com o card em imagem no topo e a análise toda ----------
+const MKF: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assistências', '3PM': 'bolas de 3', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'arremessos convertidos', FGA: 'arremessos tentados', '2PM': 'de 2 convertidos', '2PA': 'de 2 tentados', '3PA': 'bolas de 3 tentadas', FTM: 'lances livres convertidos', FTA: 'lances livres tentados', STL: 'roubos', BLK: 'tocos', SB: 'roubos+tocos', TOV: 'erros', PF: 'faltas' };
+const GRADE: Record<string, string> = { 'A+': '🔥 A+', A: '✅ A', B: '➖ B', C: '⚪ C' };
+const pc = (x: number | null | undefined) => x == null ? '–' : Math.round(x * 100) + '%';
+const bar = (p: number, n = 10) => { const k = Math.max(0, Math.min(n, Math.round(p * n))); return '▰'.repeat(k) + '▱'.repeat(n - k); };
+const hitTxt = (h?: number[] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
+function fullAlert(x: any, r: any) {
+  const over = x.side === 'o', line = +x.line, odd = +x.odd, edge = x.edge == null ? null : +x.edge;
+  const sw = over ? 'acima' : 'abaixo';
+  const title = x.strategy_id === 'oport-forte' ? `OPORTUNIDADE FORTE · ${MKF[x.mk] ?? x.mk}` : `NOVA ENTRADA · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' (reserva)' : ''}`;
+  const vs = r ? (r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`) : `${x.team} x ${x.opp}`;
+  const L = [`🚨 <b>${esc(title)}</b>`, `<b>${esc(x.name)}</b>  <i>${esc(vs)} · ${x.tip_utc ? hourBR(x.tip_utc) : r?.h ?? ''}</i>`, ''];
+  L.push(`${over ? '⬆️ <b>Mais de ' : '⬇️ <b>Menos de '}${n1(line)}</b> ${MKF[x.mk] ?? x.mk}`);
+  L.push(`💵 <code>@${n2(odd)}</code> 99play${edge == null ? '' : ` · EV <b>${pct(edge)}</b>${edge >= .1 ? ' 🔥' : ''}`}`);
+  if (r) {
+    L.push(`${GRADE[r.gr] ?? r.gr ?? ''}${r.nt != null ? ` · Nota <b>${r.nt}</b>` : ''}  ${bar(+x.p)} <b>${pc(+x.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}`);
+    L.push('', `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}`, `📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${esc(r.o)} ${hitTxt(r.hh)}`);
+  } else L.push(`Chance do modelo <b>${pc(+x.p)}</b>`);
+  const sq = x.sq?.length ? x.sq : r?.sq;
+  if (sq?.length) L.push(sqLine(sq, line, x.side), `🔢 <code>${sq.slice(0, 10).join('-')}</code>`);
+  if (r) {
+    L.push(`${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sw} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${r.ed == null ? '' : ` · vantagem <b>${r.ed >= 0 ? '+' : '−'}${n1(Math.abs(r.ed))}</b>`}`);
+    if (r.wo) L.push(`🚑 ${r.wo.x ? 'Sem' : 'Se faltar,'} ${esc(r.wo.q)}${r.wo.x ? '' : ' (em dúvida)'}: <b>${r.wo.h[0]}/${r.wo.h[1]}</b> ${sw} · média ${n1(r.wo.a)}`);
+    if (r.dv?.r) {
+      const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
+      L.push(`🛡️ Defesa ${esc(r.o)}: ${r.dv.r}ª/${r.dv.of} contra ${esc(r.dv.ps)} em ${esc(r.dv.k)}${good ? ' · <b>favorável</b>' : bad ? ' · <i>difícil</i>' : ''}`);
+    }
+  }
+  const body = `<blockquote>${L.slice(3).join('\n')}</blockquote>`;
+  const dup = /^(Bateu em|Defesa do|Contra o |Sem |Temporada passada|\d+ jogos seguidos)/;
+  const wy = (r?.wy ?? []).filter((t: string) => !dup.test(t)).slice(0, 3).map((t: string) => `✅ ${esc(t)}`);
+  const wn = (r?.wn ?? []).filter((t: string) => !dup.test(t)).slice(0, 2).map((t: string) => `⚠️ ${esc(t)}`);
+  if (edge != null && edge > .15) wn.push('⚠️ <i>Muito acima do mercado: confira notícias antes</i>');
+  if (r?.st === 'questionable') wn.push('🟡 <i>Jogador em dúvida</i>');
+  const why = [...wy, ...wn];
+  let text = `${L.slice(0, 3).join('\n')}${body}${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}\n<i>No papel: 1u a @${n2(odd)} · 🔞 18+ · Aposte com responsabilidade</i>`;
+  if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '…';
+  const share = [`🏀 ${x.name} (${vs})`, `${over ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(line)} ${MKF[x.mk] ?? x.mk} · @${n2(odd)}`,
+    ...(sq?.length ? [`📊 Últimos 10: ${sqLine(sq, line, x.side).replace(/<\/?b>/g, '')}`, `🔢 ${sq.slice(0, 10).join('-')}`] : [])].join('\n').slice(0, 256);
+  const kb = { inline_keyboard: [[{ text: '📝 Registrar minha aposta', callback_data: `bet:${x.pid}-${x.mk}-${x.side}:e.${x.strategy_id}`.slice(0, 64) }, { text: '📋 Copiar', copy_text: { text: share } }], [{ text: '🧪 Placar', callback_data: '/estrategias' }, { text: '💼 Banca', callback_data: '/banca' }]] };
+  return { text, kb };
+}
+async function alert(fresh: any[], evMin: number, bot: any) {
   const token = await cfg('TELEGRAM_BOT_TOKEN'); if (!token || !fresh.length) return 0;
   const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
   if (!subs.length) return 0;
-  const { blocks, regs, n } = fmtEntries(fresh);
-  let text = `🚨 <b>${n > 1 ? 'NOVAS ENTRADAS' : 'NOVA ENTRADA'} · MODELO BH</b>\n<i>Linha e odd da 99play agora · EV mínimo ${Math.round(evMin * 100)}% · 1u cada</i>\n\n${blocks.join('\n\n')}\n\n🟩 bateu · 🟥 não bateu nos últimos 10 (mais recente primeiro)\n📝 <i>Toque no número para registrar a sua aposta. Quanto antes, melhor: a linha costuma andar até o jogo.</i>\n<i>🔞 18+ · Aposte com responsabilidade.</i>`;
-  if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '</blockquote>…';
-  const kb = { inline_keyboard: [...Array.from({ length: Math.ceil(regs.length / 5) }, (_, k) => regs.slice(k * 5, k * 5 + 5)), [{ text: '🧪 Placar', callback_data: '/estrategias' }, { text: '💼 Banca', callback_data: '/banca' }]] };
+  const rowOf = new Map<string, any>((bot?.rows ?? []).map((r: any) => [`${r.id}-${r.m}-${r.s}`, r]));
+  // ordem: jogo mais cedo primeiro, e dentro do jogo o maior EV
+  const list = [...fresh].sort((a, b) => String(a.tip_utc ?? '').localeCompare(String(b.tip_utc ?? '')) || (+b.edge || 0) - (+a.edge || 0));
   let sent = 0;
-  for (const s of subs) {
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: kb }) }).then(r => r.json()).catch(() => null);
-    if (r?.ok) sent++;
+  for (const x of list) {
+    const r = rowOf.get(`${x.pid}-${x.mk}-${x.side}`);
+    const { text, kb } = fullAlert(x, r);
+    const img = r?.cd ? `${APP}cards/${r.id}-${r.m}-${r.s}.jpg?v=${encodeURIComponent(bot.gen)}` : null;
+    for (const s of subs) {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', reply_markup: kb,
+          link_preview_options: img ? { url: img, prefer_large_media: true, show_above_text: true } : { is_disabled: true } }) }).then(r => r.json()).catch(() => null);
+      if (res?.ok) sent++;
+      await new Promise(ok => setTimeout(ok, 350)); // o Telegram limita mensagens seguidas no mesmo chat
+    }
   }
   return sent;
 }
@@ -97,8 +145,8 @@ async function record(silent = false) {
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
   const toAlert = fresh.filter(x => x.alerted).sort((a, b) => b.edge - a.edge);
-  const alertas = silent ? 0 : await alert(toAlert, evMin).catch(e => { console.error('alerta', e); return 0; });
   const bot = await getJ('bot.json').catch(() => null);
+  const alertas = silent ? 0 : await alert(toAlert, evMin, bot?.date === st.date ? bot : null).catch(e => { console.error('alerta', e); return 0; });
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
   return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk };
 }
@@ -186,6 +234,14 @@ Deno.serve(async (req: Request) => {
     const secret = await cfg('WEBHOOK_SECRET');
     if (u.searchParams.get('record') && u.searchParams.get('record') === secret) return json(await record(u.searchParams.get('silent') === '1'));
     if (u.searchParams.get('settle') && u.searchParams.get('settle') === secret) return json(await settle());
+    // prévia: manda o alerta completo de uma entrada de hoje (a de maior EV, ou &k=<pid>-<mk>-<lado>) marcado como TESTE
+    if (u.searchParams.get('preview') && u.searchParams.get('preview') === secret) {
+      const bot = await getJ('bot.json'), k = u.searchParams.get('k');
+      const ps: any[] = await sb(`strategy_picks?date=eq.${bot.date}&select=*&order=edge.desc.nullslast&limit=200`) ?? [];
+      const x = ps.find(p => !k || `${p.pid}-${p.mk}-${p.side}` === k); if (!x) return json({ ok: false, erro: 'sem entrada' });
+      const live = (await getJ('strategies.json'))?.picks?.find((p: any) => p.pid === x.pid && p.mk === x.mk && p.strategy_id === x.strategy_id);
+      return json({ ok: true, enviadas: await alert([{ ...x, ...(live ?? {}), name: '[TESTE] ' + x.name }], 0, bot) });
+    }
     if (u.searchParams.get('stats')) return json(await sb('strategy_stats?select=*&order=lucro.desc.nullslast'));
     const rep = await cfg('REPORT_TOKEN');
     if (rep && u.searchParams.get('csv') === rep) {

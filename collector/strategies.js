@@ -35,6 +35,14 @@ STRATEGIES.push({
   descr: 'Menos de nos 8 mercados para jogadores de reserva (12 a 24 min por jogo), com linha e odd da 99play: chance do modelo entre 55% e 85%, sem colega importante fora hoje, ordem pela Nota BH.',
   test: r => c99(r) && r.s === 'u' && (r.mn ?? 0) >= 12 && (r.mn ?? 0) < 24 && r.st !== 'questionable' && r.p >= .55 && r.p <= .85 && !r.wo?.x,
 });
+// oportunidade forte fora dos 8 mercados (pedido do usuário em 13/11): qualquer outro mercado da 99play quando o
+// Modelo BH vê muito valor. Também entra no papel, para medir se esse corte dá lucro.
+const GOOD = r => r.gr === 'A+' || r.gr === 'A';
+STRATEGIES.push({
+  id: 'oport-forte', name: 'Oportunidade forte', markets: ['PTS', 'REB', 'AST', 'PRA', 'PR', 'PA', 'STL', 'BLK', 'SB', 'TOV', 'PF'], max: 6,
+  descr: 'Fora dos 8 mercados monitorados: entradas com linha e odd da 99play, EV de 10% ou mais, nota A ou A+, jogador de rotação (24+ min), chance do modelo entre 55% e 85%, sem trava de desfalque, ordem pela Nota BH.',
+  test: r => !!(r.c9 && r.d) && !OFF_MK.has(r.m) && !MK_EST.includes(r.m) && GOOD(r) && edgeOf(r) >= .10 && rot(r) && r.p >= .55 && r.p <= .85 && !woLock(r),
+});
 
 /* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */
 export function pickStrategies(bot, games = []) {

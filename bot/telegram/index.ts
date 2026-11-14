@@ -369,7 +369,7 @@ async function pushDaily(force = false, minHour = 0, lead = 0) {
   return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et?.regs.length ?? 0 };
 }
 // ---------- Entradas das estratégias (strategies.json gerado na coleta) ----------
-const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast', 'reserva-under': 'Under de reserva' };
+const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast', 'reserva-under': 'Under de reserva', 'oport-forte': 'Oportunidade forte' };
 const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
 const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
 // entradas já gravadas do dia (linha e odd do alerta), só de jogos que ainda não começaram, no formato do strategies.json
@@ -398,7 +398,7 @@ function estText(d: Data, st: any): { text: string; regs: { text: string; callba
   const regs: { text: string; callback_data: string }[] = []; let i = 0;
   const blocks = order.map(([k, xs]) => `🏀 <b>${esc(k)}</b>${xs[0].tip_utc ? ' · ' + hourBR(xs[0].tip_utc) : ''}\n<blockquote>` + xs.map((x: any) => {
     i++; regs.push(BTN(`📝 ${i}`, `bet:${estKey(x)}:e.${x.strategy_id}`));
-    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}${x.sq?.length ? '\n' + sqLine(x.sq, +x.line, x.side) : ''}`;
+    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? MK[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}${x.sq?.length ? '\n' + sqLine(x.sq, +x.line, x.side) : ''}`;
   }).join('\n') + '</blockquote>');
   let text = `🧪 <b>RESUMO DO DIA · MODELO BH</b>\n<i>${dateBR(d.date)} · ${i} entrada${i > 1 ? 's' : ''} em aberto · linha e odd do alerta</i>\n\n${blocks.join('\n\n')}\n\n📝 <i>Toque no número e mande a odd que você pegou (ex.: <code>1,85</code> ou <code>1,85 0,5u</code>).</i>` + FOOT;
   if (text.length > 4090) text = text.slice(0, 3990).replace(/<[^>]*$/, '') + '</blockquote>…';
