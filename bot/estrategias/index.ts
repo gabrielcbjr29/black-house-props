@@ -97,6 +97,9 @@ async function alert(fresh: any[], evMin: number, bot: any) {
   const rowOf = new Map<string, any>((bot?.rows ?? []).map((r: any) => [`${r.id}-${r.m}-${r.s}`, r]));
   // ordem: jogo mais cedo primeiro, e dentro do jogo o maior EV
   const list = [...fresh].sort((a, b) => String(a.tip_utc ?? '').localeCompare(String(b.tip_utc ?? '')) || (+b.edge || 0) - (+a.edge || 0));
+  // de madrugada (0h às 8h em Brasília) o alerta chega sem som; aparece no Telegram para ver de manhã
+  const hBR = +new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23' }).format(new Date());
+  const quiet = hBR < 8;
   let sent = 0;
   for (const x of list) {
     const r = rowOf.get(`${x.pid}-${x.mk}-${x.side}`);
@@ -104,7 +107,7 @@ async function alert(fresh: any[], evMin: number, bot: any) {
     const img = r?.cd ? `${APP}cards/${r.id}-${r.m}-${r.s}.jpg?v=${encodeURIComponent(bot.gen)}` : null;
     for (const s of subs) {
       const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', reply_markup: kb,
+        body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', reply_markup: kb, disable_notification: quiet,
           link_preview_options: img ? { url: img, prefer_large_media: true, show_above_text: true } : { is_disabled: true } }) }).then(r => r.json()).catch(() => null);
       if (res?.ok) sent++;
       await new Promise(ok => setTimeout(ok, 350)); // o Telegram limita mensagens seguidas no mesmo chat

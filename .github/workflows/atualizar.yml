@@ -10,8 +10,7 @@ name: Atualizar dados e publicar
 
 on:
   schedule:
-    - cron: '50 12-23 * * *'
-    - cron: '50 0-2 * * *'
+    - cron: '50 * * * *'
   workflow_dispatch:
     inputs:
       odds_agora:

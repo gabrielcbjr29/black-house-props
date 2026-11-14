@@ -1,4 +1,5 @@
-# Relógio da coleta: dispara "Atualizar dados e publicar" de hora em hora, aos :50 (Brasília, das 9h50 às 23h50),
+# Relógio da coleta: dispara "Atualizar dados e publicar" de hora em hora, aos :50, o dia todo (desde 14/11: a 99play
+# abre as linhas de madrugada e o usuário quer o alerta já na abertura),
 # 15 minutos depois de cada leitura das linhas da 99play (:35). O agendamento próprio do GitHub (schedule) atrasa
 # horas ou pula horários; este relógio fica esperando dentro de um job e se dispara de novo a cada hora
 # (workflow_dispatch com o GITHUB_TOKEN pode disparar outro workflow). O schedule abaixo só religa a corrente
@@ -33,12 +34,7 @@ jobs:
           if [ $wait -lt 60 ]; then wait=$((wait + 3600)); fi
           echo "esperando $wait s (até o próximo :50)"
           sleep $wait
-          h=$((10#$(TZ=America/Sao_Paulo date +%H)))
-          if [ $h -ge 9 ] && [ $h -le 23 ]; then
-            gh api -X POST "repos/$REPO/actions/workflows/atualizar.yml/dispatches" -f ref=main && echo "coleta disparada às $(TZ=America/Sao_Paulo date +%H:%M)"
-          else
-            echo "fora do horário ($h h em Brasília): sem coleta"
-          fi
+          gh api -X POST "repos/$REPO/actions/workflows/atualizar.yml/dispatches" -f ref=main && echo "coleta disparada às $(TZ=America/Sao_Paulo date +%H:%M)"
       - name: Agenda o próximo relógio
         if: ${{ !cancelled() }}
         env:
