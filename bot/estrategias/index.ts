@@ -62,6 +62,8 @@ function fullAlert(x: any, r: any) {
   const L = [`🚨 <b>${esc(title)}</b>`, `<b>${esc(x.name)}</b>  <i>${esc(vs)} · ${x.tip_utc ? hourBR(x.tip_utc) : r?.h ?? ''}</i>`, ''];
   L.push(`${over ? '⬆️ <b>Mais de ' : '⬇️ <b>Menos de '}${n1(line)}</b> ${MKF[x.mk] ?? x.mk}`);
   L.push(`💵 <code>@${n2(odd)}</code> 99play${x.strategy_id === 'tendencia' ? ` · <i>sinal da sequência, não do modelo</i>` : edge == null ? '' : ` · EV <b>${pct(edge)}</b>${edge >= .1 ? ' 🔥' : ''}`}`);
+  const age9 = x.t9 ? (Date.now() - Date.parse(x.t9)) / 36e5 : 0;
+  if (age9 >= 2) L.push(`⏱️ <b>Odd lida às ${hourBR(x.t9)}</b> (há ${Math.floor(age9)}h): leitor da 99play parado, <b>confira a linha e a odd antes</b>`);
   if (r) {
     L.push(`${GRADE[r.gr] ?? r.gr ?? ''}${r.nt != null ? ` · Nota <b>${r.nt}</b>` : ''}  ${bar(+x.p)} <b>${pc(+x.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}`);
     L.push('', `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}`, `📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${esc(r.o)} ${hitTxt(r.hh)}`);
@@ -130,11 +132,12 @@ async function record(silent = false) {
   const key = (x: any) => `${x.strategy_id}|${x.pid}|${x.mk}`, had = new Set(have.map(key));
   const count: Record<string, number> = {}; for (const h of have) count[h.strategy_id] = (count[h.strategy_id] || 0) + 1;
   const maxOf = Object.fromEntries(st.strategies.map((s: any) => [s.id, s.max ?? 5]));
-  const rows: any[] = [], fresh: any[] = [];
+  const rows: any[] = [], fresh: any[] = [], t9Of = new Map<string, string>();
   for (const p of st.picks) {
     if (p.tip_utc && Date.parse(p.tip_utc) <= now + 5 * 6e4) continue; // jogo começado: fica a última gravada
     if (!p.odd) continue; // sem odd da 99play: não entra
-    const row = { date: st.date, ...p, stat: MK2STAT[p.mk], odd_src: p.odd_src || '99play', updated_at: new Date(now).toISOString() };
+    const { t9, ...pp } = p; if (t9) t9Of.set(key(p), t9); // hora da leitura da 99play: só para o alerta (não vai para o banco)
+    const row = { date: st.date, ...pp, stat: MK2STAT[p.mk], odd_src: p.odd_src || '99play', updated_at: new Date(now).toISOString() };
     if (had.has(key(p))) { rows.push(row); continue; }
     if ((count[p.strategy_id] || 0) >= (maxOf[p.strategy_id] ?? 5)) continue; // teto do dia já preenchido
     count[p.strategy_id] = (count[p.strategy_id] || 0) + 1; fresh.push(row);
@@ -163,11 +166,35 @@ async function record(silent = false) {
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
   for (const x of trendLate) await sb(`strategy_picks?date=eq.${x.date}&strategy_id=eq.tendencia&pid=eq.${x.pid}&mk=eq.${encodeURIComponent(x.mk)}`, { method: 'PATCH', body: JSON.stringify({ alerted: true }) }).catch(() => null);
-  const toAlert = [...fresh.filter(x => x.alerted), ...trendLate].sort((a, b) => (b.edge ?? -1) - (a.edge ?? -1));
+  const toAlert = [...fresh.filter(x => x.alerted), ...trendLate].map(x => ({ ...x, t9: t9Of.get(key(x)) })).sort((a, b) => (b.edge ?? -1) - (a.edge ?? -1));
   const bot = await getJ('bot.json').catch(() => null);
   const alertas = silent ? 0 : await alert(toAlert, evMin, bot?.date === st.date ? bot : null).catch(e => { console.error('alerta', e); return 0; });
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
-  return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk };
+  const leitor = await leitorCheck().catch(e => ({ erro: String(e) }));
+  return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor };
+}
+// ---------- Leitor da 99play parado (PC do usuário desligado, aba fechada…) ----------
+// Roda junto com a gravação (a cada 15 min). Se a última leitura tem 2h+ avisa uma vez; quando volta, avisa de novo.
+// Estado em bot_config C99_ALERT (= taken_at da leitura já avisada). De 0h às 8h o aviso chega sem som.
+async function leitorCheck() {
+  const last = (await sb('c99_snapshots?select=taken_at&order=taken_at.desc&limit=1'))?.[0]?.taken_at as string | undefined;
+  if (!last) return { skip: 'sem leitura' };
+  const age = (Date.now() - Date.parse(last)) / 36e5, warned = (await cfg('C99_ALERT')) ?? '';
+  const setCfg = (v: string) => sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'C99_ALERT', value: v, updated_at: new Date().toISOString() }) });
+  let text = '';
+  if (age >= 2 && warned !== last) {
+    text = `⚠️ <b>Leitor da 99play parado</b>\nA última leitura foi às <b>${hourBR(last)}</b> (há ${Math.floor(age)}h). O bot segue com essas linhas e odds; os alertas mostram ⏱️ com a hora da leitura.\n<i>Confira a linha e a odd na 99play antes de apostar. Se o PC estiver ligado, veja se a aba da 99play está aberta com o selo BH.</i>`;
+    await setCfg(last);
+  } else if (age < 2 && warned) {
+    text = `✅ <b>Leitor da 99play voltou</b>\nNova leitura às ${hourBR(last)}. As odds do bot estão atualizadas de novo.`;
+    await setCfg('');
+  }
+  if (!text) return { idade_h: Math.round(age * 10) / 10, aviso: warned ? 'já avisado' : 'ok' };
+  const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
+  const hBR = +new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23' }).format(new Date());
+  for (const s of subs) await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', disable_notification: hBR < 8 }) }).catch(() => null);
+  return { idade_h: Math.round(age * 10) / 10, enviado: age >= 2 ? 'parado' : 'voltou' };
 }
 // ---------- Monitor de risco: vigia as entradas já enviadas até o jogo começar (roda junto com a gravação) ----------
 // Sinais (com os dados que a coleta de hora em hora já traz, sem depender da 99play):

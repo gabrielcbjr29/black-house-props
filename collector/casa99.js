@@ -68,6 +68,8 @@ export async function fetch99({ slate, state, now = new Date(), log = console.lo
     for (const ev of parseEvents(p)) {
       const g = ours.get(ev.teams.slice().sort().join('|')); if (!g || !p.details?.[ev.id]) continue;
       const lines = parseEventLines(p.details[ev.id], slate.players.filter(x => x.team === g.home || x.team === g.away));
+      // cada linha leva a hora da leitura (o bot avisa quando a odd ficou velha, ex.: PC desligado)
+      for (const l of lines) if (l.books?.['99play']) l.books['99play'].at = snap.taken_at;
       if (lines.length) { S.events[g.id] = { at: snap.taken_at, ev: ev.id, lines }; used++; }
     }
   } else if (p) log(`  99play: foto de ${Math.round(age)}h atrás, velha demais; uso a última guardada`);

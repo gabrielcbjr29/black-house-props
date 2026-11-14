@@ -87,7 +87,10 @@ const dots = (sq, line, side) => (sq || []).slice(0, 10).map(v => {
 }).join('');
 const vs = (r, games) => { const g = games[r.g]; return `${r.home ? r.t + ' x ' + r.o : r.t + ' @ ' + r.o}${g?.t ? ' · ' + g.t : r.h ? ' · ' + r.h : ''}`; };
 const entry = r => `${r.s === 'o' ? 'Mais de' : 'Menos de'} ${n1(r.l)}`;
-const oddCell = r => r.c9 && r.d ? `<b>@${n2(r.d)}</b><small>99play · EV ${ev(r.e)}</small>` : `<b>${n2(1 / r.p)}</b><small>odd justa · linha ref.</small>`;
+let GEN = Date.now(); // hora dos dados (a odd é "velha" se a leitura da 99play tem 2h+ em relação a ela)
+const hBR = iso => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+const old9 = r => r.t9 && GEN - Date.parse(r.t9) >= 2 * 36e5;
+const oddCell = r => r.c9 && r.d ? `<b>@${n2(r.d)}</b><small>99play · EV ${ev(r.e)}${old9(r) ? ` · <span class="old">⏱️ lida ${hBR(r.t9)}</span>` : ''}</small>` : `<b>${n2(1 / r.p)}</b><small>odd justa · linha ref.</small>`;
 
 function rowHTML(r, games, extra = '') {
   return `<tr><td class="pl">${jerseySVG({ team: r.t, num: r.nu ?? NUM.get(r.id), name: r.n }, 1)}<div><b>${esc(r.n)}</b><small>${esc(vs(r, games))}</small></div></td>
@@ -100,6 +103,11 @@ const TH = `<tr><th>Jogador</th><th>Entrada</th><th>Chance</th><th>Odd</th><th>�
 
 export function reportHTML(bot, rep) {
   const { games, sections, dd, td, metodo, rowOf, multi } = rep;
+  GEN = Date.parse(bot.gen) || Date.now();
+  const t9s = bot.rows.map(r => r.t9).filter(Boolean).sort(), last9 = t9s.at(-1);
+  const leit = !last9 ? '' : GEN - Date.parse(last9) >= 2 * 36e5
+    ? `<div class="warn">⏱️ <b>Leitor da 99play parado:</b> a última leitura foi às ${hBR(last9)}. Linhas e odds podem ter mudado; confira na 99play antes de apostar.</div>`
+    : `<div class="ok9">Linhas e odds da 99play lidas às ${hBR(last9)}.</div>`;
   const d = new Date(bot.date + 'T12:00:00Z');
   const dia = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', timeZone: 'UTC' });
   const gen = new Date(bot.gen).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
@@ -126,10 +134,11 @@ b.o,span.o{color:#4FD18B}b.u,span.u{color:#F2B544}.pr b{font:800 17px BS;color:#
 .dots{display:flex;gap:2px;margin-bottom:2px}.dots i{width:9px;height:9px;border-radius:2px;display:block}.dots .g{background:#2DB46E}.dots .r{background:#E5534B}.dots .p{background:#6B7570}
 .df{font:700 12px BS;white-space:nowrap}.tks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tk{background:#0C120F;border:1px solid #1C2A22;border-radius:9px;padding:9px}
 .tkh b{font:800 14px BS;text-transform:uppercase;display:block}.tkh span{color:#2DB46E;font-weight:700;font-size:10px}.lg{display:flex;gap:6px;align-items:center;margin-top:7px}.lg .jer{width:20px;height:22px;flex:none}.lg small{display:block;color:#8FA196;font-size:9px}
+.warn{margin:8px 0 2px;background:#3a2a08;border:1px solid #F2B544;color:#FBE3A8;border-radius:7px;padding:7px 10px;font-size:10.5px}.ok9{margin:6px 0 0;color:#8FA196;font-size:9.5px}.old{color:#F2B544;font-weight:700}
 footer{margin-top:18px;border-top:1px solid #1C2A22;padding-top:8px;color:#6E8075;font-size:9px}`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Black House · ${esc(bot.date)}</title><style>${css}</style></head><body><div class="page">
 <header><div class="hd"><h1>Melhores entradas <em>do dia</em></h1><small>${esc(dia)} · dados das ${esc(gen)} (Brasília)</small></div><div class="brand">BLACK HOUSE<small>Modelo BH · NBA</small></div></header>
-<div class="games">${jogos}</div>
+<div class="games">${jogos}</div>${leit}
 ${met ? sec('Entradas do método', 'As que o bot alertou hoje (EV de 5% ou mais na odd da 99play, uma por jogador). Ficam registradas no papel com 1u.', `<table>${TH}${met}</table>`) : ''}
 ${sections.map(s => sec(s.t, 'As de maior chance do Modelo BH, só jogador de rotação (24+ min). Com linha da 99play, só as sem valor negativo; sem ela, a linha de referência.', `<table>${TH}${s.rows.map(r => rowHTML(r, games)).join('')}</table>`)).join('')}
 ${dd.length ? sec('Duplo-duplo', 'Chance pelo histórico (últimos 10, últimos 20 e temporada). Compare a odd justa com a da casa: só vale se a casa pagar mais.', `<table>${TH}${ddRows(dd, 'Duplo-duplo')}</table>`) : ''}
