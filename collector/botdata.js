@@ -22,16 +22,29 @@ const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt
 const brTime = iso => iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '';
 const r3 = x => x == null ? null : Math.round(x * 1000) / 1000;
 
+// Regra de tendência (ideia do usuário em 14/11, estilo GameRead): sequência + matchup + defesa + odd, na linha da 99play.
+//   sequência: 7+ acertos nos últimos 10 e 4+ nos últimos 5; matchup: 50%+ contra o adversário (ou sem jogo contra ele);
+//   defesa: adversário entre os 12 que mais cedem (over) ou os 12 que menos cedem (under) à posição no mercado;
+//   odd da 99play entre 1,60 e 2,30; jogador de rotação (24+ min) e não "em dúvida". Não usa a chance do modelo.
+export const trendOK = r => !!(r.c9 && r.d >= 1.6 && r.d <= 2.3) && (r.mn ?? 0) >= 24 && r.st !== 'questionable'
+  && r.l10?.[1] >= 10 && r.l10[0] >= 7 && r.l5?.[0] >= 4 && (!r.hh?.[1] || r.hh[0] / r.hh[1] >= .5)
+  && !!r.dv?.r && (r.s === 'o' ? r.dv.r >= r.dv.of - 11 : r.dv.r <= 12);
 // full: todas as linhas (sem cortar nota baixa nem B fraco), para o PDF do dia; o bot.json usa o corte
 export function buildBotData(slate, { w = .4, full = false } = {}) {
   const games = slate.games.map(g => ({ id: g.id, a: g.away, h: g.home, t: brTime(g.timeUTC), utc: g.timeUTC, sp: g.spread ?? null, to: g.total ?? null }));
   const gById = Object.fromEntries(slate.games.map(g => [g.id, g]));
-  const rows = [];
+  const rows = [], trend = [];
   for (const pr of buildProps(slate, { calib: true })) {
     if (pr.p.status === 'out' || pr.p.status === 'doubtful' || OFF_MK.has(pr.mk)) continue;
     const e = evaluate(pr, null, { w });
-    const s = e[e.best];
-    if (!full && GRADE_ORDER[s.grade] < 2) continue;
+    for (const side of [e.best, e.best === 'over' ? 'under' : 'over']) {
+    const s = e[side], isBest = side === e.best;
+    // regra de tendência (sequência + matchup + defesa + odd): pode puxar o outro lado ou um lado de nota baixa.
+    // pré-checagem barata da sequência antes de montar a linha
+    const seqOk = s.hits?.L10?.[1] >= 10 && s.hits.L10[0] >= 7 && s.hits?.L5?.[0] >= 4;
+    if (!isBest && (full || !seqOk)) continue;
+    const gradeOk = full || GRADE_ORDER[s.grade] >= 2;
+    if (!gradeOk && !seqOk) continue;
     // odd: casa de verdade primeiro; Kalshi só se não houver casa
     let odd = null, book = null, kal = false;
     if (pr.book?.books) {
@@ -47,7 +60,7 @@ export function buildBotData(slate, { w = .4, full = false } = {}) {
     const nt = bhScore(pr, { ...e, [s.side]: sv }, s.side, { steam: steamOf(pr, s.side) });
     const rk = pr.rank?.rank ? { r: pr.rank.rank, of: pr.rank.of, ps: POS_PT[pr.p.pos] || '', k: STAT_PT[pr.rank.k] || pr.rank.k } : null;
     const h10 = s.hits?.L10?.[1] ? s.hits.L10[0] / s.hits.L10[1] : 0;
-    rows.push({ id: pr.p.id, n: pr.p.name, t: pr.p.team, o: opp, home: pr.p.team === g.home, g: pr.game.id, h: brTime(g.timeUTC), m: pr.mk, s: s.side === 'over' ? 'o' : 'u', l: e.line,
+    const row = { id: pr.p.id, n: pr.p.name, t: pr.p.team, o: opp, home: pr.p.team === g.home, g: pr.game.id, h: brTime(g.timeUTC), m: pr.mk, s: s.side === 'over' ? 'o' : 'u', l: e.line,
       p: r3(s.p), q: r3(s.pMkt), d: odd, b: book, k: kal ? 1 : 0, e: r3(ev), gr: s.grade, l10: s.hits?.L10 || null, l20: s.hits?.L20 || null,
       ss: s.hits?.CUR?.[1] ? s.hits.CUR : null, hh: s.hits?.H2H?.[1] ? s.hits.H2H : null, dv: rk, pj: r3(e.muF), mb: pr.model ? 1 : 0, mn: Math.round((pr.ctx.m5 + pr.ctx.m20) / 2),
       st: pr.p.status, rl: pr.ctx.role || null, nt, sc: nt + h10 / 10,
@@ -58,7 +71,12 @@ export function buildBotData(slate, { w = .4, full = false } = {}) {
       // L5, sequência atual, vantagem (projeção − linha a favor do lado), temporada passada e "sem o colega"
       l5: s.hits?.L5?.[1] ? s.hits.L5 : null, sk: s.streak || 0, ed: Math.round(s.gap * 10) / 10, tp: s.hits?.PS?.[1] ? s.hits.PS : null,
       wo: pr.ctx.wo && s.hits?.WO?.[1] >= 2 ? { q: pr.ctx.wo.q.name, h: s.hits.WO, a: Math.round(pr.woVals.reduce((a, x) => a + x, 0) / pr.woVals.length * 10) / 10, x: pr.ctx.wo.active ? 1 : 0 } : null, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
-      _v: () => ({ ps: POSLB[pr.p.pos] || '', ...(pr.p.num ? { nu: pr.p.num } : {}), v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) });
+      _v: () => ({ ps: POSLB[pr.p.pos] || '', ...(pr.p.num ? { nu: pr.p.num } : {}), v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) };
+    const tr = trendOK(row); if (tr) row.tr = 1;
+    // o lado que o modelo não escolheu (ou de nota baixa) fica numa lista à parte (só a estratégia Tendência usa; listas e alertas não mudam)
+    if (isBest && gradeOk) rows.push(row);
+    else if (tr) { delete row._v; const R = row._r(); delete row._r; row.wy = R.pro; row.wn = R.con; row.sc = Math.round(row.sc * 1000) / 1000; trend.push(row); }
+    }
   }
   // ordem: Nota BH, desempate pelo acerto nos últimos 10
   rows.sort((a, b) => b.sc - a.sc);
@@ -66,11 +84,11 @@ export function buildBotData(slate, { w = .4, full = false } = {}) {
   const perMk = {}, keep = [];
   for (const r of rows) {
     perMk[r.m] = (perMk[r.m] || 0) + 1;
-    if (GRADE_ORDER[r.gr] >= 3 || perMk[r.m] <= 25) { const R = r._r(); r.wy = R.pro; r.wn = R.con; }
+    if (r.tr || GRADE_ORDER[r.gr] >= 3 || perMk[r.m] <= 25) { const R = r._r(); r.wy = R.pro; r.wn = R.con; }
     delete r._r;
     r.sc = Math.round(r.sc * 1000) / 1000;
     // B fraco (nota < 40) fora das 25 melhores do mercado não aparece em nenhuma lista
-    if (full || GRADE_ORDER[r.gr] >= 3 || r.nt >= 40 || perMk[r.m] <= 25) keep.push(r);
+    if (full || r.tr || GRADE_ORDER[r.gr] >= 3 || r.nt >= 40 || perMk[r.m] <= 25) keep.push(r);
   }
   rows.length = 0; rows.push(...keep);
   // cards em imagem (o publicar renderiza): as entradas que as listas do bot mostram por padrão
@@ -87,7 +105,7 @@ export function buildBotData(slate, { w = .4, full = false } = {}) {
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   // todas as entradas das estratégias (o alerta do bot manda o card de cada uma)
   const sctx = strategyCtx(rows);
-  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort((a, b) => (b.sc ?? 0) - (a.sc ?? 0)), S.max + 4, false);
+  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort(S.sort || ((a, b) => (b.sc ?? 0) - (a.sc ?? 0))), S.max + 4, false);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
   // Modelo BH por jogador (para o /modelo do bot): média e dispersão de cada estatística + últimos 10 jogos e média na temporada
@@ -104,5 +122,5 @@ export function buildBotData(slate, { w = .4, full = false } = {}) {
         h2h: logs.filter(x => x[L.opp] === (g.home === p.team ? g.away : g.home)).slice(0, 10).map(x => Object.fromEntries(Object.keys(ST).map(k => [k, ST[k](x)]))) };
     }
   }
-  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, mdl };
+  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, trend, mdl };
 }

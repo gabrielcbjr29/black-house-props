@@ -2,7 +2,7 @@
 // próprias, registradas em papel (tabela strategy_picks) e acompanhadas por ROI e CLV, uma a uma.
 // Regras para criar/mudar: uma hipótese por estratégia, com motivo; nunca mudar a regra de uma estratégia que já
 // tem histórico (crie uma versão nova, ex. "valor99-v2"), senão o histórico dela deixa de valer.
-import { woLock, topEligible, c99Games } from './botdata.js';
+import { woLock, topEligible, c99Games, trendOK } from './botdata.js';
 import { OFF_MK } from '../public/engine.js';
 
 // Modelo por mercado (escolha do usuário em 13/11/2026): uma "estratégia" por mercado monitorado, com as melhores
@@ -62,17 +62,26 @@ STRATEGIES.push({
   descr: 'Entradas do Top 10 tentativas ou do Top 10 reb+ast do bot com linha e odd da 99play, EV de 8% ou mais e nota A ou A+ (as boas que surgem depois que o teto do mercado encheu), ordem pela Nota BH.',
   test: (r, ctx) => !!(r.c9 && r.d) && !!ctx?.top?.has(`${r.id}|${r.m}|${r.s}`) && GOOD(r) && edgeOf(r) >= .08,
 });
+// tendência (pedido do usuário em 14/11): sequência + matchup + defesa + odd da 99play, sem a chance do modelo.
+// Os dois lados valem; uma entrada por jogador (a de melhor sequência). Teste no papel lado a lado com o Modelo BH.
+const rt = h => h?.[1] ? h[0] / h[1] : 0;
+STRATEGIES.push({
+  id: 'tendencia', name: 'Tendência', markets: ['PTS', 'REB', 'AST', '3PM', 'PRA', 'PR', 'PA', 'RA', 'FGM', '2PM', '2PA', '3PA', 'FTM', 'FTA', 'STL', 'BLK', 'SB', 'TOV', 'PF'], max: 10, one: true,
+  descr: 'Sem o modelo: 7+ acertos nos últimos 10 e 4+ nos últimos 5, 50%+ contra o adversário (ou sem jogo contra ele), defesa adversária entre as 12 que mais cedem (over) ou menos cedem (under), odd da 99play entre 1,60 e 2,30, jogador de rotação (24+ min). Uma por jogador, ordem pela sequência.',
+  test: r => !OFF_MK.has(r.m) && trendOK(r),
+  sort: (a, b) => (rt(b.l10) - rt(a.l10)) || (rt(b.l5) - rt(a.l5)) || (rt(b.l20) - rt(a.l20)) || ((b.d ?? 0) - (a.d ?? 0)),
+});
 
 /* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */
 export function pickStrategies(bot, games = []) {
   const tip = Object.fromEntries((games || []).map(g => [g.id, g.timeUTC || g.utc || null]));
   const out = [], ctx = strategyCtx(bot.rows);
   for (const S of STRATEGIES) {
-    const rows = bot.rows.filter(r => { try { return S.test(r, ctx); } catch { return false; } })
-      .sort((a, b) => ((b.sc ?? b.nt ?? 0) - (a.sc ?? a.nt ?? 0)) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1)));
+    const rows = (S.id === 'tendencia' ? [...bot.rows, ...(bot.trend || [])] : bot.rows).filter(r => { try { return S.test(r, ctx); } catch { return false; } })
+      .sort(S.sort || ((a, b) => ((b.sc ?? b.nt ?? 0) - (a.sc ?? a.nt ?? 0)) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1))));
     const seen = new Set(); let k = 0;
     for (const r of rows) {
-      const key = r.id + '|' + r.m; if (seen.has(key)) continue; seen.add(key);
+      const key = S.one ? r.id : r.id + '|' + r.m; if (seen.has(key)) continue; seen.add(key);
       out.push({ strategy_id: S.id, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, side: r.s, line: r.l, odd: r.d ?? null,
         odd_src: r.d ? (r.k ? 'Kalshi' : (r.b || 'casa')) : 'estimada', p: r.p, edge: edgeOf(r) == null ? null : Math.round(edgeOf(r) * 1e4) / 1e4,
         nota: r.nt ?? null, tip_utc: tip[r.g] || null, sq: r.sq?.length ? r.sq.slice(0, 10) : null });

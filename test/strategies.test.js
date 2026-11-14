@@ -5,7 +5,7 @@ import { STRATEGIES, MK_EST, pickStrategies } from '../collector/strategies.js';
 const base = { id: 'p1', n: 'A', t: 'DET', o: 'WAS', g: 'g1', mn: 30, st: 'ok', nt: 60, sc: 60, l10: [8, 10], k: 0, b: '99play', c9: 1, d: 1.85 };
 test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(MK_EST, ['2PA', '2PM', '3PA', '3PM', 'FGM', 'FTA', 'FTM', 'RA']);
-  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 11);
+  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 12);
   const rows = [
     { ...base, m: 'RA', s: 'o', l: 8.5, p: .6, sc: 61 },                              // reb+ast
     { ...base, id: 'p2', m: 'FTA', s: 'u', l: 4.5, p: .66, sc: 70 },                  // lances tentados (nota maior)
@@ -41,4 +41,16 @@ test('top 10 forte: só quem está no Top 10 do bot, com 99play, EV 8%+ e nota A
     ...Array.from({ length: 8 }, (_, i) => mk('f' + i, 50 - i, { d: 1.5 })), mk('t5', 10)]; // t5 fica fora do top 10
   const r = pickStrategies({ date: '2026-11-13', gen: 'x', rows }, []);
   assert.deepEqual(r.picks.filter(p => p.strategy_id === 'top10-forte').map(p => p.pid), ['t1']);
+});
+
+test('tendência: sequência + matchup + defesa + odd da 99play, os dois lados, uma por jogador', () => {
+  const t = { ...base, c9: 1, mn: 30, st: 'ok', l10: [8, 10], l5: [4, 5], l20: [14, 20], hh: [2, 3], dv: { r: 25, of: 30 } };
+  const rows = [{ ...t, id: 'a', m: 'PTS', s: 'o', d: 1.8 },
+    { ...t, id: 'a', m: 'REB', s: 'o', d: 1.8, l10: [7, 10] },               // mesmo jogador: só a melhor sequência
+    { ...t, id: 'b', m: 'AST', s: 'u', d: 1.7, dv: { r: 5, of: 30 } },        // under contra defesa que cede pouco
+    { ...t, id: 'c', m: 'PTS', s: 'o', d: 1.5 },                              // odd baixa: fora
+    { ...t, id: 'd', m: 'PTS', s: 'o', d: 1.8, hh: [0, 2] },                  // matchup ruim: fora
+    { ...t, id: 'e', m: 'PTS', s: 'o', d: 1.8, dv: { r: 5, of: 30 } }];       // over contra defesa forte: fora
+  const r = pickStrategies({ date: '2026-11-14', gen: 'x', rows: [], trend: rows }, []);
+  assert.deepEqual(r.picks.filter(p => p.strategy_id === 'tendencia').map(p => p.pid + p.mk), ['aPTS', 'bAST']);
 });

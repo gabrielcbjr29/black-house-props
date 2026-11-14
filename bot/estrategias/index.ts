@@ -57,7 +57,7 @@ const hitTxt = (h?: number[] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–
 function fullAlert(x: any, r: any) {
   const over = x.side === 'o', line = +x.line, odd = +x.odd, edge = x.edge == null ? null : +x.edge;
   const sw = over ? 'acima' : 'abaixo';
-  const title = x.strategy_id === 'oport-forte' ? `OPORTUNIDADE FORTE · ${MKF[x.mk] ?? x.mk}` : x.strategy_id === 'top10-forte' ? `TOP 10 ${x.mk === 'RA' ? 'REB+AST' : 'TENTATIVAS'} · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}` : `NOVA ENTRADA · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' (reserva)' : ''}`;
+  const title = x.strategy_id === 'oport-forte' ? `OPORTUNIDADE FORTE · ${MKF[x.mk] ?? x.mk}` : x.strategy_id === 'tendencia' ? `TENDÊNCIA · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}` : x.strategy_id === 'top10-forte' ? `TOP 10 ${x.mk === 'RA' ? 'REB+AST' : 'TENTATIVAS'} · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}` : `NOVA ENTRADA · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' (reserva)' : ''}`;
   const vs = r ? (r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`) : `${x.team} x ${x.opp}`;
   const L = [`🚨 <b>${esc(title)}</b>`, `<b>${esc(x.name)}</b>  <i>${esc(vs)} · ${x.tip_utc ? hourBR(x.tip_utc) : r?.h ?? ''}</i>`, ''];
   L.push(`${over ? '⬆️ <b>Mais de ' : '⬇️ <b>Menos de '}${n1(line)}</b> ${MKF[x.mk] ?? x.mk}`);
@@ -143,7 +143,9 @@ async function record(silent = false) {
   // ALERT_EV, padrão 5%) e uma por jogador no dia: a de maior EV (mercados do mesmo jogador andam juntos)
   const evMin = +((await cfg('ALERT_EV')) ?? .05) || .05;
   const alertedPid = new Set(have.filter(h => h.alerted).map(h => h.pid)), best = new Map<string, any>();
-  for (const x of fresh) if ((x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
+  // 'tendencia' é teste no papel (sem alerta) até o usuário decidir; NO_ALERT em bot_config pode listar outras
+  const noAlert = new Set(['tendencia', ...String(await cfg('NO_ALERT') ?? '').split(',').map(t => t.trim()).filter(Boolean)]);
+  for (const x of fresh) if (!noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
   for (const x of fresh) x.alerted = best.get(x.pid) === x;
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
