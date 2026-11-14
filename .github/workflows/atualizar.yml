@@ -38,10 +38,10 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
       - name: Leitor de PDF (relatório oficial de lesões)
@@ -102,12 +102,12 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       # pega a versão mais nova (com os dados que a coleta acabou de salvar)
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main
       - uses: actions/configure-pages@v5
       # cards em imagem das melhores entradas (o bot do Telegram envia por /cards e pelos botões 🖼️)
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
       - name: Gerar cards em imagem

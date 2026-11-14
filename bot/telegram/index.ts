@@ -663,6 +663,28 @@ async function estGabarito(y: string, res: any) {
   const text = build(true);
   return text.length <= 4090 ? text : build(false);
 }
+// saúde do sistema: coleta, leitor da 99play, papel de hoje, inscritos
+async function statusCmd(): Promise<Out> {
+  const ago = (iso?: string | null) => { if (!iso) return null; const m = Math.round((Date.now() - Date.parse(iso)) / 6e4); return m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`; };
+  const [d, snap, picks, subs] = await Promise.all([
+    data().catch(() => null),
+    sb('c99_snapshots?select=taken_at,n_events,n_markets&order=taken_at.desc&limit=1').then(r => r?.[0]).catch(() => null),
+    sb(`strategy_picks?date=eq.${etDate()}&select=status,alerted,strategy_id`).catch(() => [] as any[]),
+    sb('bot_subs?select=chat_id&est=eq.true').catch(() => [] as any[]),
+  ]);
+  const ageH = (iso?: string | null) => iso ? (Date.now() - Date.parse(iso)) / 36e5 : Infinity;
+  const ok = (h: number, lim: number) => h < lim ? '✅' : h < lim * 2 ? '🟡' : '🔴';
+  const L = ['🩺 <b>SAÚDE DO SISTEMA</b>', ''];
+  L.push(`${ok(ageH(d?.gen), 1.5)} <b>Coleta</b>: ${d ? `dados das ${hourBR(d.gen)} (${ago(d.gen)}) · ${d.games.length} jogos · ${d.rows.length} linhas` : 'indisponível'}`);
+  L.push(`${ok(ageH(snap?.taken_at), 1.5)} <b>Leitor 99play</b>: ${snap ? `leitura às ${hourBR(snap.taken_at)} (${ago(snap.taken_at)}) · ${snap.n_events} jogos · ${snap.n_markets} mercados` : 'sem leitura'}`);
+  const n = picks?.length ?? 0, al = picks?.filter((p: any) => p.alerted).length ?? 0, ab = picks?.filter((p: any) => p.status === 'aberta').length ?? 0;
+  L.push(`🧪 <b>Papel de hoje</b>: ${n} entradas · ${al} alertadas · ${ab} em aberto`);
+  L.push(`📬 <b>Inscritos nos alertas</b>: ${subs?.length ?? 0}`);
+  L.push('', '<i>Coleta: de hora em hora aos :50 · leitura 99play: aos :35 · gravação e alertas: a cada 15 min · gabarito: 11h05.</i>');
+  if (ageH(snap?.taken_at) >= 2) L.push('⚠️ <i>Leitor parado há 2h+: o PC está ligado com a aba da 99play aberta e o selo BH?</i>');
+  if (ageH(d?.gen) >= 2.5) L.push('⚠️ <i>Coleta parada há 2h30+: confira as execuções no GitHub.</i>');
+  return { text: L.join('\n'), kb: { inline_keyboard: [[BTN('🧪 Placar', '/estrategias'), BTN('📄 PDF do dia', '/pdf')], HOME] } };
+}
 async function gabaritoCmd(): Promise<Out> {
   const y = etDate(Date.now() - 864e5), res = await getResults();
   const kb = { inline_keyboard: [[BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('🏠 Menu', '/menu')]] };
@@ -859,6 +881,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /ontem · resultado de ontem (chega sozinho de manhã)
 /estrategias · modelo por mercado: placar e entradas do dia
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
+/status · saúde do sistema: coleta, leitor da 99play, papel de hoje
 /app · app completo
 
 <b>Como usar as listas</b>
@@ -880,7 +903,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('📄 PDF do dia', '/pdf')],
+  [BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status'), { text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -920,6 +943,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'apagar') return apagarCmd(chatId, rest);
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
   if (cmd === 'gabarito') return gabaritoCmd();
+  if (cmd === 'status' || cmd === 'saude') return statusCmd();
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
@@ -1116,7 +1140,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

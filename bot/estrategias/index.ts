@@ -5,11 +5,13 @@
 //   ?settle=<WEBHOOK_SECRET>  confere as entradas abertas dos dias com box score (pg_cron, de manhã)
 //   ?csv=<REPORT_TOKEN>       todas as entradas em CSV (aba Estratégias da planilha)
 //   ?stats=1                  resumo por estratégia (view strategy_stats)
+//   ?placar=1                 placar público agregado para o app (função SQL placar_json; CORS; cache 60 s)
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const ODD_EST = 1.87;
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
-const json = (x: unknown, status = 200) => new Response(JSON.stringify(x), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+const json = (x: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(x), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extra } });
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'content-type' };
 async function sb(path: string, init: RequestInit = {}) {
   const url = Deno.env.get('SUPABASE_URL'), key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const r = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { apikey: key!, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
@@ -171,7 +173,8 @@ async function record(silent = false) {
   const alertas = silent ? 0 : await alert(toAlert, evMin, bot?.date === st.date ? bot : null).catch(e => { console.error('alerta', e); return 0; });
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
   const leitor = await leitorCheck().catch(e => ({ erro: String(e) }));
-  return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor };
+  const coleta = await coletaCheck(bot).catch(e => ({ erro: String(e) }));
+  return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor, coleta };
 }
 // ---------- Leitor da 99play parado (PC do usuário desligado, aba fechada…) ----------
 // Roda junto com a gravação (a cada 15 min). Se a última leitura tem 2h+ avisa uma vez; quando volta, avisa de novo.
@@ -195,6 +198,27 @@ async function leitorCheck() {
   for (const s of subs) await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', disable_notification: hBR < 8 }) }).catch(() => null);
   return { idade_h: Math.round(age * 10) / 10, enviado: age >= 2 ? 'parado' : 'voltou' };
+}
+// ---------- Coleta parada (GitHub Actions sem publicar há 2h30+) ----------
+// A coleta publica de hora em hora; se bot.json ficar velho, avisa uma vez e de novo quando voltar (bot_config COLETA_ALERT).
+async function coletaCheck(bot: any) {
+  if (!bot?.gen) return { skip: 'sem bot.json' };
+  const age = (Date.now() - Date.parse(bot.gen)) / 36e5, warned = (await cfg('COLETA_ALERT')) ?? '';
+  const setCfg = (v: string) => sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'COLETA_ALERT', value: v, updated_at: new Date().toISOString() }) });
+  let text = '';
+  if (age >= 2.5 && warned !== bot.gen) {
+    text = `🛠️ <b>Coleta parada</b>\nOs dados do app e do bot são das <b>${hourBR(bot.gen)}</b> (há ${Math.floor(age)}h). O GitHub não publicou uma rodada nova desde então.\n<i>Linhas, chances e alertas podem estar defasados. Se persistir, veja as execuções em github.com/gabrielcbjr29/black-house-props/actions.</i>`;
+    await setCfg(bot.gen);
+  } else if (age < 2.5 && warned) {
+    text = `✅ <b>Coleta voltou</b>\nDados novos das ${hourBR(bot.gen)}.`;
+    await setCfg('');
+  }
+  if (!text) return { idade_h: Math.round(age * 10) / 10, aviso: warned ? 'já avisado' : 'ok' };
+  const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
+  const hBR = +new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23' }).format(new Date());
+  for (const s of subs) await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', disable_notification: hBR < 8 }) }).catch(() => null);
+  return { idade_h: Math.round(age * 10) / 10, enviado: age >= 2.5 ? 'parada' : 'voltou' };
 }
 // ---------- Monitor de risco: vigia as entradas já enviadas até o jogo começar (roda junto com a gravação) ----------
 // Sinais (com os dados que a coleta de hora em hora já traz, sem depender da 99play):
@@ -276,7 +300,13 @@ async function settle() {
 }
 Deno.serve(async (req: Request) => {
   const u = new URL(req.url);
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   try {
+    // placar público (só números agregados e as entradas do papel já conferidas; sem dados de usuário)
+    if (u.searchParams.get('placar')) {
+      const r = await sb('rpc/placar_json', { method: 'POST', body: '{}' });
+      return json(r, 200, { ...CORS, 'Cache-Control': 'public, max-age=60' });
+    }
     const secret = await cfg('WEBHOOK_SECRET');
     if (u.searchParams.get('record') && u.searchParams.get('record') === secret) return json(await record(u.searchParams.get('silent') === '1'));
     if (u.searchParams.get('settle') && u.searchParams.get('settle') === secret) return json(await settle());

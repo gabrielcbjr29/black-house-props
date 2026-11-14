@@ -3,6 +3,7 @@ import { buildProps, evaluate, MARKETS, GROUPS, POSLB, TEAM_INFO, L, dvpRank, GR
 import { newTip, settleTip, summarize, toCSV, clvOf, profitOf } from './tips.js';
 import { postText, drawCard, legText, WARNINGS, resultsText, drawResults } from './share.js';
 import { parseImport } from './importer.js';
+import { loadPlacar, placarHTML } from './placar.js';
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
@@ -87,7 +88,12 @@ function rebuild() {
   BYID = Object.fromEntries(PROPS.map(p => [p.id, p]));
   EVAL = {}; for (const p of PROPS) EVAL[p.id] = ev(p, OVR[p.id]);
   LADC = {}; RANGEC = {};
+  // jogos com linhas da 99play (a casa do usuário): neles, uma odd de outra fonte (Kalshi, casas dos EUA) vale só
+  // como referência e não disputa o topo das listas
+  C99 = new Set(PROPS.filter(pr => pr.book?.books?.['99play']).map(pr => pr.game.id));
 }
+let C99 = new Set();
+const offHouse = x => !!(C99.size && x.s?.odd && x.s.book && x.s.book !== '99play' && x.s.book !== 'Sua casa' && C99.has(x.pr.game.id));
 /* v7: escada de linhas, faixa provável e amostra da temporada (com cache por reconstrução) */
 let LADC = {}, RANGEC = {};
 const ladOf = (pr, max = 8) => LADC[pr.id + '|' + max] ||= ladder(pr, { w: CFG.w, max });
@@ -155,7 +161,7 @@ const hitRate = h => h?.[1] ? h[0] / h[1] : 0;
    A nota pesa chance, valor, acertos (L10/L20/temporada), confronto, defesa × posição e mercado. */
 const NOTA = new WeakMap();
 function nota(r) { let v = NOTA.get(r.s); if (v == null) { v = bhScore(r.pr, r.e, r.s.side, { steam: steamOf(r.pr, r.s.side) }); NOTA.set(r.s, v); } return v; }
-function score(r) { return nota(r) + hitRate(r.s.hits.L10) / 10; }
+function score(r) { return nota(r) + hitRate(r.s.hits.L10) / 10 - (offHouse(r) ? 25 : 0); }
 const notaChip = r => { const n = nota(r); return `<span class="nota ${n >= 75 ? 'hi' : n >= 55 ? 'md' : 'lo'}" title="Nota BH: ${n} de 100">${n}</span>`; };
 // odd da faixa: a da casa ou, sem casa, a justa
 const oddForRange = s => s.odd ?? s.fair;
@@ -335,7 +341,7 @@ function listRow({ pr, e, s }) {
   return `<button class="lrow ${s.side}${s.ev > 0 ? ' value' : ''}" data-open="${pr.id}" data-side="${s.side}" style="--tc:${teamCol(p.team)}">
     ${jer(p)}<span class="lr-name"><b>${esc(p.name)}</b><small>${matchLabel(pr)} · ${brTime(pr.game.timeUTC)}${p.status !== 'ok' ? ' · <span class="bad">' + (p.status === 'questionable' ? 'dúvida' : esc(p.status)) + '</span>' : ''}</small></span>
     <span class="lr-line"><span class="side ${s.side}">${s.side === 'over' ? 'Mais' : 'Menos'} ${fmt(e.line)}</span><small>${esc(MARKETS[pr.mk].lb)}</small></span>
-    <span class="lr-odd"><small>odd</small><b>${s.odd ? fmt(s.odd, 2) : '—'}</b>${s.ev != null ? `<small class="${s.ev >= 0 ? 'pos' : 'neg'}">EV ${sgnPct(s.ev)}</small>` : ''}</span>
+    <span class="lr-odd"><small>${s.odd && s.book && s.book !== '99play' && s.book !== 'Sua casa' ? `<span class="srcx" title="Odd de referência: não é da 99play">${esc(s.book)}</span>` : 'odd'}</small><b>${s.odd ? fmt(s.odd, 2) : '—'}</b>${s.ev != null ? `<small class="${s.ev >= 0 ? 'pos' : 'neg'}">EV ${sgnPct(s.ev)}</small>` : ''}</span>
     <span class="lr-hit ${r == null ? '' : r >= .7 ? 'hi' : r < .5 ? 'lo' : 'md'}"><b>${r == null ? '—' : Math.round(r * 100) + '%'}</b><small>${h?.[1] ? h[0] + '/' + h[1] + ' ' + (F.sample === 'CUR' ? 'temp.' : F.sample) : ''}</small></span>
     <span class="lr-dots">${dots(pr, s.side, e.line)}</span>
     <span class="lr-nota">${notaChip({ pr, e, s })}</span>
@@ -1251,7 +1257,14 @@ function toggleSlip(id, side) {
   store.set('slip2', SLIP); refreshLists(); if (D) renderDrawer();
 }
 function refreshLists() { if (state.view === 'props') renderProps(); if (state.view === 'tendencias') renderTrends(); if (state.view === 'jogos') renderGames(); if (state.view === 'banca') renderBanca(); renderSlip(); }
-const VIEWS = ['props', 'tendencias', 'jogos', 'defesa', 'multipla', 'banca', 'guia'];
+const VIEWS = ['props', 'tendencias', 'jogos', 'defesa', 'multipla', 'placar', 'banca', 'guia'];
+let placarBusy = false;
+async function renderPlacar(force = false) {
+  const el = $('#placarView'); if (!el || placarBusy) return; placarBusy = true;
+  try { const P = await loadPlacar(force); el.innerHTML = placarHTML(P, { fresh: SLATE ? { gen: SLATE.meta.generatedAt } : null }); }
+  catch (e) { el.innerHTML = `<div class="notice"><span class="dot"></span><div><b>Placar indisponível.</b> ${esc(e.message)}. Tente de novo em instantes.</div></div>`; }
+  finally { placarBusy = false; }
+}
 function route() {
   let h = location.hash.slice(1); if (h === 'sistema' || h === 'usar') h = 'guia'; state.view = VIEWS.includes(h) ? h : 'props';
   if (D) { D = null; $('#drawer').hidden = true; $('#scrim').hidden = true; }
@@ -1259,8 +1272,9 @@ function route() {
   $('#filters').classList.remove('open');
   VIEWS.forEach(v => $('#v-' + v).hidden = v !== state.view);
   $$('.topnav a,.botnav a').forEach(a => a.getAttribute('href') === '#' + state.view ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+  if (state.view === 'placar') renderPlacar();
   if (!SLATE) return;
-  ({ props: () => { renderOnboard(); renderSummary(); renderProps(); }, tendencias: renderTrends, jogos: renderGames, defesa: renderDvP, guia: renderGuide, banca: renderBanca, multipla: () => { } })[state.view]();
+  ({ props: () => { renderOnboard(); renderSummary(); renderProps(); }, tendencias: renderTrends, jogos: renderGames, defesa: renderDvP, guia: renderGuide, banca: renderBanca, placar: () => { }, multipla: () => { } })[state.view]();
   renderSlip(); window.scrollTo(0, 0);
 }
 
@@ -1393,6 +1407,7 @@ function bind() {
   $('#themeBtn').addEventListener('click', () => { const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; root.dataset.theme = dark ? 'light' : 'dark'; store.set('theme', root.dataset.theme); });
   let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (state.view === 'props') renderProps(); }, 150); });
   addEventListener('hashchange', route);
+  $('#placarRefresh')?.addEventListener('click', () => renderPlacar(true));
   addEventListener('scroll', () => { $('#pop').hidden = true; }, { passive: true });
   fillBooks();
   // instalar como app (Chrome/Edge/Android); no iPhone é pelo Compartilhar, explicado no Guia
