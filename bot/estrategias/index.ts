@@ -61,7 +61,7 @@ function fullAlert(x: any, r: any) {
   const vs = r ? (r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`) : `${x.team} x ${x.opp}`;
   const L = [`🚨 <b>${esc(title)}</b>`, `<b>${esc(x.name)}</b>  <i>${esc(vs)} · ${x.tip_utc ? hourBR(x.tip_utc) : r?.h ?? ''}</i>`, ''];
   L.push(`${over ? '⬆️ <b>Mais de ' : '⬇️ <b>Menos de '}${n1(line)}</b> ${MKF[x.mk] ?? x.mk}`);
-  L.push(`💵 <code>@${n2(odd)}</code> 99play${edge == null ? '' : ` · EV <b>${pct(edge)}</b>${edge >= .1 ? ' 🔥' : ''}`}`);
+  L.push(`💵 <code>@${n2(odd)}</code> 99play${x.strategy_id === 'tendencia' ? ` · <i>sinal da sequência, não do modelo</i>` : edge == null ? '' : ` · EV <b>${pct(edge)}</b>${edge >= .1 ? ' 🔥' : ''}`}`);
   if (r) {
     L.push(`${GRADE[r.gr] ?? r.gr ?? ''}${r.nt != null ? ` · Nota <b>${r.nt}</b>` : ''}  ${bar(+x.p)} <b>${pc(+x.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}`);
     L.push('', `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}`, `📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${esc(r.o)} ${hitTxt(r.hh)}`);
@@ -143,13 +143,27 @@ async function record(silent = false) {
   // ALERT_EV, padrão 5%) e uma por jogador no dia: a de maior EV (mercados do mesmo jogador andam juntos)
   const evMin = +((await cfg('ALERT_EV')) ?? .05) || .05;
   const alertedPid = new Set(have.filter(h => h.alerted).map(h => h.pid)), best = new Map<string, any>();
-  // 'tendencia' é teste no papel (sem alerta) até o usuário decidir; NO_ALERT em bot_config pode listar outras
-  const noAlert = new Set(['tendencia', ...String(await cfg('NO_ALERT') ?? '').split(',').map(t => t.trim()).filter(Boolean)]);
-  for (const x of fresh) if (!noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
+  // NO_ALERT em bot_config pode tirar estratégias do alerta (ficam só no papel)
+  const noAlert = new Set(String(await cfg('NO_ALERT') ?? '').split(',').map(t => t.trim()).filter(Boolean));
+  for (const x of fresh) if (x.strategy_id !== 'tendencia' && !noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
   for (const x of fresh) x.alerted = best.get(x.pid) === x;
+  // Tendência (pedido do usuário em 14/11): alerta toda entrada dela, sem corte de EV do modelo (a regra já é a seleção),
+  // uma por jogador no dia: se o jogador já teve alerta (de qualquer estratégia), não manda de novo. Inclui as já gravadas
+  // e ainda não alertadas (as de hoje cedo, gravadas antes de o alerta da Tendência existir).
+  const trendLate: any[] = [];
+  if (!noAlert.has('tendencia')) {
+    const sentPid = new Set([...alertedPid, ...[...best.values()].map(x => x.pid)]);
+    const wasAlerted = new Set(have.filter(h => h.alerted).map(h => `${h.strategy_id}|${h.pid}|${h.mk}`));
+    for (const x of [...fresh, ...rows].filter(x => x.strategy_id === 'tendencia')) {
+      if (sentPid.has(x.pid) || wasAlerted.has(`tendencia|${x.pid}|${x.mk}`)) continue;
+      sentPid.add(x.pid);
+      if (fresh.includes(x)) x.alerted = true; else trendLate.push(x);
+    }
+  }
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
-  const toAlert = fresh.filter(x => x.alerted).sort((a, b) => b.edge - a.edge);
+  for (const x of trendLate) await sb(`strategy_picks?date=eq.${x.date}&strategy_id=eq.tendencia&pid=eq.${x.pid}&mk=eq.${encodeURIComponent(x.mk)}`, { method: 'PATCH', body: JSON.stringify({ alerted: true }) }).catch(() => null);
+  const toAlert = [...fresh.filter(x => x.alerted), ...trendLate].sort((a, b) => (b.edge ?? -1) - (a.edge ?? -1));
   const bot = await getJ('bot.json').catch(() => null);
   const alertas = silent ? 0 : await alert(toAlert, evMin, bot?.date === st.date ? bot : null).catch(e => { console.error('alerta', e); return 0; });
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
