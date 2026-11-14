@@ -57,7 +57,7 @@ const hitTxt = (h?: number[] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–
 function fullAlert(x: any, r: any) {
   const over = x.side === 'o', line = +x.line, odd = +x.odd, edge = x.edge == null ? null : +x.edge;
   const sw = over ? 'acima' : 'abaixo';
-  const title = x.strategy_id === 'oport-forte' ? `OPORTUNIDADE FORTE · ${MKF[x.mk] ?? x.mk}` : `NOVA ENTRADA · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' (reserva)' : ''}`;
+  const title = x.strategy_id === 'oport-forte' ? `OPORTUNIDADE FORTE · ${MKF[x.mk] ?? x.mk}` : x.strategy_id === 'top10-forte' ? `TOP 10 ${x.mk === 'RA' ? 'REB+AST' : 'TENTATIVAS'} · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}` : `NOVA ENTRADA · ${MKN[x.mk] ?? MKF[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' (reserva)' : ''}`;
   const vs = r ? (r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`) : `${x.team} x ${x.opp}`;
   const L = [`🚨 <b>${esc(title)}</b>`, `<b>${esc(x.name)}</b>  <i>${esc(vs)} · ${x.tip_utc ? hourBR(x.tip_utc) : r?.h ?? ''}</i>`, ''];
   L.push(`${over ? '⬆️ <b>Mais de ' : '⬇️ <b>Menos de '}${n1(line)}</b> ${MKF[x.mk] ?? x.mk}`);

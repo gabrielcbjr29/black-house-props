@@ -2,7 +2,7 @@
 // próprias, registradas em papel (tabela strategy_picks) e acompanhadas por ROI e CLV, uma a uma.
 // Regras para criar/mudar: uma hipótese por estratégia, com motivo; nunca mudar a regra de uma estratégia que já
 // tem histórico (crie uma versão nova, ex. "valor99-v2"), senão o histórico dela deixa de valer.
-import { woLock } from './botdata.js';
+import { woLock, topEligible, c99Games } from './botdata.js';
 import { OFF_MK } from '../public/engine.js';
 
 // Modelo por mercado (escolha do usuário em 13/11/2026): uma "estratégia" por mercado monitorado, com as melhores
@@ -43,13 +43,32 @@ STRATEGIES.push({
   descr: 'Fora dos 8 mercados monitorados: entradas com linha e odd da 99play, EV de 10% ou mais, nota A ou A+, jogador de rotação (24+ min), chance do modelo entre 55% e 85%, sem trava de desfalque, ordem pela Nota BH.',
   test: r => !!(r.c9 && r.d) && !OFF_MK.has(r.m) && !MK_EST.includes(r.m) && GOOD(r) && edgeOf(r) >= .10 && rot(r) && r.p >= .55 && r.p <= .85 && !woLock(r),
 });
+// top 10 forte (pedido do usuário em 13/11): entrada que está no Top 10 tentativas ou no Top 10 reb+ast do bot, com
+// linha e odd da 99play, EV de 8% ou mais e nota A/A+. Pega as boas que surgem depois que o teto de 5 do mercado já
+// encheu. O ranking é o mesmo das listas do bot (topEligible, ordem pela Nota BH, um mercado por jogador).
+export const TOP_GROUPS = [['3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']];
+export function strategyCtx(rows) {
+  const cov = c99Games(rows), top = new Set();
+  for (const g of TOP_GROUPS) {
+    const seen = new Set(); let k = 0;
+    for (const r of rows.filter(r => topEligible(r, g, cov)).sort((a, b) => (b.sc ?? 0) - (a.sc ?? 0))) {
+      if (seen.has(r.id)) continue; seen.add(r.id); top.add(`${r.id}|${r.m}|${r.s}`); if (++k >= 10) break;
+    }
+  }
+  return { top };
+}
+STRATEGIES.push({
+  id: 'top10-forte', name: 'Top 10 forte', markets: TOP_GROUPS.flat(), max: 6,
+  descr: 'Entradas do Top 10 tentativas ou do Top 10 reb+ast do bot com linha e odd da 99play, EV de 8% ou mais e nota A ou A+ (as boas que surgem depois que o teto do mercado encheu), ordem pela Nota BH.',
+  test: (r, ctx) => !!(r.c9 && r.d) && !!ctx?.top?.has(`${r.id}|${r.m}|${r.s}`) && GOOD(r) && edgeOf(r) >= .08,
+});
 
 /* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */
 export function pickStrategies(bot, games = []) {
   const tip = Object.fromEntries((games || []).map(g => [g.id, g.timeUTC || g.utc || null]));
-  const out = [];
+  const out = [], ctx = strategyCtx(bot.rows);
   for (const S of STRATEGIES) {
-    const rows = bot.rows.filter(r => { try { return S.test(r); } catch { return false; } })
+    const rows = bot.rows.filter(r => { try { return S.test(r, ctx); } catch { return false; } })
       .sort((a, b) => ((b.sc ?? b.nt ?? 0) - (a.sc ?? a.nt ?? 0)) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1)));
     const seen = new Set(); let k = 0;
     for (const r of rows) {

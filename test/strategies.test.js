@@ -5,7 +5,7 @@ import { STRATEGIES, MK_EST, pickStrategies } from '../collector/strategies.js';
 const base = { id: 'p1', n: 'A', t: 'DET', o: 'WAS', g: 'g1', mn: 30, st: 'ok', nt: 60, sc: 60, l10: [8, 10], k: 0, b: '99play', c9: 1, d: 1.85 };
 test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(MK_EST, ['2PA', '2PM', '3PA', '3PM', 'FGM', 'FTA', 'FTM', 'RA']);
-  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 10);
+  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 11);
   const rows = [
     { ...base, m: 'RA', s: 'o', l: 8.5, p: .6, sc: 61 },                              // reb+ast
     { ...base, id: 'p2', m: 'FTA', s: 'u', l: 4.5, p: .66, sc: 70 },                  // lances tentados (nota maior)
@@ -31,5 +31,14 @@ test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(by('oport-forte'), ['o1']);
   assert.equal(r.picks.length, 5);
   assert.equal(r.picks[0].tip_utc, '2026-11-14T00:00:00Z');
+  assert.deepEqual(by('top10-forte'), []); // sem Modelo BH (mb) nenhuma entra no top 10
   assert.ok(!('test' in r.strategies[0]));
+});
+
+test('top 10 forte: só quem está no Top 10 do bot, com 99play, EV 8%+ e nota A/A+', () => {
+  const mk = (id, sc, extra = {}) => ({ ...base, id, m: 'RA', s: 'u', l: 7.5, p: .6, d: 2.0, gr: 'A', mb: 1, sc, ...extra });
+  const rows = [mk('t1', 90), mk('t2', 80, { d: 1.75 }), mk('t3', 70, { gr: 'B' }), mk('t4', 60, { c9: 0, d: null }),
+    ...Array.from({ length: 8 }, (_, i) => mk('f' + i, 50 - i, { d: 1.5 })), mk('t5', 10)]; // t5 fica fora do top 10
+  const r = pickStrategies({ date: '2026-11-13', gen: 'x', rows }, []);
+  assert.deepEqual(r.picks.filter(p => p.strategy_id === 'top10-forte').map(p => p.pid), ['t1']);
 });

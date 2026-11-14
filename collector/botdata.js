@@ -1,7 +1,7 @@
 // Dados prontos para o bot do Telegram (public/data/bot.json).
 // O modelo roda aqui, na coleta; o bot só filtra e formata, então responde rápido.
 import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB, OFF_MK } from '../public/engine.js';
-import { STRATEGIES } from './strategies.js';
+import { STRATEGIES, strategyCtx } from './strategies.js';
 
 const POS_PT = { G: 'armadores', F: 'alas', C: 'pivôs' };
 const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bolas de 3', stl: 'roubos', blk: 'tocos', tov: 'erros', fgm: 'arremessos convertidos', fga: 'arremessos tentados', fta: 'lances livres tentados', ftm: 'lances livres', tpa: 'bolas de 3 tentadas', twom: 'arremessos de 2', twoa: 'arremessos de 2 tentados', oreb: 'rebotes ofensivos', pf: 'faltas' };
@@ -85,7 +85,8 @@ export function buildBotData(slate, { w = .4 } = {}) {
   for (const g of [['3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']]) take(rows.filter(r => topEligible(r, g, cov)).sort((a, b) => b.sc - a.sc), 10);
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   // todas as entradas das estratégias (o alerta do bot manda o card de cada uma)
-  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r); } catch { return false; } }).sort((a, b) => (b.sc ?? 0) - (a.sc ?? 0)), S.max + 4, false);
+  const sctx = strategyCtx(rows);
+  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort((a, b) => (b.sc ?? 0) - (a.sc ?? 0)), S.max + 4, false);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
   // Modelo BH por jogador (para o /modelo do bot): média e dispersão de cada estatística + últimos 10 jogos e média na temporada
