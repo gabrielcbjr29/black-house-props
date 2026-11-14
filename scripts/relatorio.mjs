@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { jerseySVG, L } from '../public/engine.js';
+import { buildBotData } from '../collector/botdata.js';
 
 const ROOT = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const J = f => JSON.parse(readFileSync(join(ROOT, 'data', f), 'utf8'));
@@ -24,8 +25,9 @@ export function buildReport(bot, slate, strat) {
   NUM = new Map(slate.players.map(p => [p.id, p.num]));
   const games = Object.fromEntries((bot.games || []).map(g => [g.id, g]));
   const cov = new Set(bot.rows.filter(r => r.c9).map(r => r.g)); // jogos com linhas da 99play
-  const ok = r => r.p != null && (r.mn ?? 0) >= 24 && r.st !== 'questionable' && r.st !== 'out' && r.p <= .92 && r.m !== 'FGA'
-    && (r.c9 ? r.d && r.e != null && r.e >= 0 : !cov.has(r.g)); // na 99play: só sem valor negativo; jogo sem 99play: linha de referência
+  // linha da 99play: só sem valor negativo; sem linha da 99play para o jogador e mercado: linha de referência
+  const ok = r => r.p != null && r.p >= .55 && (r.mn ?? 0) >= 24 && r.st !== 'questionable' && r.st !== 'out' && r.p <= .92 && r.m !== 'FGA'
+    && (r.c9 ? r.d && r.e != null && r.e >= 0 : true);
   const best = (mks, n = 6) => {
     const seen = new Set(), out = [];
     for (const r of bot.rows.filter(r => mks.includes(r.m) && ok(r)).sort((a, b) => b.p - a.p || (b.sc ?? 0) - (a.sc ?? 0))) {
@@ -34,10 +36,11 @@ export function buildReport(bot, slate, strat) {
     return out;
   };
   const sections = [
-    ['Pontos', ['PTS']], ['Rebotes', ['REB']], ['Assistências', ['AST']], ['Bolas de 3', ['3PM']],
-    ['Tentativas', ['3PA', '2PA', 'FTA']], ['Convertidos', ['FGM', '2PM', 'FTM']], ['Combinadas', ['PRA', 'PR', 'PA', 'RA']],
-    ['Defesa e outros', ['STL', 'BLK', 'SB', 'TOV', 'PF']],
-  ].map(([t, mks]) => ({ t, rows: best(mks) })).filter(s => s.rows.length);
+    ['Pontos', ['PTS'], 10], ['Rebotes', ['REB'], 10], ['Assistências', ['AST'], 10], ['Bolas de 3', ['3PM'], 8],
+    ['Pts+Reb+Ast', ['PRA'], 6], ['Pts+Reb', ['PR'], 6], ['Pts+Ast', ['PA'], 6], ['Reb+Ast', ['RA'], 6],
+    ['Tentativas', ['3PA', '2PA', 'FTA'], 8], ['Convertidos', ['FGM', '2PM', 'FTM'], 8],
+    ['Defesa e outros', ['STL', 'BLK', 'SB', 'TOV', 'PF'], 6],
+  ].map(([t, mks, n]) => ({ t, rows: best(mks, n) })).filter(s => s.rows.length);
 
   // duplo-duplo e triplo-duplo: chance pelo histórico (últimos 10, últimos 20 e temporada), só jogador de rotação
   const rot = new Map(); for (const r of bot.rows) if ((r.mn ?? 0) >= 24 && r.st !== 'out') rot.set(r.id, r);
@@ -128,7 +131,7 @@ footer{margin-top:18px;border-top:1px solid #1C2A22;padding-top:8px;color:#6E807
 <header><div class="hd"><h1>Melhores entradas <em>do dia</em></h1><small>${esc(dia)} · dados das ${esc(gen)} (Brasília)</small></div><div class="brand">BLACK HOUSE<small>Modelo BH · NBA</small></div></header>
 <div class="games">${jogos}</div>
 ${met ? sec('Entradas do método', 'As que o bot alertou hoje (EV de 5% ou mais na odd da 99play, uma por jogador). Ficam registradas no papel com 1u.', `<table>${TH}${met}</table>`) : ''}
-${sections.map(s => sec(s.t, 'As de maior chance do Modelo BH, só jogador de rotação (24+ min) e sem valor negativo na 99play.', `<table>${TH}${s.rows.map(r => rowHTML(r, games)).join('')}</table>`)).join('')}
+${sections.map(s => sec(s.t, 'As de maior chance do Modelo BH, só jogador de rotação (24+ min). Com linha da 99play, só as sem valor negativo; sem ela, a linha de referência.', `<table>${TH}${s.rows.map(r => rowHTML(r, games)).join('')}</table>`)).join('')}
 ${dd.length ? sec('Duplo-duplo', 'Chance pelo histórico (últimos 10, últimos 20 e temporada). Compare a odd justa com a da casa: só vale se a casa pagar mais.', `<table>${TH}${ddRows(dd, 'Duplo-duplo')}</table>`) : ''}
 ${td.length ? sec('Triplo-duplo', 'Mercado raro e de odd alta: mesma conta do duplo-duplo.', `<table>${TH}${ddRows(td, 'Triplo-duplo')}</table>`) : ''}
 ${mul ? sec('Múltiplas', 'Uma perna por jogo, só linhas da 99play sem valor negativo. Chance da múltipla = produto das chances (as pernas são de jogos diferentes).', `<div class="tks">${mul}</div>`) : ''}
@@ -137,8 +140,12 @@ ${mul ? sec('Múltiplas', 'Uma perna por jogo, só linhas da 99play sem valor ne
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const bot = J('bot.json'), slate = J('slate.json'), strat = existsSync(join(ROOT, 'data', 'strategies.json')) ? J('strategies.json') : null;
-  if (bot.demo || !bot.rows?.length) { console.log('relatório: sem dados do dia'); process.exit(0); }
+  const bot0 = J('bot.json'), slate = J('slate.json'), strat = existsSync(join(ROOT, 'data', 'strategies.json')) ? J('strategies.json') : null;
+  if (bot0.demo || !bot0.rows?.length) { console.log('relatório: sem dados do dia'); process.exit(0); }
+  // todas as linhas do dia (o bot.json corta as de nota baixa); "por que sim" e cards não são usados aqui
+  let prev = null; try { prev = J('prev.json'); } catch { }
+  const full = buildBotData({ ...slate, prev }, { w: .4, full: true });
+  const bot = { ...bot0, rows: full.rows };
   const rep = buildReport(bot, slate, strat);
   const html = reportHTML(bot, rep);
   writeFileSync(join(ROOT, 'data', 'relatorio.html'), html);

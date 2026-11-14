@@ -22,7 +22,8 @@ const steamOf = (pr, side) => { if (!pr.mkt?.openMu) return 0; const d = (pr.mkt
 const brTime = iso => iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '';
 const r3 = x => x == null ? null : Math.round(x * 1000) / 1000;
 
-export function buildBotData(slate, { w = .4 } = {}) {
+// full: todas as linhas (sem cortar nota baixa nem B fraco), para o PDF do dia; o bot.json usa o corte
+export function buildBotData(slate, { w = .4, full = false } = {}) {
   const games = slate.games.map(g => ({ id: g.id, a: g.away, h: g.home, t: brTime(g.timeUTC), utc: g.timeUTC, sp: g.spread ?? null, to: g.total ?? null }));
   const gById = Object.fromEntries(slate.games.map(g => [g.id, g]));
   const rows = [];
@@ -30,7 +31,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
     if (pr.p.status === 'out' || pr.p.status === 'doubtful' || OFF_MK.has(pr.mk)) continue;
     const e = evaluate(pr, null, { w });
     const s = e[e.best];
-    if (GRADE_ORDER[s.grade] < 2) continue;
+    if (!full && GRADE_ORDER[s.grade] < 2) continue;
     // odd: casa de verdade primeiro; Kalshi só se não houver casa
     let odd = null, book = null, kal = false;
     if (pr.book?.books) {
@@ -69,7 +70,7 @@ export function buildBotData(slate, { w = .4 } = {}) {
     delete r._r;
     r.sc = Math.round(r.sc * 1000) / 1000;
     // B fraco (nota < 40) fora das 25 melhores do mercado não aparece em nenhuma lista
-    if (GRADE_ORDER[r.gr] >= 3 || r.nt >= 40 || perMk[r.m] <= 25) keep.push(r);
+    if (full || GRADE_ORDER[r.gr] >= 3 || r.nt >= 40 || perMk[r.m] <= 25) keep.push(r);
   }
   rows.length = 0; rows.push(...keep);
   // cards em imagem (o publicar renderiza): as entradas que as listas do bot mostram por padrão
