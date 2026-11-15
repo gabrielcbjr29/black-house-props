@@ -11,7 +11,7 @@
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
-type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; at: number };
+type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; at: number };
 let CFG: Cfg | null = null;
 async function cfg(): Promise<Cfg> {
   if (CFG && Date.now() - CFG.at < 60_000) return CFG;
@@ -25,7 +25,7 @@ async function cfg(): Promise<Cfg> {
   }
   const get = (k: string) => Deno.env.get(k) || v[k] || '';
   CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
-    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), at: Date.now() };
+    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), affRef: get('AFF_REF') || 'rca5p', at: Date.now() };
   return CFG;
 }
 // banco (REST do próprio Supabase, com a chave de serviço): testes do Modelo BH
@@ -1050,6 +1050,17 @@ async function handle(update: any) {
   // ignore-duplicates: quem já tem inscrição (inclusive desligada) não muda
   await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
     body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
+  // link de bilhete da 99play colado no chat: devolve o link rastreado com o ref de afiliado (bot_config AFF_REF)
+  if (!cq) {
+    const codes = [...text.matchAll(/99play\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi)].map(m => m[1]);
+    if (codes.length) {
+      const ref = (await cfg()).affRef;
+      const links = [...new Set(codes)].map(c => `https://99play.io/sports?ref=${encodeURIComponent(ref)}&shareCode=${c}`);
+      await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true,
+        text: `🔗 <b>Link rastreado</b> <i>(ref ${esc(ref)}, toque para copiar)</i>\n${links.map(l => `<code>${esc(l)}</code>`).join('\n')}` });
+      return;
+    }
+  }
   // teclado fixo (botões de baixo): vira comando
   if (!cq && KBMAP[text.trim()]) text = KBMAP[text.trim()];
   // /start: liga o teclado fixo (uma mensagem curta) e mostra o início
