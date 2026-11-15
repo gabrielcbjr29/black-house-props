@@ -291,6 +291,12 @@ function sqDots(vals: number[] | null | undefined, line: number, side: string, n
   return { dots, hit, n: v.length };
 }
 const sqLine = (vals: number[] | null | undefined, line: number, side: string) => { const q = sqDots(vals, line, side); return q.n ? `${q.dots} <b>${q.hit}/${q.n}</b>` : ''; };
+// bloco pronto para compartilhar (um toque no bloco copia tudo): jogador, entrada, quadradinhos e os números
+function seqBlock(name: string, vs: string, side: string, line: number, mkLabel: string, odd: number | null | undefined, vals: number[] | null | undefined) {
+  const q = sqDots(vals, line, side); if (!q.n) return '';
+  const L = [`🏀 ${name} (${vs})`, `${side === 'o' ? '⬆️ Mais de' : '⬇️ Menos de'} ${n1(line)} ${mkLabel}${odd ? ` · @${n2(odd)}` : ''}`, `${q.dots} ${q.hit}/${q.n}`, `🔢 ${(vals ?? []).slice(0, q.n).join('-')}`];
+  return `<pre>${esc(L.join('\n'))}</pre>`;
+}
 const vsTxt = (r: Row) => r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
 function shareText(r: Row, i?: number) {
   const head = i != null ? `${i}. ${r.n} (${vsTxt(r)} · ${r.h})` : `🏀 ${r.n} (${vsTxt(r)} · ${r.h})`;
@@ -480,13 +486,15 @@ async function betFinish(chatId: number, id: number | null, text: string): Promi
 Odd <b>${n2(v.odd)}</b> · ${n1(st)}u${p ? ` · modelo ${pc(p)}` : ''}${ev != null ? ` · EV pelo modelo ${pctS(ev)}` : ''}${line !== +b.ref_line ? `\n<i>linha da casa ${n1(line)} (referência era ${n1(+b.ref_line)})</i>` : ''}</blockquote>
 Confiro sozinho depois do jogo e te conto de manhã. Acompanhe em /banca.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), ...(srcCmd(b.src) ? [BTN('◀ Voltar', srcCmd(b.src))] : []), BTN('🏠 Menu', '/menu')]] } };
 }
+// o jogo do time já tem box score final? (results.json só lista jogos encerrados; sem o time na lista, a entrada segue aberta)
+const gameDone = (res: any, date: string, team?: string) => { const g = res?.games?.[date]; if (!g) return false; if (!team) return true; return g.some((x: any[]) => x[1] === team || x[2] === team); };
 async function settleBets(rows: any[]) {
   const open = rows.filter(r => r.status === 'aberta');
   if (!open.length) return;
   const res = await fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 300_000)).then(r => r.ok ? r.json() : null).catch(() => null);
   if (!res?.stats) return;
   for (const r of open) {
-    if (!res.dates?.includes(r.date)) continue;
+    if (!res.dates?.includes(r.date) || !gameDone(res, r.date, r.team)) continue;
     const a = res.stats[r.date]?.[r.pid];
     let patch: Record<string, unknown>;
     if (!a || !(a[0] > 0)) patch = { status: 'void', profit: 0, result: null };
@@ -589,7 +597,7 @@ async function recordTops(d: Data) {
 }
 async function settleTops(rows: any[], res: any) {
   for (const r of rows.filter(x => x.status === 'aberta')) {
-    if (!res?.dates?.includes(r.date)) continue;
+    if (!res?.dates?.includes(r.date) || !gameDone(res, r.date, r.team)) continue;
     const a = res.stats[r.date]?.[r.pid];
     let patch: Record<string, unknown>;
     if (!a || !(a[0] > 0)) patch = { status: 'void', result: null };
@@ -707,6 +715,18 @@ async function morningPush(force = false) {
   if (!res?.dates?.includes(y)) return { ok: true, skip: `resultados de ${y} ainda não saíram` };
   const picks: any[] = await sb(`top_picks?date=eq.${y}`).catch(() => []) ?? [];
   await settleTops(picks, res);
+  // rodada terminou? Só manda quando nenhuma entrada do dia (papel, top 10 ou apostas) ficou sem jogo conferido.
+  // Antes das 10h30, espera a rodada inteira; depois disso manda mesmo assim (jogo adiado, sem box score etc.).
+  const hBR = +new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23' }).format(new Date());
+  if (!force && hBR < 10) {
+    const teams = new Set<string>();
+    for (const p of picks) if (p.status === 'aberta') teams.add(p.team);
+    for (const p of (await sb(`strategy_picks?date=eq.${y}&status=eq.aberta&select=team`).catch(() => [])) ?? []) teams.add(p.team);
+    for (const p of (await sb(`bets?date=eq.${y}&status=eq.aberta&select=team`).catch(() => [])) ?? []) teams.add(p.team);
+    const pend = [...teams].filter(t => !gameDone(res, y, t));
+    if (pend.length) return { ok: true, skip: `rodada em andamento: ${pend.join(', ')}` };
+  }
+  const quiet = hBR < 8;
   const subs: any[] = await sb('bot_subs?select=chat_id,tent,ra,est&or=(tent.eq.true,ra.eq.true,est.eq.true)').catch(() => []) ?? [];
   const gab = await estGabarito(y, res).catch(e => { console.error('gabarito', e); return null; });
   const bettors: any[] = await sb(`bets?select=chat_id&date=eq.${y}&status=neq.aguardando_odd`).catch(() => []) ?? [];
@@ -715,12 +735,12 @@ async function morningPush(force = false) {
   for (const c of chats) {
     const text = await morningText(c, y, subs.some(x => +x.chat_id === c && (x.tent || x.ra)) ? picks : [], res);
     if (text) {
-      const r = await TG('sendMessage', { chat_id: c, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: MORNING_KB() });
+      const r = await TG('sendMessage', { chat_id: c, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: quiet, reply_markup: MORNING_KB() });
       if (r.ok) sent++;
       await new Promise(ok => setTimeout(ok, 60));
     }
     if (gab && subs.some(x => +x.chat_id === c && x.est)) {
-      const r = await TG('sendMessage', { chat_id: c, text: gab, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('🏠 Menu', '/menu')]] } });
+      const r = await TG('sendMessage', { chat_id: c, text: gab, parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: quiet, reply_markup: { inline_keyboard: [[BTN('🧪 Placar das estratégias', '/estrategias'), BTN('💼 Banca', '/banca')], [BTN('🏠 Menu', '/menu')]] } });
       if (r.ok) sent++;
       await new Promise(ok => setTimeout(ok, 60));
     }
@@ -749,7 +769,7 @@ function card(r: Row, i: number) {
   // histórico em janelas (estilo hit rate): recente, temporada, temporada passada e confronto
   const hits = `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}
 📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${r.o} ${hitTxt(r.hh)}
-${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
+${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
@@ -767,7 +787,7 @@ ${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.s
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
 ${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
-${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
+${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${seq(r) ? `\n📋 <i>Toque para copiar e compartilhar:</i>\n${seqBlock(r.n, vs, r.s, r.l, (MK[r.m] ?? r.m).toLowerCase(), r.d, r.sq)}` : ''}${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
 }
 // cartão das listas (visual de antes)
 function listCard(r: Row, i: number) {

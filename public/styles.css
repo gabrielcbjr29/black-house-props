@@ -1081,3 +1081,5 @@ ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
 @media (max-width: 560px) { .gab li { grid-template-columns: 24px 1fr auto; } .gab li .what { grid-column: 2; } }
 
 .srcx { color: var(--warn); font-weight: 700; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.plink { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--green); text-decoration: none; }
+.plink:hover { text-decoration: underline; }

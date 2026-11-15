@@ -101,7 +101,20 @@ function rowHTML(r, games, extra = '') {
 }
 const TH = `<tr><th>Jogador</th><th>Entrada</th><th>Chance</th><th>Odd</th><th>Últimos 10 · histórico</th><th>Defesa</th></tr>`;
 
-export function reportHTML(bot, rep) {
+/* placar do método (prestação de contas no topo do PDF); vem de estrategias?placar=1, e o PDF sai mesmo sem ele */
+export async function fetchPlacar() {
+  try { const r = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/estrategias?placar=1', { signal: AbortSignal.timeout(15000) }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+function placarBox(P) {
+  const E = (P?.estrategias || []).filter(e => e.n > 0); if (!E.length) return '';
+  const t = E.reduce((a, e) => ({ n: a.n + e.n, g: a.g + e.g, r: a.r + e.r, l: a.l + (+e.lucro || 0) }), { n: 0, g: 0, r: 0, l: 0 });
+  const dec = t.g + t.r, u = x => (x > 0 ? '+' : x < 0 ? '−' : '') + n1(Math.abs(x)) + 'u', c = x => x > 0 ? 'pos' : x < 0 ? 'neg' : '';
+  const top = E.slice().sort((a, b) => b.lucro - a.lucro).slice(0, 3), low = E.slice().sort((a, b) => a.lucro - b.lucro).slice(0, 2);
+  return `<section class="plc"><div class="plch"><h2>Placar do método</h2><span>${(P.dias || []).length} dia(s) · papel, 1u na odd do alerta · tudo que o sistema apontou, sem escolher depois</span></div>
+    <div class="plck"><div><small>Entradas</small><b>${t.n}</b><span>${t.g}G ${t.r}R</span></div><div><small>Acerto</small><b>${dec ? pc(t.g / dec) : '–'}</b><span>precisa ~57% a @1,75</span></div><div><small>Lucro</small><b class="${c(t.l)}">${u(t.l)}</b><span>ROI ${dec ? ev(t.l / dec) : '–'}</span></div>
+      <div class="plcl"><small>Melhores</small>${top.map(e => `<span>${esc(e.name)} <b class="pos">${u(+e.lucro)}</b></span>`).join('')}</div><div class="plcl"><small>Piores</small>${low.map(e => `<span>${esc(e.name)} <b class="neg">${u(+e.lucro)}</b></span>`).join('')}</div></div></section>`;
+}
+export function reportHTML(bot, rep, placar = null) {
   const { games, sections, dd, td, metodo, rowOf, multi } = rep;
   GEN = Date.parse(bot.gen) || Date.now();
   const t9s = bot.rows.map(r => r.t9).filter(Boolean).sort(), last9 = t9s.at(-1);
@@ -134,11 +147,13 @@ b.o,span.o{color:#4FD18B}b.u,span.u{color:#F2B544}.pr b{font:800 17px BS;color:#
 .dots{display:flex;gap:2px;margin-bottom:2px}.dots i{width:9px;height:9px;border-radius:2px;display:block}.dots .g{background:#2DB46E}.dots .r{background:#E5534B}.dots .p{background:#6B7570}
 .df{font:700 12px BS;white-space:nowrap}.tks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tk{background:#0C120F;border:1px solid #1C2A22;border-radius:9px;padding:9px}
 .tkh b{font:800 14px BS;text-transform:uppercase;display:block}.tkh span{color:#2DB46E;font-weight:700;font-size:10px}.lg{display:flex;gap:6px;align-items:center;margin-top:7px}.lg .jer{width:20px;height:22px;flex:none}.lg small{display:block;color:#8FA196;font-size:9px}
+.plc{margin-top:12px;background:#0C120F;border:1px solid #1C2A22;border-radius:9px;padding:10px 12px}.plch{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.plch h2{margin:0;font-size:15px}.plch h2::before{height:12px}.plch span{color:#8FA196;font-size:9.5px}
+.plck{display:grid;grid-template-columns:auto auto auto 1fr 1fr;gap:14px;margin-top:8px;align-items:start}.plck>div small{display:block;color:#6E8075;font-size:8.5px;text-transform:uppercase;letter-spacing:.08em}.plck>div b{font:800 18px BS}.plck>div>span{display:block;color:#8FA196;font-size:9px}.plcl span{display:block;font-size:10px}.plcl span b{font:800 10.5px MR}.pos{color:#4FD18B}.neg{color:#FF6A5C}
 .warn{margin:8px 0 2px;background:#3a2a08;border:1px solid #F2B544;color:#FBE3A8;border-radius:7px;padding:7px 10px;font-size:10.5px}.ok9{margin:6px 0 0;color:#8FA196;font-size:9.5px}.old{color:#F2B544;font-weight:700}
 footer{margin-top:18px;border-top:1px solid #1C2A22;padding-top:8px;color:#6E8075;font-size:9px}`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Black House · ${esc(bot.date)}</title><style>${css}</style></head><body><div class="page">
 <header><div class="hd"><h1>Melhores entradas <em>do dia</em></h1><small>${esc(dia)} · dados das ${esc(gen)} (Brasília)</small></div><div class="brand">BLACK HOUSE<small>Modelo BH · NBA</small></div></header>
-<div class="games">${jogos}</div>${leit}
+<div class="games">${jogos}</div>${leit}${placarBox(placar)}
 ${met ? sec('Entradas do método', 'As que o bot alertou hoje (EV de 5% ou mais na odd da 99play, uma por jogador). Ficam registradas no papel com 1u.', `<table>${TH}${met}</table>`) : ''}
 ${sections.map(s => sec(s.t, 'As de maior chance do Modelo BH, só jogador de rotação (24+ min). Com linha da 99play, só as sem valor negativo; sem ela, a linha de referência.', `<table>${TH}${s.rows.map(r => rowHTML(r, games)).join('')}</table>`)).join('')}
 ${dd.length ? sec('Duplo-duplo', 'Chance pelo histórico (últimos 10, últimos 20 e temporada). Compare a odd justa com a da casa: só vale se a casa pagar mais.', `<table>${TH}${ddRows(dd, 'Duplo-duplo')}</table>`) : ''}
@@ -156,7 +171,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const full = buildBotData({ ...slate, prev }, { w: .4, full: true });
   const bot = { ...bot0, rows: full.rows };
   const rep = buildReport(bot, slate, strat);
-  const html = reportHTML(bot, rep);
+  const html = reportHTML(bot, rep, await fetchPlacar());
   writeFileSync(join(ROOT, 'data', 'relatorio.html'), html);
   const { chromium } = createRequire(import.meta.url)('playwright');
   const browser = await chromium.launch();
