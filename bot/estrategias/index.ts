@@ -71,7 +71,7 @@ function fullAlert(x: any, r: any) {
     L.push('', `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}`, `📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${esc(r.o)} ${hitTxt(r.hh)}`);
   } else L.push(`Chance do modelo <b>${pc(+x.p)}</b>`);
   const sq = x.sq?.length ? x.sq : r?.sq;
-  if (sq?.length) L.push(sqLine(sq, line, x.side));
+  if (sq?.length) L.push(sqLine(sq, line, x.side), `🔢 <code>${sq.slice(0, 10).join('-')}</code>`);
   if (r) {
     L.push(`${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sw} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${r.ed == null ? '' : ` · vantagem <b>${r.ed >= 0 ? '+' : '−'}${n1(Math.abs(r.ed))}</b>`}`);
     if (r.wo) L.push(`🚑 ${r.wo.x ? 'Sem' : 'Se faltar,'} ${esc(r.wo.q)}${r.wo.x ? '' : ' (em dúvida)'}: <b>${r.wo.h[0]}/${r.wo.h[1]}</b> ${sw} · média ${n1(r.wo.a)}`);
@@ -87,8 +87,7 @@ function fullAlert(x: any, r: any) {
   if (edge != null && edge > .15) wn.push('⚠️ <i>Muito acima do mercado: confira notícias antes</i>');
   if (r?.st === 'questionable') wn.push('🟡 <i>Jogador em dúvida</i>');
   const why = [...wy, ...wn];
-  const copy = sq?.length ? `\n📋 <i>Toque para copiar e compartilhar:</i>\n<pre>${esc([`🏀 ${x.name} (${vs})`, `${over ? '⬆️ Mais de' : '⬇️ Menos de'} ${n1(line)} ${MKF[x.mk] ?? x.mk} · @${n2(odd)}`, `${sqLine(sq, line, x.side).replace(/<\/?b>/g, '')}`, `🔢 ${sq.slice(0, 10).join('-')}`].join('\n'))}</pre>` : '';
-  let text = `${L.slice(0, 3).join('\n')}${body}${copy}${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}\n<i>No papel: 1u a @${n2(odd)} · 🔞 18+ · Aposte com responsabilidade</i>`;
+  let text = `${L.slice(0, 3).join('\n')}${body}${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}\n<i>No papel: 1u a @${n2(odd)} · 🔞 18+ · Aposte com responsabilidade</i>`;
   if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '…';
   const share = [`🏀 ${x.name} (${vs})`, `${over ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(line)} ${MKF[x.mk] ?? x.mk} · @${n2(odd)}`,
     ...(sq?.length ? [`📊 Últimos 10: ${sqLine(sq, line, x.side).replace(/<\/?b>/g, '')}`, `🔢 ${sq.slice(0, 10).join('-')}`] : [])].join('\n').slice(0, 256);

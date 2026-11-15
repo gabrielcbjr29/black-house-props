@@ -291,12 +291,6 @@ function sqDots(vals: number[] | null | undefined, line: number, side: string, n
   return { dots, hit, n: v.length };
 }
 const sqLine = (vals: number[] | null | undefined, line: number, side: string) => { const q = sqDots(vals, line, side); return q.n ? `${q.dots} <b>${q.hit}/${q.n}</b>` : ''; };
-// bloco pronto para compartilhar (um toque no bloco copia tudo): jogador, entrada, quadradinhos e os números
-function seqBlock(name: string, vs: string, side: string, line: number, mkLabel: string, odd: number | null | undefined, vals: number[] | null | undefined) {
-  const q = sqDots(vals, line, side); if (!q.n) return '';
-  const L = [`🏀 ${name} (${vs})`, `${side === 'o' ? '⬆️ Mais de' : '⬇️ Menos de'} ${n1(line)} ${mkLabel}${odd ? ` · @${n2(odd)}` : ''}`, `${q.dots} ${q.hit}/${q.n}`, `🔢 ${(vals ?? []).slice(0, q.n).join('-')}`];
-  return `<pre>${esc(L.join('\n'))}</pre>`;
-}
 const vsTxt = (r: Row) => r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
 function shareText(r: Row, i?: number) {
   const head = i != null ? `${i}. ${r.n} (${vsTxt(r)} · ${r.h})` : `🏀 ${r.n} (${vsTxt(r)} · ${r.h})`;
@@ -317,7 +311,7 @@ function compact(r: Row, i: number) {
   const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
   return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
 ${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
-${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n<i>🔢 ${seq(r)}</i>` : ''}${duvida(r)}`;
+${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>` : ''}${duvida(r)}`;
 }
 // colega importante em dúvida: como ele foi nos jogos sem esse colega (se o colega cair, o cenário muda)
 const duvida = (r: Row) => r.wo && !r.wo.x ? `\n🟡 ${esc(r.wo.q)} em dúvida · sem ele: ${r.wo.h[0]}/${r.wo.h[1]} ${r.s === 'o' ? 'acima' : 'abaixo'}, média ${n1(r.wo.a)}` : '';
@@ -769,7 +763,7 @@ function card(r: Row, i: number) {
   // histórico em janelas (estilo hit rate): recente, temporada, temporada passada e confronto
   const hits = `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}
 📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${r.o} ${hitTxt(r.hh)}
-${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
+${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r.sk} seguidos</b> ${sideW(r)} · ` : ''}🧠 ${r.mb ? 'Modelo BH' : 'Projeção'} <b>${n1(Math.round(r.pj * 10) / 10)}</b>${edTxt(r)}`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
@@ -787,7 +781,7 @@ ${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n` : ''}${r.sk && r.sk >= 2 ? `🔥 <b>${r
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
 ${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
-${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${seq(r) ? `\n📋 <i>Toque para copiar e compartilhar:</i>\n${seqBlock(r.n, vs, r.s, r.l, (MK[r.m] ?? r.m).toLowerCase(), r.d, r.sq)}` : ''}${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
+${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
 }
 // cartão das listas (visual de antes)
 function listCard(r: Row, i: number) {
@@ -798,7 +792,7 @@ function listCard(r: Row, i: number) {
   const ev = r.e == null ? '' : ` · EV <b>${r.e >= 0 ? '+' : ''}${(r.e * 100).toFixed(1).replace('.', ',')}%</b>`;
   const nota = r.nt != null ? ` · Nota <b>${r.nt}</b>` : '';
   // três acertos lado a lado: últimos 10 · temporada · contra o adversário
-  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)} · <i>${seq(r)}</i>` : ''}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
+  const hits = `📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>` : ''}\n🧠 ${r.mb ? 'Modelo BH' : 'Projeção'}: <b>${n1(Math.round(r.pj * 10) / 10)}</b>`;
   let def = '';
   if (r.dv?.r) {
     const good = over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6, bad = over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5;
