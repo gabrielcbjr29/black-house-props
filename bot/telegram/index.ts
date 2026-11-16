@@ -917,7 +917,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status'), BTN('📢 Canal', '/canal')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status'), BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -958,8 +958,9 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
-  if (cmd === 'canal') return canalCmd(chatId, arg);
-  if ((cmd === 'cb' || cmd === 'cs') && String(chatId) !== (await cfg()).allowed[0]) return { text: 'Só o dono do canal pode fazer isso.' };
+  if (cmd === 'canal' || cmd === 'canais') return canaisCmd(chatId, arg);
+  if (cmd === 'cn') return cnCmd(chatId, rest);
+  if (cmd === 'cf') return cfCmd(chatId, rest);
   if (cmd === 'cb') return cbCmd(chatId, rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
@@ -1048,50 +1049,77 @@ async function sendCards(chatId: number, arg?: string) {
   await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>', reply_markup: { inline_keyboard: [[BTN('🔥 Top do dia em texto', '/top'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('🏠 Menu', '/menu')]] } });
 }
 
-// ---------- canal do Telegram (postagem automática na função canal) ----------
+// ---------- hub de canais do Telegram (postagem automática na função canal) ----------
+// Cada canal tem dono (quem colocou o bot como administrador) e configuração própria na tabela canais, editada pelo
+// /canais no privado do bot. Só o dono do canal (ou o administrador do bot) mexe nele.
 const FN = (name: string) => `${Deno.env.get('SUPABASE_URL') ?? 'https://brtexfomhlvltdsuezsi.supabase.co'}/functions/v1/${name}`;
 const getCfgKey = async (k: string) => (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value as string | undefined;
 const putCfgKey = (k: string, v: string) => sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: k, value: v, updated_at: new Date().toISOString() }) });
+const delCfgKey = (k: string) => sb(`bot_config?key=eq.${k}`, { method: 'DELETE' }).catch(() => null);
+type Canal = { id: number; chat_id: number; title: string; owner: number; ativo: boolean; cfg: any };
+const CDEF = { max: 20, oddMin: 1.4, oddMax: 3.5, evMin: .03, mercados: null as string[] | null, lado: 'ambos', multis: null as any[] | null, casa: '99', inicio: 10,
+  on: true, botoes: true, resultado: true, rodape: '🔞 18+ · Aposte com responsabilidade', ref99: '', ref365: '' };
+const canalRows = async (q = ''): Promise<Canal[]> => ((await sb(`canais?ativo=eq.true${q}&select=*&order=id`).catch(() => [])) ?? []).map((c: any) => ({ ...c, cfg: { ...CDEF, ...(c.cfg ?? {}) } }));
+const canalByChat = async (chat: number | string) => (await canalRows(`&chat_id=eq.${chat}`))[0];
+const canalById = async (id: number | string) => (await canalRows(`&id=eq.${encodeURIComponent(String(id))}`))[0];
+const isAdmin = async (chatId: number | string) => String(chatId) === (await cfg()).allowed[0];
+const canEdit = async (k: Canal | undefined, user: number | string) => !!k && (String(k.owner) === String(user) || await isAdmin(user));
+async function saveCfg(k: Canal, patch: Record<string, unknown>) {
+  const raw = ((await sb(`canais?id=eq.${k.id}&select=cfg`)) ?? [])[0]?.cfg ?? {};
+  await sb(`canais?id=eq.${k.id}`, { method: 'PATCH', body: JSON.stringify({ cfg: { ...raw, ...patch } }) });
+}
 // o bot virou admin de um canal (my_chat_member) ou alguém postou num canal onde ele está (channel_post)
 async function canalSeen(cm: any, cp: any) {
-  const c = await cfg(), ch = (cm ?? cp).chat, own = c.allowed[0];
-  if (String(ch.id) === (await getCfgKey('CANAL_ID'))) return;
-  if (cm && cm.new_chat_member?.status !== 'administrator') return;
-  if (cm && own && c.allowed.includes(String(cm.from?.id))) {
-    await putCfgKey('CANAL_ID', String(ch.id)); await putCfgKey('CANAL_TITLE', ch.title ?? '');
-    await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `✅ <b>Canal conectado:</b> ${esc(ch.title ?? String(ch.id))}
-As postagens automáticas começam na próxima rodada (a partir das 10h). Use /canal para ver o status ou pausar.` });
+  const c = await cfg(), ch = (cm ?? cp).chat, adm = c.allowed[0];
+  const known = ((await sb(`canais?chat_id=eq.${ch.id}&select=*`).catch(() => [])) ?? [])[0];
+  const st = cm?.new_chat_member?.status;
+  if (known) {
+    if (cm && (st === 'left' || st === 'kicked')) { // tiraram o bot do canal: para de postar
+      await sb(`canais?id=eq.${known.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: false }) });
+      await TG('sendMessage', { chat_id: known.owner ?? adm, parse_mode: 'HTML', text: `⏸️ O bot saiu do canal <b>${esc(known.title ?? '')}</b>; as postagens automáticas pararam.` });
+    } else if (cm && st === 'administrator' && !known.ativo) {
+      await sb(`canais?id=eq.${known.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: true, title: ch.title ?? known.title }) });
+      await TG('sendMessage', { chat_id: known.owner ?? adm, parse_mode: 'HTML', text: `✅ Canal <b>${esc(ch.title ?? '')}</b> reconectado. Configuração em /canais.` });
+    }
     return;
   }
-  if (own) await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Usar este canal para as postagens automáticas?`,
-    reply_markup: { inline_keyboard: [[{ text: '✅ Usar este canal', callback_data: `/canal set:${ch.id}` }]] } });
+  if (cm && st !== 'administrator') return;
+  if (cm && c.allowed.includes(String(cm.from?.id))) await canalAdd(ch.id, ch.title, cm.from.id);
+  else if (adm) await TG('sendMessage', { chat_id: adm, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Conectar ao hub de postagem automática (você como dono)?`,
+    reply_markup: { inline_keyboard: [[BTN('✅ Conectar este canal', `/canais add ${ch.id}`)]] } });
 }
-// ---------- controles dentro do canal (pedido de 16/11: nada disso no privado do bot) ----------
+async function canalAdd(chatId: number | string, title: string | undefined, owner: number | string) {
+  await sb('canais?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: +chatId, title: title ?? null, owner: +owner, ativo: true }) });
+  const k = await canalByChat(chatId), own = await isAdmin(owner);
+  await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', text: `✅ <b>Canal conectado:</b> ${esc(title ?? String(chatId))}\nAs postagens automáticas começam na próxima rodada (a partir das 10h), com a configuração padrão.${own ? '' : '\n\n⚠️ <b>Cadastre os seus links de afiliado</b> antes: sem eles, os bilhetes prontos saem sem ref.'}`,
+    reply_markup: { inline_keyboard: [[BTN('⚙️ Configurar o canal', `/cn ${k?.id}`)], ...(own ? [] : [[BTN('🔗 Meus links de afiliado', `/cn ${k?.id} refs`)]])] } });
+}
+// ---------- controles dentro do canal ----------
 const SHARE_RE = /(?:99play|br365)\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi;
-const postLabel = (p: any) => (p.kind === 'multipla' ? `Múltipla @${n2(+p.odd)} · ${new Set((p.legs ?? []).map((l: any) => l.game)).size} jogos`
+const postLabel = (p: any) => (p.kind === 'multipla' ? `Múltipla @${n2(+p.odd)} · ${(p.legs ?? []).length} pernas`
   : `${p.legs?.[0]?.name ?? '?'} · ${MKS[p.legs?.[0]?.mk] ?? p.legs?.[0]?.mk} ${p.legs?.[0]?.side === 'o' ? 'mais' : 'menos'} ${n1(+p.legs?.[0]?.line)}`).slice(0, 60);
 const delMsgs = (chat: number, ids: number[]) => Promise.all(ids.filter(Boolean).map(id => TG('deleteMessage', { chat_id: chat, message_id: id })));
 // o dono postou no canal um link de bilhete (respondendo um post, ou compartilhando direto da casa)
-async function canalPost(cp: any) {
+async function canalPost(cp: any, k: Canal) {
   const text = cp.text ?? cp.caption ?? '';
   const codes = [...new Set([...text.matchAll(SHARE_RE)].map(m => m[1]))];
   if (!codes.length) return;
   const ch = cp.chat.id, photo = cp.photo?.at?.(-1)?.file_id ?? '', code = codes[0];
   if (cp.reply_to_message) {
-    const r = await canalFn('relink', `ch=${cp.reply_to_message.message_id}&code=${encodeURIComponent(code)}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
+    const r = await canalFn('relink', `cid=${ch}&ch=${cp.reply_to_message.message_id}&code=${encodeURIComponent(code)}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
     if (r.ok) { await delMsgs(ch, [cp.message_id]); return; }
     if (r.erro !== 'post não encontrado') { await TG('sendMessage', { chat_id: ch, disable_notification: true, reply_parameters: { message_id: cp.message_id }, text: `Não consegui atualizar o post: ${r.erro ?? 'erro'}` }); return; }
   }
-  const abertos: any[] = await canalFn('abertos', '').catch(() => []);
+  const abertos: any[] = await canalFn('abertos', `canal=${k.id}`).catch(() => []);
   if (!Array.isArray(abertos) || !abertos.length) return;
   const q = await TG('sendMessage', { chat_id: ch, disable_notification: true, reply_parameters: { message_id: cp.message_id }, text: '🎟️ De qual post é este bilhete?',
     reply_markup: { inline_keyboard: [...abertos.map(p => [BTN(postLabel(p), `/cb ${code} ${p.id}`)]), [BTN('✖️ Cancelar', `/cb ${code} x`)]] } });
   await putCfgKey('CANAL_PEND_' + code, JSON.stringify({ photo, del: [cp.message_id, q.result?.message_id] }));
 }
-// botões dentro do canal: trocar a casa do post (/cs) ou ligar o bilhete ao post (/cb); só o dono
+// botões dentro do canal: trocar a casa do post (/cs) ou ligar o bilhete ao post (/cb); só o dono do canal
 async function canalCb(cq: any) {
-  const data: string = cq.data ?? '', ch = cq.message.chat.id;
-  if (String(cq.from?.id) !== (await cfg()).allowed[0]) { await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Só o dono do canal pode usar estes botões.' }); return; }
+  const data: string = cq.data ?? '', ch = cq.message.chat.id, k = await canalByChat(ch);
+  if (!(await canEdit(k, cq.from?.id))) { await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Só o dono do canal pode usar estes botões.' }); return; }
   if (/^\/cs\s/.test(data)) {
     const r = await csCmd(data.trim().split(/\s+/).slice(1));
     await TG('answerCallbackQuery', { callback_query_id: cq.id, text: r ? r.text.replace(/<[^>]+>/g, '') : '✅ Casa do post trocada' });
@@ -1106,59 +1134,178 @@ async function canalCb(cq: any) {
     ok = !!r.ok; txt = r.ok ? `✅ Bilhete pronto na ${r.casa}${r.imagem ? ' (com o print)' : ''}` : `Não consegui: ${r.erro ?? 'erro'}`;
   }
   await TG('answerCallbackQuery', { callback_query_id: cq.id, text: txt });
-  if (ok) { await delMsgs(ch, [cq.message.message_id, ...(pend.del ?? [])]); await sb(`bot_config?key=eq.CANAL_PEND_${code}`, { method: 'DELETE' }).catch(() => null); }
+  if (ok) { await delMsgs(ch, [cq.message.message_id, ...(pend.del ?? [])]); await delCfgKey('CANAL_PEND_' + code); }
 }
 async function canalFn(action: string, qs: string): Promise<any> {
   const secret = (await cfg()).secret;
   return fetch(`${FN('canal')}?${action}=${encodeURIComponent(secret)}${qs ? '&' + qs : ''}`).then(r => r.json()).catch(e => ({ ok: false, erro: String(e) }));
 }
-async function shareLinksText(codes: string[]) {
-  const c = await cfg();
+// links rastreados para quem mandou o link: refs do canal dele (o administrador usa os refs do bot)
+async function shareLinksText(codes: string[], chatId: number) {
+  const c = await cfg(), mine = (await canalRows(`&owner=eq.${chatId}`))[0];
+  const r99 = mine?.cfg.ref99 || (await isAdmin(chatId) ? c.affRef : ''), r365 = mine?.cfg.ref365 || (await isAdmin(chatId) ? c.affRef365 : '');
+  const link = (dom: string, ref: string, code: string) => `${dom}/sports?${ref ? `ref=${encodeURIComponent(ref)}&amp;` : ''}shareCode=${code}`;
   return `🔗 <b>Links rastreados</b> <i>(toque para copiar)</i>\n` + codes.map(code =>
-    `<b>99play</b> <i>(ref ${esc(c.affRef)})</i>\n<code>${c.dom99}/sports?ref=${encodeURIComponent(c.affRef)}&amp;shareCode=${code}</code>\n<b>BR365</b> <i>(ref ${esc(c.affRef365)})</i>\n<code>${c.dom365}/sports?ref=${encodeURIComponent(c.affRef365)}&amp;shareCode=${code}</code>`).join('\n\n');
+    `<b>99play</b> <i>(${r99 ? 'ref ' + esc(r99) : 'sem ref: cadastre em /canais'})</i>\n<code>${link(c.dom99, r99, code)}</code>\n<b>BR365</b> <i>(${r365 ? 'ref ' + esc(r365) : 'sem ref: cadastre em /canais'})</i>\n<code>${link(c.dom365, r365, code)}</code>`).join('\n\n');
 }
+const postCanal = async (postId: string) => { const r = ((await sb(`channel_posts?id=eq.${encodeURIComponent(postId)}&select=canal_id`).catch(() => [])) ?? [])[0]; return r ? canalById(r.canal_id) : undefined; };
 // /cb <shareCode> <post>: liga o bilhete ao post escolhido (0 = só os links); /cs <post> <99|365>: troca a casa do post
 async function cbCmd(chatId: number, rest: string[]): Promise<Out> {
   const [code, id] = rest; if (!code) return { text: 'Bilhete não encontrado.' };
-  if (!id || id === '0') return { text: await shareLinksText([code]) };
+  if (!id || id === '0') return { text: await shareLinksText([code], chatId) };
+  if (!(await canEdit(await postCanal(id), chatId))) return { text: 'Só o dono do canal pode fazer isso.' };
   const pendRaw = await getCfgKey('CANAL_PEND_' + code); let photo = pendRaw ?? '';
   try { const j = JSON.parse(pendRaw ?? ''); if (j && typeof j === 'object') photo = j.photo ?? ''; } catch { /* print salvo como texto */ }
   const r = await canalFn('relink', `id=${encodeURIComponent(id)}&code=${encodeURIComponent(code)}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
-  if (photo) await sb(`bot_config?key=eq.CANAL_PEND_${code}`, { method: 'DELETE' }).catch(() => null);
+  if (photo) await delCfgKey('CANAL_PEND_' + code);
   return { text: r.ok ? `✅ Post do canal atualizado: bilhete pronto na <b>${esc(r.casa ?? '')}</b>${r.imagem ? ' e o seu print' : ''}.` : `Não consegui atualizar o post: ${esc(r.erro ?? 'erro')}` };
 }
 async function csCmd(rest: string[]): Promise<Out | null> {
   const [id, c] = rest; const r = await canalFn('casa', `id=${encodeURIComponent(id ?? '')}&c=${encodeURIComponent(c ?? '99')}`);
   return r.ok ? null : { text: `Não consegui trocar a casa do post: ${esc(r.erro ?? 'erro')}` };
 }
-async function canalCmd(chatId: number, arg: string): Promise<Out> {
-  const c = await cfg(), isOwner = String(chatId) === c.allowed[0];
-  if (isOwner && arg.startsWith('set:')) {
-    const id = arg.slice(4), info = await TG('getChat', { chat_id: id });
+
+// ---------- /canais: painel de configuração por canal ----------
+const MK_ORDER = ['PTS', 'REB', 'AST', 'PRA', 'PR', 'PA', 'RA', '3PM', '3PA', '2PM', '2PA', 'FGM', 'FGA', 'FTM', 'FTA', 'STL', 'BLK', 'SB', 'TOV', 'PF'];
+const MK_BTN: Record<string, string> = { PTS: 'Pontos', REB: 'Rebotes', AST: 'Assist.', PRA: 'PRA', PR: 'Pts+Reb', PA: 'Pts+Ast', RA: 'Reb+Ast', '3PM': '3 conv.', '3PA': '3 tent.',
+  '2PM': '2 conv.', '2PA': '2 tent.', FGM: 'Arr. conv.', FGA: 'Arr. tent.', FTM: 'LL conv.', FTA: 'LL tent.', STL: 'Roubos', BLK: 'Tocos', SB: 'Roub+Toc', TOV: 'Erros', PF: 'Faltas' };
+const LADO_TXT: Record<string, string> = { u: 'under', o: 'over', m: 'misto', ambos: 'over e under' };
+const DEF_SPECS = [{ nome: '10', min: 7, max: 10, lado: 'u' }, { nome: '10', min: 7, max: 10, lado: 'o' }, { nome: '15', min: 12, max: 17, lado: 'u' },
+  { nome: '15', min: 12, max: 17, lado: 'o' }, { nome: '25', min: 20, max: 25, lado: 'u' }, { nome: '25', min: 20, max: 25, lado: 'o' }];
+// o mesmo nome de faixa que o pipeline (scripts/canal.mjs specsOf) usa, para saber o que já saiu hoje
+function specBands(k: Canal) {
+  const raw = k.cfg.multis?.length ? k.cfg.multis : DEF_SPECS, seen: Record<string, number> = {};
+  return raw.map((sp: any) => {
+    const odd = +sp.odd || null, max = +sp.max || (odd ? Math.round(odd * 1.15 * 100) / 100 : 10), pernas = +sp.pernas || null, lado = ['u', 'o', 'm'].includes(sp.lado) ? sp.lado : 'u';
+    let band = `${sp.nome ?? (odd ?? max)}${pernas ? 'x' + pernas : ''}-${LADO_TXT[lado]}`;
+    seen[band] = (seen[band] ?? 0) + 1; if (seen[band] > 1) band += '-' + seen[band];
+    const txt = sp.nome ? `odd ${sp.min}–${sp.max}` : `odd ~${odd}`;
+    return { band, label: `${txt} · ${pernas ? pernas + ' pernas' : '2–6 pernas'} · ${LADO_TXT[lado]}` };
+  });
+}
+const pct = (x: number) => Math.round(x * 100) + '%';
+async function canaisCmd(chatId: number, arg: string): Promise<Out> {
+  const adm = await isAdmin(chatId);
+  const [sub, a1] = arg.split(/\s+/);
+  if (sub === 'add' && adm && a1) {
+    const info = await TG('getChat', { chat_id: a1 });
     if (!info.ok) return { text: `Não consegui acessar o canal (${esc(info.description ?? '')}). Confira se o bot é administrador com permissão de postar.` };
-    await putCfgKey('CANAL_ID', id); await putCfgKey('CANAL_TITLE', info.result?.title ?? '');
-    return { text: `✅ <b>Canal conectado:</b> ${esc(info.result?.title ?? id)}
-As postagens automáticas começam na próxima rodada (a partir das 10h).`, kb: { inline_keyboard: [[{ text: '📢 Status do canal', callback_data: '/canal' }]] } };
+    await canalAdd(a1, info.result?.title, chatId);
+    return { text: '✅ Pronto.' };
   }
-  if (isOwner && (arg === 'off' || arg === 'on')) await putCfgKey('CANAL_ON', arg === 'off' ? '0' : '1');
-  if (isOwner && /^casa (99|365)$/.test(arg)) await putCfgKey('CANAL_CASA', arg.slice(5));
-  const casa = (await getCfgKey('CANAL_CASA')) === '365' ? '365' : '99';
-  const id = await getCfgKey('CANAL_ID'), title = await getCfgKey('CANAL_TITLE'), on = (await getCfgKey('CANAL_ON')) !== '0';
-  if (!id) return { text: `📢 <b>Canal</b>\nAinda não conectado. Coloque o bot como administrador do canal (com permissão de postar) e mande qualquer mensagem no canal: eu peço a confirmação aqui.` };
-  const today = etDate(), rows: any[] = await sb(`channel_posts?date=eq.${today}&select=kind,status,band,odd,share_code`).catch(() => []) ?? [];
-  const s = rows.filter(r => r.kind === 'simples'), m = rows.filter(r => r.kind === 'multipla');
-  const text = `📢 <b>Canal: ${esc(title || id)}</b> · ${on ? '🟢 postando' : '⏸️ pausado'}
-<blockquote>Hoje: <b>${s.length}</b> simples · <b>${m.length}</b> múltiplas${m.length ? ` (${m.map(x => x.band + ' @' + n2(+x.odd)).join(', ')})` : ''}
-Com bilhete pronto: ${rows.filter(r => r.share_code).length}
-Conferidas: ${rows.filter(r => r.status === 'green').length} ✅ · ${rows.filter(r => r.status === 'red').length} ❌</blockquote>
-<i>Posta das 10h até 40 min antes de cada jogo: até 20 simples e as múltiplas 10 / 15 / 25 em under (12h/15h/17h) e over (13h/16h/18h). Para trocar o link de um post pelo bilhete pronto, responda o aviso "Postado no canal" com o link da 99play.</i>`;
-  return { text: text + `\n\n🏠 Casa padrão dos próximos posts: <b>${casa === '365' ? 'BR365' : '99play'}</b> <i>(cada post também troca no aviso)</i>`, kb: isOwner ? { inline_keyboard: [[on ? { text: '⏸️ Pausar o canal', callback_data: '/canal off' } : { text: '▶️ Retomar o canal', callback_data: '/canal on' }], [{ text: `${casa === '99' ? '✅ ' : ''}99play`, callback_data: '/canal casa 99' }, { text: `${casa === '365' ? '✅ ' : ''}BR365`, callback_data: '/canal casa 365' }]] } : undefined };
+  const ks = adm ? await canalRows() : await canalRows(`&owner=eq.${chatId}`);
+  if (!ks.length) return { text: '📢 <b>Canais</b>\nVocê ainda não tem canal conectado. Coloque o bot como <b>administrador</b> do seu canal (com permissão de postar, editar e apagar mensagens): ele aparece aqui sozinho.' };
+  const today = etDate(), rows: any[] = await sb(`channel_posts?date=eq.${today}&select=canal_id,kind,status`).catch(() => []) ?? [];
+  const line = (k: Canal) => { const r = rows.filter(x => x.canal_id === k.id); return `${k.cfg.on ? '🟢' : '⏸️'} <b>${esc(k.title ?? String(k.chat_id))}</b> · hoje ${r.filter(x => x.kind === 'simples').length} simples, ${r.filter(x => x.kind === 'multipla').length} múltiplas`; };
+  return { text: `📢 <b>Hub de canais</b>\n<blockquote>${ks.map(line).join('\n')}</blockquote>\n<i>Os canais dividem as melhores entradas do dia em rodízio, sem prioridade; cada um repete no máximo 30% com os outros. Toque num canal para configurar.</i>`,
+    kb: { inline_keyboard: [...ks.map(k => [BTN(`⚙️ ${k.title ?? k.chat_id}`, `/cn ${k.id}`)]), HOME] } };
+}
+async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
+  const [id, scr, ...xs] = rest, k = await canalById(id ?? '');
+  if (!(await canEdit(k, chatId))) return { text: 'Canal não encontrado ou sem permissão.' };
+  const c = k.cfg, back = [BTN('⬅️ Voltar', `/cn ${k.id}`)];
+  const opts = (field: string, vals: (string | number)[], fmt: (v: any) => string, cur: any) =>
+    chunk(vals.map(v => BTN(`${String(cur) === String(v) ? '✅ ' : ''}${fmt(v)}`, `/cf ${k.id} ${field} ${v}`)), 4);
+  if (scr === 'omin') return { text: `🎯 <b>Odd mínima das simples</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('oddMin', [1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0], v => n2(+v), c.oddMin), back] } };
+  if (scr === 'omax') return { text: `📈 <b>Odd máxima das simples</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('oddMax', [2.0, 2.2, 2.5, 3.0, 3.5, 4.0, 5.0], v => n2(+v), c.oddMax), back] } };
+  if (scr === 'max') return { text: `🔢 <b>Simples por dia</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('max', [5, 8, 10, 12, 15, 20, 25, 30], v => String(v), c.max), back] } };
+  if (scr === 'ev') return { text: `📊 <b>EV mínimo das simples</b> · ${esc(k.title)}\n<i>Quanto maior, mais seletivo (e menos entradas).</i>`, kb: { inline_keyboard: [...opts('evMin', [0, .02, .03, .05, .08, .1], v => pct(+v), c.evMin), back] } };
+  if (scr === 'lado') return { text: `⚖️ <b>Lado das simples</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('lado', ['ambos', 'o', 'u'], v => LADO_TXT[v], c.lado), back] } };
+  if (scr === 'ini') return { text: `⏰ <b>Começar a postar às</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('inicio', [8, 9, 10, 11, 12, 14], v => v + 'h', c.inicio), back] } };
+  if (scr === 'casa') return { text: `🏠 <b>Casa dos posts novos</b> · ${esc(k.title)}\n<i>Cada post ainda troca pelos botões embaixo dele.</i>`, kb: { inline_keyboard: [...opts('casa', ['99', '365'], v => v === '99' ? '99play' : 'BR365', c.casa), back] } };
+  if (scr === 'mk') {
+    const on = (m: string) => !c.mercados?.length || c.mercados.includes(m);
+    return { text: `🏷️ <b>Mercados</b> · ${esc(k.title)}\n<i>Toque para ligar/desligar. Vale para as simples e para as pernas das múltiplas.</i>`,
+      kb: { inline_keyboard: [...chunk(MK_ORDER.map(m => BTN(`${on(m) ? '✅' : '▫️'} ${MK_BTN[m]}`, `/cf ${k.id} mk ${m}`)), 3), [BTN('✅ Todos', `/cf ${k.id} mk all`)], back] } };
+  }
+  if (scr === 'mais') return { text: `⚙️ <b>Mais opções</b> · ${esc(k.title)}`, kb: { inline_keyboard: [
+    [BTN(`${c.botoes ? '✅' : '▫️'} Botões 99play/BR365 nos posts`, `/cf ${k.id} botoes ${c.botoes ? 0 : 1}`)],
+    [BTN(`${c.resultado ? '✅' : '▫️'} Responder ✅ GREEN / ❌ RED no canal`, `/cf ${k.id} resultado ${c.resultado ? 0 : 1}`)],
+    [BTN(`${c.rodape ? '✅' : '▫️'} Rodapé 🔞 18+`, `/cf ${k.id} rodape ${c.rodape ? 0 : 1}`)], back] } };
+  if (scr === 'refs') return { text: `🔗 <b>Links de afiliado</b> · ${esc(k.title)}\n<blockquote>99play: <b>${esc(c.ref99 || (String(k.owner) === (await cfg()).allowed[0] ? (await cfg()).affRef + ' (padrão do bot)' : '— sem ref'))}</b>\nBR365: <b>${esc(c.ref365 || (String(k.owner) === (await cfg()).allowed[0] ? (await cfg()).affRef365 + ' (padrão do bot)' : '— sem ref'))}</b></blockquote>\n<i>O ref vai só no link do bilhete pronto (o link do jogo sai sem ref).</i>`,
+    kb: { inline_keyboard: [[BTN('🔗 Definir 99play', `/cf ${k.id} askref 99`), BTN('🔗 Definir BR365', `/cf ${k.id} askref 365`)], back] } };
+  if (scr === 'mul') {
+    const sp = specBands(k), rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=eq.${etDate()}&kind=eq.multipla&select=band`).catch(() => []) ?? [];
+    const P = await fetch(APP_URL + 'data/canal.json?t=' + Math.floor(Date.now() / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
+    const plan = new Set((P?.canais?.[k.id]?.multis ?? []).map((m: any) => m.band)), done = new Set(rows.map(r => /-/.test(r.band) ? r.band : r.band + '-under'));
+    const st = (b: string) => done.has(b) ? '✅ saiu' : plan.has(b) ? '🕒 na pauta' : '⚠️ não fechou hoje';
+    return { text: `🧩 <b>Múltiplas</b> · ${esc(k.title)}${c.multis?.length ? '' : ' <i>(padrão)</i>'}\n<blockquote>${sp.map((x: any, i: number) => `${i + 1}. ${x.label} — ${st(x.band)}`).join('\n')}</blockquote>\n<i>Cada múltipla repete no máximo 30% das pernas com múltiplas de outros canais. "Não fechou" = hoje não há pernas boas que cheguem nessa odd com esse número de jogadores.</i>`,
+      kb: { inline_keyboard: [...chunk(sp.map((_: any, i: number) => BTN(`❌ ${i + 1}`, `/cf ${k.id} mdel ${i}`)), 4), [BTN('➕ Adicionar múltipla', `/cn ${k.id} madd`)], [BTN('↩️ Voltar ao padrão', `/cf ${k.id} mreset`)], back] } };
+  }
+  if (scr === 'madd') {
+    const [pernas, odd] = xs;
+    if (!pernas) return { text: '➕ <b>Nova múltipla</b>\nQuantos jogadores (pernas)?', kb: { inline_keyboard: [...chunk(['2', '3', '4', '5', '6', '7', '8'].map(p => BTN(p, `/cn ${k.id} madd ${p}`)), 4), [BTN('Livre (2 a 6)', `/cn ${k.id} madd 0`)], [BTN('⬅️ Voltar', `/cn ${k.id} mul`)]] } };
+    const sug: Record<string, number[]> = { '0': [5, 10, 15, 25], '2': [3, 4, 5], '3': [4, 5, 7, 10], '4': [5, 7, 10, 15], '5': [7, 10, 15, 20], '6': [10, 15, 20, 25], '7': [15, 20, 30, 40], '8': [20, 30, 40, 50] };
+    if (!odd) return { text: `➕ <b>Nova múltipla</b> · ${pernas === '0' ? '2 a 6' : pernas} pernas\nOdd alvo? <i>(faixa de ±15%; opções que costumam fechar com esse número de pernas)</i>`, kb: { inline_keyboard: [chunk((sug[pernas] ?? [10]).map(o => BTN(`~${o}`, `/cn ${k.id} madd ${pernas} ${o}`)), 4)[0], [BTN('⬅️ Voltar', `/cn ${k.id} madd`)]] } };
+    return { text: `➕ <b>Nova múltipla</b> · odd ~${odd} · ${pernas === '0' ? '2 a 6' : pernas} pernas\nLado?`, kb: { inline_keyboard: [[BTN('Under', `/cf ${k.id} madd ${pernas} ${odd} u`), BTN('Over', `/cf ${k.id} madd ${pernas} ${odd} o`), BTN('Misto', `/cf ${k.id} madd ${pernas} ${odd} m`)], [BTN('⬅️ Voltar', `/cn ${k.id} madd ${pernas}`)]] } };
+  }
+  // painel principal
+  const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=eq.${etDate()}&select=kind,status`).catch(() => []) ?? [];
+  const mk = c.mercados?.length ? c.mercados.map((m: string) => MK_BTN[m] ?? m).join(', ') : 'todos';
+  const text = `📢 <b>${esc(k.title ?? String(k.chat_id))}</b> · ${c.on ? '🟢 postando' : '⏸️ pausado'}
+<blockquote>Simples: até <b>${c.max}</b>/dia · odd <b>${n2(+c.oddMin)}–${n2(+c.oddMax)}</b> · EV ${pct(+c.evMin)}+ · ${LADO_TXT[c.lado] ?? c.lado}
+Mercados: ${esc(mk)}
+Múltiplas: ${specBands(k).length}${c.multis?.length ? '' : ' (padrão 10/15/25 over e under)'}
+Casa: <b>${c.casa === '365' ? 'BR365' : '99play'}</b> · começa às ${c.inicio}h
+Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(r => r.kind === 'multipla').length} múltiplas · ${rows.filter(r => r.status === 'green').length} ✅ ${rows.filter(r => r.status === 'red').length} ❌</blockquote>`;
+  return { text, kb: { inline_keyboard: [
+    [BTN('🎯 Odd mínima', `/cn ${k.id} omin`), BTN('📈 Odd máxima', `/cn ${k.id} omax`)],
+    [BTN('🔢 Simples/dia', `/cn ${k.id} max`), BTN('📊 EV mínimo', `/cn ${k.id} ev`)],
+    [BTN('🏷️ Mercados', `/cn ${k.id} mk`), BTN('⚖️ Lado', `/cn ${k.id} lado`)],
+    [BTN('🧩 Múltiplas', `/cn ${k.id} mul`), BTN('🏠 Casa', `/cn ${k.id} casa`)],
+    [BTN('🔗 Links de afiliado', `/cn ${k.id} refs`), BTN('⏰ Horário', `/cn ${k.id} ini`)],
+    [BTN('⚙️ Mais opções', `/cn ${k.id} mais`), c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`)],
+    [BTN('⬅️ Canais', '/canais')]] } };
+}
+// /cf <canal> <campo> <valor>: grava e volta para a tela certa
+async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
+  const [id, field, ...vs] = rest, k = await canalById(id ?? ''), v = vs[0];
+  if (!(await canEdit(k, chatId))) return { text: 'Canal não encontrado ou sem permissão.' };
+  const num: Record<string, [number, number]> = { oddMin: [1.01, 10], oddMax: [1.1, 20], max: [0, 50], evMin: [0, .5], inicio: [0, 23] };
+  if (num[field]) { const x = +v; if (isFinite(x) && x >= num[field][0] && x <= num[field][1]) await saveCfg(k, { [field]: x }); return cnCmd(chatId, [id, field === 'oddMin' ? 'omin' : field === 'oddMax' ? 'omax' : field === 'evMin' ? 'ev' : field === 'inicio' ? 'ini' : 'max']); }
+  if (field === 'lado' && ['ambos', 'o', 'u'].includes(v)) { await saveCfg(k, { lado: v }); return cnCmd(chatId, [id, 'lado']); }
+  if (field === 'casa' && ['99', '365'].includes(v)) { await saveCfg(k, { casa: v }); return cnCmd(chatId, [id, 'casa']); }
+  if (field === 'on') { await saveCfg(k, { on: v === '1' }); return cnCmd(chatId, [id]); }
+  if (field === 'botoes' || field === 'resultado') { await saveCfg(k, { [field]: v === '1' }); return cnCmd(chatId, [id, 'mais']); }
+  if (field === 'rodape') { await saveCfg(k, { rodape: v === '1' ? CDEF.rodape : '' }); return cnCmd(chatId, [id, 'mais']); }
+  if (field === 'mk') {
+    let cur: string[] = k.cfg.mercados?.length ? [...k.cfg.mercados] : [...MK_ORDER];
+    if (v === 'all') cur = [...MK_ORDER]; else if (MK_ORDER.includes(v)) cur = cur.includes(v) ? cur.filter(m => m !== v) : [...cur, v];
+    if (!cur.length) cur = [v]; // nunca fica sem mercado
+    await saveCfg(k, { mercados: cur.length === MK_ORDER.length ? null : cur }); return cnCmd(chatId, [id, 'mk']);
+  }
+  if (field === 'mreset') { await saveCfg(k, { multis: null }); return cnCmd(chatId, [id, 'mul']); }
+  if (field === 'mdel') { const cur = [...(k.cfg.multis?.length ? k.cfg.multis : DEF_SPECS)]; cur.splice(+v, 1); await saveCfg(k, { multis: cur.length ? cur : [] }); return cnCmd(chatId, [id, 'mul']); }
+  if (field === 'madd') {
+    const [pernas, odd, lado] = vs, cur = [...(k.cfg.multis?.length ? k.cfg.multis : DEF_SPECS)];
+    if (cur.length >= 8) return { text: 'Máximo de 8 múltiplas por canal. Remova uma antes.', kb: { inline_keyboard: [[BTN('⬅️ Múltiplas', `/cn ${id} mul`)]] } };
+    cur.push({ odd: +odd, pernas: +pernas || null, lado: ['u', 'o', 'm'].includes(lado) ? lado : 'u' });
+    await saveCfg(k, { multis: cur }); return cnCmd(chatId, [id, 'mul']);
+  }
+  if (field === 'askref' && ['99', '365'].includes(v)) {
+    await putCfgKey('PEND_' + chatId, `ref${v} ${k.id}`);
+    return { text: `🔗 Mande agora o seu <b>link de indicação da ${v === '99' ? '99play' : 'BR365'}</b> (o do painel de afiliado, ex.: <code>https://${v === '99' ? '99play.im' : 'br365.io'}/?ref=abc12</code>) ou só o código do ref.`, kb: { inline_keyboard: [[BTN('✖️ Cancelar', `/cn ${id} refs`)]] } };
+  }
+  return cnCmd(chatId, [id]);
+}
+// resposta ao "mande o seu link de indicação": grava o ref no canal
+async function pendingText(chatId: number, text: string): Promise<boolean> {
+  const pend = await getCfgKey('PEND_' + chatId); if (!pend || text.startsWith('/')) return false;
+  const [what, id] = pend.split(' '), k = await canalById(id);
+  await delCfgKey('PEND_' + chatId);
+  if (!(await canEdit(k, chatId))) return false;
+  const ref = (/[?&]ref=([A-Za-z0-9_-]+)/.exec(text) ?? /^\s*([A-Za-z0-9_-]{3,32})\s*$/.exec(text))?.[1];
+  if (!ref) { await TG('sendMessage', { chat_id: chatId, text: 'Não achei o ref nesse link. Tente de novo pelo /canais.' }); return true; }
+  await saveCfg(k, { [what === 'ref365' ? 'ref365' : 'ref99']: ref });
+  const o = await cnCmd(chatId, [String(k.id), 'refs']);
+  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `✅ Ref <b>${esc(ref)}</b> salvo.\n\n` + o.text, reply_markup: o.kb });
+  return true;
 }
 
 async function handle(update: any) {
   const cm = update.my_chat_member, cpost = update.channel_post;
-  if (cpost && String(cpost.chat?.id) === (await getCfgKey('CANAL_ID'))) { await canalPost(cpost); return; }
-  if (cm?.chat?.type === 'channel' || cpost?.chat?.type === 'channel') { await canalSeen(cm, cpost); return; }
+  if (cpost?.chat?.type === 'channel') { const k = await canalByChat(cpost.chat.id); if (k) await canalPost(cpost, k); else await canalSeen(null, cpost); return; }
+  if (cm?.chat?.type === 'channel') { await canalSeen(cm, null); return; }
   const cq = update.callback_query;
   if (cq?.message?.chat?.type === 'channel') { await canalCb(cq); return; }
   const msg = update.message ?? cq?.message;
@@ -1175,37 +1322,31 @@ async function handle(update: any) {
   // ignore-duplicates: quem já tem inscrição (inclusive desligada) não muda
   await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
     body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
-  // link de bilhete da 99play ou da BR365 (mesmo shareCode nas duas) colado/compartilhado no chat
+  // resposta a um pedido do /canais (ex.: "mande o seu link de indicação")
+  if (!cq && update.message?.text && await pendingText(chatId, update.message.text)) return;
+  // link de bilhete da 99play ou da BR365 (mesmo shareCode nas duas) compartilhado no privado do bot
   if (!cq) {
-    const codes = [...new Set([...text.matchAll(/(?:99play|br365)\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi)].map(m => m[1]))];
-    const isOwner = String(chatId) === (await cfg()).allowed[0];
-    const photo = update.message?.photo?.at?.(-1)?.file_id ?? '';
-    // resposta ao aviso "Postado no canal": troca o link do post pelo bilhete pronto (e a imagem pelo print, se veio)
-    const rep = update.message?.reply_to_message;
-    if (codes.length && rep && isOwner) {
-      const r = await canalFn('relink', `msg=${rep.message_id}&code=${encodeURIComponent(codes[0])}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
-      if (r.ok) { await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', reply_parameters: { message_id: update.message.message_id }, text: `✅ Post do canal atualizado: bilhete pronto na <b>${esc(r.casa ?? '')}</b>${r.imagem ? ' e o seu print' : ''}.` }); return; }
-      if (r.erro !== 'post não encontrado') { await TG('sendMessage', { chat_id: chatId, text: `Não consegui atualizar o post do canal: ${r.erro ?? 'erro'}` }); return; }
-    }
-    // compartilhou direto da casa (sem responder): pergunta de qual post é, com os posts ainda sem bilhete
-    if (codes.length && isOwner) {
-      const abertos: any[] = await canalFn('abertos', '').catch(() => []);
-      if (Array.isArray(abertos) && abertos.length) {
-        if (photo) await putCfgKey('CANAL_PEND_' + codes[0], photo);
-        const lab = (p: any) => p.kind === 'multipla' ? `Múltipla @${n2(+p.odd)} · ${new Set((p.legs ?? []).map((l: any) => l.game)).size} jogos`
-          : `${p.legs?.[0]?.name ?? '?'} · ${MKS[p.legs?.[0]?.mk] ?? p.legs?.[0]?.mk} ${p.legs?.[0]?.side === 'o' ? 'mais' : 'menos'} ${n1(+p.legs?.[0]?.line)}`;
+    const codes = [...new Set([...text.matchAll(SHARE_RE)].map(m => m[1]))];
+    if (codes.length) {
+      const photo = update.message?.photo?.at?.(-1)?.file_id ?? '';
+      // posts recentes sem bilhete dos canais desta pessoa (o administrador vê todos)
+      const ks = (await isAdmin(chatId)) ? await canalRows() : await canalRows(`&owner=eq.${chatId}`);
+      const abertos = (await Promise.all(ks.map(async k => ((await canalFn('abertos', `canal=${k.id}`).catch(() => [])) ?? []).map((p: any) => ({ ...p, canal: k.title }))))).flat().slice(0, 10);
+      if (abertos.length) {
+        if (photo) await putCfgKey('CANAL_PEND_' + codes[0], JSON.stringify({ photo }));
+        const many = ks.length > 1;
         await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', reply_parameters: { message_id: update.message.message_id },
-          text: `🎟️ <b>Bilhete recebido.</b> De qual post do canal é?${photo ? '\n<i>O print vai junto.</i>' : ''}`,
-          reply_markup: { inline_keyboard: [...abertos.map(p => [BTN(lab(p).slice(0, 60), `/cb ${codes[0]} ${p.id}`)]), [BTN('🔗 Só quero os links', `/cb ${codes[0]} 0`)]] } });
+          text: `🎟️ <b>Bilhete recebido.</b> De qual post é?${photo ? '\n<i>O print vai junto.</i>' : ''}`,
+          reply_markup: { inline_keyboard: [...abertos.map((p: any) => [BTN(((many ? `[${p.canal ?? ''}] ` : '') + postLabel(p)).slice(0, 60), `/cb ${codes[0]} ${p.id}`)]), [BTN('🔗 Só quero os links', `/cb ${codes[0]} 0`)]] } });
         return;
       }
+      await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true, text: await shareLinksText(codes, chatId) }); return;
     }
-    if (codes.length) { await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true, text: await shareLinksText(codes) }); return; }
   }
   // trocar a casa de um post do canal (botões do aviso "Postado no canal"): responde com um aviso rápido, sem nova mensagem
   if (cq && /^\/cs\s/.test(text)) {
-    const own = String(chatId) === (await cfg()).allowed[0];
-    const r = own ? await csCmd(text.trim().split(/\s+/).slice(1)) : { text: 'Só o dono do canal pode fazer isso.' };
+    const parts = text.trim().split(/\s+/).slice(1), own = await canEdit(await postCanal(parts[0] ?? ''), chatId);
+    const r = own ? await csCmd(parts) : { text: 'Só o dono do canal pode fazer isso.' };
     await TG('answerCallbackQuery', { callback_query_id: cq.id, text: r ? r.text.replace(/<[^>]+>/g, '') : '✅ Casa do post trocada' });
     return;
   }
@@ -1313,7 +1454,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canal', 'Canal: postagens automáticas'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canais', 'Canais: postagem automática e configuração'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

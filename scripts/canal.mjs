@@ -183,6 +183,135 @@ export function plan({ strat, slate, events, bot, now = Date.now() }) {
   return { date: slate?.meta?.date ?? strat?.date, gen: strat?.gen ?? null, singles: S.map(pack), multis: M.map(pack) };
 }
 
+// ======================= HUB DE CANAIS (pedido de 16/11) =======================
+// Vários canais (o dele, o do amigo e mais dois), cada um com a sua configuração (/canais no bot). Nenhum canal tem
+// prioridade: a cada rodada da divisão os canais escolhem um por vez, numa ordem que gira (por rodada e por dia). Cada
+// canal pode ter no máximo 30% de simples "repetidas" com os outros canais no dia (mesmo jogador + mesmo mercado; conta
+// para todos os canais que têm a entrada); cada múltipla repete no máximo 30% das pernas e nenhuma sai igual em dois canais.
+export const SHARE_CAP = .3;
+export const DEFAULT_SPECS = [ // slot = hora (Brasília) a partir da qual a múltipla sai
+  { nome: '10', min: 7, max: 10, lado: 'u', slot: 12 }, { nome: '10', min: 7, max: 10, lado: 'o', slot: 13 },
+  { nome: '15', min: 12, max: 17, lado: 'u', slot: 15 }, { nome: '15', min: 12, max: 17, lado: 'o', slot: 16 },
+  { nome: '25', min: 20, max: 25, lado: 'u', slot: 17 }, { nome: '25', min: 20, max: 25, lado: 'o', slot: 18 }];
+export const DEFAULT_CFG = { max: 20, oddMin: 1.4, oddMax: 3.5, evMin: .03, mercados: null, lado: 'ambos', multis: null };
+const LADO = { u: 'under', o: 'over', m: 'misto' };
+export const normCfg = c => ({ ...DEFAULT_CFG, ...(c ?? {}) });
+/* especificação da múltipla: faixa de odd (min–max), nº de pernas (ou livre: 2 a 6) e lado (u, o ou m = misto).
+   "odd 10 com 4 jogadores" vira { odd: 10, pernas: 4 } → faixa 8,5–11,5. band = nome único no dia ("10x4-under"). */
+export function specsOf(cfg) {
+  const raw = cfg.multis?.length ? cfg.multis : DEFAULT_SPECS, seen = {};
+  return raw.map((sp, i) => {
+    const odd = +sp.odd || null, min = +sp.min || (odd ? Math.round(odd * .85 * 100) / 100 : 7), max = +sp.max || (odd ? Math.round(odd * 1.15 * 100) / 100 : 10);
+    const pernas = +sp.pernas || null, lado = ['u', 'o', 'm'].includes(sp.lado) ? sp.lado : 'u';
+    let band = `${sp.nome ?? (odd ?? max)}${pernas ? 'x' + pernas : ''}-${LADO[lado]}`;
+    seen[band] = (seen[band] ?? 0) + 1; if (seen[band] > 1) band += '-' + seen[band];
+    const slot = +sp.slot || 12 + Math.round(i * 6 / Math.max(1, raw.length - 1)); // personalizadas: espalhadas das 12h às 18h
+    return { min, max, pernas, lado, band, slot };
+  });
+}
+const ident = x => `${x.pid}-${x.mk}`; // "repetida" = mesmo jogador no mesmo mercado
+/* todas as simples possíveis do dia (linhas da 99play do bot), com qualidade mínima; cada canal ainda aplica o seu filtro */
+export function singlesPool({ bot, slate, events = {}, now = Date.now() }) {
+  const gameOf = {};
+  for (const g of slate?.games ?? []) for (const t of [g.home, g.away]) gameOf[t] = g;
+  const out = [];
+  for (const r of bot?.rows ?? []) {
+    if (!r.c9 || !r.d || r.d < 1.3 || r.d > 5 || r.p < .55 || (r.e ?? -1) < 0 || r.e > .25 || (r.mn ?? 0) < 24 || (r.st && r.st !== 'ok')) continue;
+    if (!/^[AB]/.test(r.gr ?? '')) continue;
+    const g = gameOf[r.t]; if (!g?.timeUTC || Date.parse(g.timeUTC) <= now) continue;
+    if (r.t9 && (now - Date.parse(r.t9)) / 36e5 >= STALE_H) continue;
+    out.push({ key: `${r.id}-${r.m}-${r.s}`, pid: r.id, name: r.n, team: r.t, opp: r.o, away: g.away, home: g.home, game: g.id, ev: events[g.id] ?? null,
+      mk: r.m, side: r.s, line: +r.l, odd: +r.d, p: +r.p, edge: Math.round(+r.e * 1e4) / 1e4, tip: g.timeUTC, sq: r.sq ?? null, t9: r.t9 ?? null });
+  }
+  return out.sort((a, b) => b.edge - a.edge || b.p - a.p);
+}
+const fits = (x, c, legs = false) => x.odd >= c.oddMin && x.odd <= (legs ? Math.max(c.oddMax, 3.5) : c.oddMax) && (legs || x.edge >= c.evMin)
+  && (!c.mercados?.length || c.mercados.includes(x.mk)) && (legs || c.lado === 'ambos' || x.side === c.lado);
+const dayN = d => Math.floor(Date.parse(d + 'T12:00:00Z') / 864e5);
+/* divisão do dia. hub = { canais: [{ id, cfg }], postados: [{ canal_id, kind, pkey, band, legs: [{ pid, mk, side }] }] } */
+export function planHub({ bot, slate, events = {}, hub, now = Date.now() }) {
+  const date = slate?.meta?.date, chans = (hub?.canais ?? []).map(c => ({ id: c.id, cfg: normCfg(c.cfg) })).sort((a, b) => a.id - b.id);
+  const order = r => chans.map((_, i) => chans[(i + r + dayN(date)) % chans.length]);
+  const posted = hub?.postados ?? [];
+  // quem já usou cada "identidade" no dia (simples e pernas de múltiplas separadas)
+  const usedS = new Map(), usedM = new Map(), add = (m, k, id) => (m.get(k) ?? m.set(k, new Set()).get(k)).add(id);
+  for (const p of posted) for (const l of p.legs ?? []) add(p.kind === 'simples' ? usedS : usedM, ident(l), p.canal_id);
+  const sharedBy = (m, k, id) => [...(m.get(k) ?? [])].some(o => o !== id);
+  const S = {}, M = {};
+  // ---- simples: "repetida" conta para todos os canais que têm a entrada; ninguém passa de 30% das suas simples
+  const pool = singlesPool({ bot, slate, events, now });
+  const st = Object.fromEntries(chans.map(c => {
+    const mine = posted.filter(p => p.canal_id === c.id && p.kind === 'simples');
+    return [c.id, { need: Math.max(0, c.cfg.max - mine.length), cap: Math.floor(c.cfg.max * SHARE_CAP), shared: 0,
+      pids: new Set(mine.flatMap(p => (p.legs ?? []).map(l => l.pid))), list: pool.filter(x => fits(x, c.cfg)) }];
+  }));
+  for (const [k, hs] of usedS) if (hs.size > 1) for (const h of hs) if (st[h]) st[h].shared++;
+  for (const c of chans) S[c.id] = [];
+  const canTake = (x, id) => {
+    const hs = [...(usedS.get(ident(x)) ?? [])].filter(h => h !== id);
+    if (!hs.length) return true;
+    if (st[id].shared >= st[id].cap) return false;
+    return usedS.get(ident(x)).size > 1 || hs.every(h => !st[h] || st[h].shared < st[h].cap); // o outro canal também fica com uma repetida
+  };
+  for (let r = 0, moved = true; moved; r++) {
+    moved = false;
+    for (const c of order(r)) {
+      const k = st[c.id]; if (S[c.id].length >= k.need) continue;
+      const i = k.list.findIndex(x => !k.pids.has(x.pid) && canTake(x, c.id));
+      if (i < 0) continue;
+      const x = k.list.splice(i, 1)[0], hs = usedS.get(ident(x));
+      if (hs?.size) { k.shared++; if (hs.size === 1) for (const h of hs) if (st[h]) st[h].shared++; }
+      k.pids.add(x.pid); add(usedS, ident(x), c.id); S[c.id].push(x); moved = true;
+    }
+  }
+  // ---- múltiplas: cada uma pode repetir no máximo 30% das pernas (arredondado para cima) com múltiplas de outros
+  // canais; nunca duas iguais; entre as combinações possíveis, ganha a de maior chance com desconto por perna repetida
+  const legs0 = legPool({ bot, slate, events, now });
+  const legSt = Object.fromEntries(chans.map(c => {
+    const mine = posted.filter(p => p.canal_id === c.id && p.kind === 'multipla');
+    const done = new Set(mine.map(p => p.band));
+    return [c.id, { specs: specsOf(c.cfg).filter(sp => !done.has(sp.band)), used: new Set(mine.flatMap(p => (p.legs ?? []).map(l => l.pid))) }];
+  }));
+  const sigs = new Set(posted.filter(p => p.kind === 'multipla').map(p => (p.legs ?? []).map(ident).sort().join('|')));
+  for (const c of chans) M[c.id] = [];
+  const maxSpecs = Math.max(0, ...chans.map(c => legSt[c.id].specs.length));
+  for (let r = 0; r < maxSpecs; r++) for (const c of order(r)) {
+    const k = legSt[c.id], sp = k.specs[r]; if (!sp) continue;
+    const pool0 = legs0.filter(x => fits(x, c.cfg, true) && (sp.lado === 'm' || x.side === sp.lado)).sort((a, b) => b.p - a.p).slice(0, sp.pernas && sp.pernas > 6 ? 20 : 16);
+    const lo = sp.pernas ?? 2, hi = sp.pernas ?? 6;
+    let best = null;
+    const run = (pool, cap = SHARE_CAP, perGame = 1) => {
+      const rec = (i, legs, odd, prob, games, sh) => {
+        if (odd > sp.max) return;
+        if (odd >= sp.min && legs.length >= lo && legs.length <= hi && sh <= Math.ceil(legs.length * cap)) {
+          const score = prob * Math.pow(.85, sh);
+          if (!best || score > best.score) { const sig = legs.map(ident).sort().join('|'); if (!sigs.has(sig)) best = { legs: [...legs], odd, prob, score }; }
+        }
+        if (legs.length >= hi || sh > Math.ceil(hi * cap)) return;
+        for (let j = i; j < pool.length; j++) {
+          const x = pool[j]; if ((games.get(x.game) ?? 0) >= perGame || legs.some(l => l.pid === x.pid)) continue;
+          games.set(x.game, (games.get(x.game) ?? 0) + 1); legs.push(x);
+          rec(j + 1, legs, odd * x.odd, prob * x.p, games, sh + (sharedBy(usedM, ident(x), c.id) ? 1 : 0));
+          legs.pop(); games.set(x.game, games.get(x.game) - 1);
+        }
+      };
+      rec(0, [], 1, 1, new Map(), 0);
+    };
+    run(pool0.filter(x => !k.used.has(x.pid)));
+    if (!best) run(pool0); // sem pernas novas: pode repetir jogador de outra múltipla do mesmo canal
+    if (!best) run(pool0, .5); // dia magro: até metade das pernas repetidas com outros canais (nunca a múltipla igual)
+    if (!best && (sp.pernas ?? 0) >= 5) run(pool0, .5, 2); // muitas pernas e poucos jogos: até 2 jogadores do mesmo jogo
+    if (!best) continue;
+    const legs = best.legs.slice().sort((a, b) => Date.parse(a.tip) - Date.parse(b.tip));
+    legs.forEach(l => { k.used.add(l.pid); add(usedM, ident(l), c.id); });
+    sigs.add(legs.map(ident).sort().join('|'));
+    M[c.id].push({ key: `m${sp.band}-` + legs.map(keyOf).join('.'), band: sp.band, lado: sp.lado, slot: sp.slot, odd: Math.round(best.odd * 100) / 100, prob: Math.round(best.prob * 1000) / 1000, legs });
+  }
+  const packS = x => ({ ...x, img: `canal/s-${x.key}.jpg`, img365: `canal/365/s-${x.key}.jpg`, cap: caption(x) });
+  const packM = id => x => ({ ...x, img: `canal/m-${id}-${x.band}.jpg`, img365: `canal/365/m-${id}-${x.band}.jpg`, cap: caption(x) });
+  return { v: 2, date, canais: Object.fromEntries(chans.map(c => [c.id, { singles: S[c.id].map(packS), multis: M[c.id].map(packM(c.id)) }])) };
+}
+
 async function main() {
   const ROOT = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
   const J = f => JSON.parse(readFileSync(join(ROOT, 'data', f), 'utf8'));
@@ -190,14 +319,18 @@ async function main() {
   const stPath = join(ROOT, '..', 'data', 'odds-state.json');
   const c99 = existsSync(stPath) ? JSON.parse(readFileSync(stPath, 'utf8')).providers?.c99 : null;
   const events = c99?.date === slate.meta?.date ? Object.fromEntries(Object.entries(c99.events ?? {}).map(([g, v]) => [g, v.ev])) : {};
-  const P = plan({ strat, slate, events, bot: bot?.date === slate.meta?.date ? bot : null });
+  // hub de canais: configurações e o que já foi postado hoje (endpoint público da função canal, sem dados sensíveis)
+  const hub = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/canal?hub=1').then(r => r.ok ? r.json() : null).catch(() => null);
+  const botOk = bot?.date === slate.meta?.date ? bot : null;
+  const P = hub?.canais?.length && botOk ? { ...planHub({ bot: botOk, slate, events, hub }), gen: strat?.gen ?? null } : plan({ strat, slate, events, bot: botOk });
   const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(join(dir, '365'), { recursive: true });
   const font = f => readFileSync(join(ROOT, 'fonts', f)).toString('base64');
   const css = CSS(font); const css365 = CSS365(font);
   const { chromium } = await import('playwright');
   const b = await chromium.launch(); const pg = await b.newPage({ viewport: { width: 540, height: 800 }, deviceScaleFactor: 2 });
   let n = 0;
-  for (const x of [...P.singles, ...P.multis]) {
+  const all = P.v === 2 ? [...new Map(Object.values(P.canais).flatMap(c => [...c.singles, ...c.multis]).map(x => [x.img, x])).values()] : [...P.singles, ...P.multis];
+  for (const x of all) {
     await pg.setContent(page(css, cardHTML(x)), { waitUntil: 'load' });
     await (await pg.$('.phone')).screenshot({ path: join(ROOT, 'data', x.img), type: 'jpeg', quality: 90 }); n++;
     await pg.setContent(page365(css365, card365HTML(x)), { waitUntil: 'load' });
@@ -205,6 +338,8 @@ async function main() {
   }
   await b.close();
   writeFileSync(join(ROOT, 'data', 'canal.json'), JSON.stringify(P));
-  console.log(`canal: ${P.singles.length} simples, ${P.multis.length} múltiplas (${P.multis.map(m => m.band + '@' + m.odd).join(', ')}), ${n} cards`);
+  if (P.v === 2) for (const [id, c] of Object.entries(P.canais)) console.log(`canal ${id}: ${c.singles.length} simples, ${c.multis.length} múltiplas (${c.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
+  else console.log(`canal: ${P.singles.length} simples, ${P.multis.length} múltiplas (${P.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
+  console.log(`canal: ${n} cards`);
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main().catch(e => { console.error(e); process.exit(1); });
