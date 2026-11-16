@@ -97,8 +97,56 @@ function fill(cap: string, kind: string, link: string, k: Canal) {
   return cap.replace('{UN}', esc(un)).replace('{LINK}', link) + (!rod || rod === '0' ? '' : `\n\n<i>${esc(rod)}</i>`);
 }
 const resumo = (x: any) => legsOf(x).map((l: any) => `${esc(l.name)} · ${MKS[l.mk] ?? l.mk} ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)} @${n2(l.odd)}`).join('\n');
+// ---------- padrão de mensagem do canal (pedido de 16/11) ----------
+// O dono manda ao bot um post no padrão do canal (texto ou legenda, com os emojis personalizados). Guardamos o texto e as
+// "entities" do Telegram (negrito, citação, link, emoji personalizado...). Na hora de postar: a sequência do post de
+// exemplo (ou {SEQUENCIA}) vira a sequência da entrada, todo link vira o link da entrada, {LINK} vira o texto do link,
+// {ODD} e {JOGADOR} viram a odd e o(s) jogador(es). Offsets em UTF-16, como o Telegram (e o JavaScript) contam.
+type Ent = { type: string; offset: number; length: number; url?: string; custom_emoji_id?: string; language?: string };
+const SEQ_RE = /\d{1,2}(?:\s*-\s*\d{1,2}){4,}/;
+function tplApply(tpl: { text: string; entities?: Ent[] }, v: { seq: string; url: string; linkText: string; odd: string; names: string }) {
+  let text = tpl.text ?? '', ents: Ent[] = (tpl.entities ?? []).map(e => ({ ...e }));
+  const repl = (start: number, end: number, str: string, add?: Ent) => {
+    const d = str.length - (end - start);
+    text = text.slice(0, start) + str + text.slice(end);
+    ents = ents.flatMap(e => {
+      const eEnd = e.offset + e.length;
+      if (eEnd <= start) return [e];                                   // antes
+      if (e.offset >= end) return [{ ...e, offset: e.offset + d }];     // depois
+      if (e.offset <= start && eEnd >= end) return [{ ...e, length: e.length + d }]; // contém (ex.: citação com a sequência)
+      if (e.offset >= start && eEnd <= end) return e.type === 'custom_emoji' ? [] : [{ ...e, offset: start, length: str.length }]; // dentro
+      return [{ ...e, offset: Math.min(e.offset, start), length: Math.max(1, eEnd + d - Math.min(e.offset, start)) }];
+    });
+    if (add) ents.push({ ...add, offset: start, length: str.length });
+  };
+  const sub = (re: RegExp, str: string, add?: Ent) => { const m = re.exec(text); if (!m) return false; repl(m.index, m.index + m[0].length, str, add); return true; };
+  if (!sub(/\{SEQU[EÊ]NCIA\}|\{SEQ\}/i, v.seq || '—')) sub(SEQ_RE, v.seq || '—'); // nunca deixa a sequência do post de exemplo
+  while (sub(/\{ODD\}/i, v.odd)); while (sub(/\{JOGADORE?S?\}/i, v.names));
+  let linked = false;
+  for (const e of ents) if (e.type === 'text_link') { e.url = v.url; linked = true; }
+  if (sub(/\{LINK\}/i, v.linkText, { type: 'text_link', offset: 0, length: 0, url: v.url })) linked = true;
+  if (!linked) { const start = text.length + 2; text += '\n\n' + v.linkText; ents.push({ type: 'text_link', offset: start, length: v.linkText.length, url: v.url }); }
+  return { text, entities: ents.filter(e => e.length > 0 && e.offset >= 0 && e.offset + e.length <= text.length) };
+}
+async function tplCaption(x: any, kind: string, code: string | null, c: string, k: Canal) {
+  const legs = legsOf(x), seqs = legs.filter((l: any) => l.sq?.length);
+  const seq = legs.length === 1 ? (seqs[0]?.sq ?? []).slice(0, 10).join('-') : seqs.map((l: any) => `${l.name}: ${l.sq.slice(0, 10).join('-')}`).join('\n');
+  const url = code ? await shareLink(code, c, k) : await evLink(legs[0].ev, c);
+  return tplApply(k.cfg.tpl, { seq, url, linkText: code ? 'Clique aqui para pegar o bilhete pronto.' : `Clique aqui para abrir o jogo na ${CASAS[c].nome}.`,
+    odd: n2(+x.odd), names: legs.map((l: any) => l.name).join(', ') });
+}
+// manda com as entities; se o Telegram recusar os emojis personalizados (bot sem permissão no canal), manda sem eles
+async function tgCaption(method: string, body: any, capKey: 'caption' | 'media' = 'caption') {
+  let r = await TG(method, body);
+  if (!r.ok && /emoji/i.test(r.description ?? '')) {
+    const strip = (o: any) => ({ ...o, caption_entities: (o.caption_entities ?? []).filter((e: Ent) => e.type !== 'custom_emoji') });
+    r = await TG(method, capKey === 'media' ? { ...body, media: strip(body.media) } : strip(body));
+    if (r.ok) r.semEmoji = true;
+  }
+  return r;
+}
 const minLegs = (x: any) => legsOf(x).map((l: any) => ({ pid: l.pid, name: l.name, team: l.team, opp: l.opp, home: l.home, away: l.away, game: l.game, ev: l.ev,
-  mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip }));
+  mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip, sq: l.sq ?? null }));
 const img365 = (img: string) => img.replace(/^canal\//, 'canal/365/');
 // botões embaixo do post no canal (controles no canal, não no privado do bot). Só o dono do canal consegue usar;
 // botoes=false na configuração do canal tira (ex.: num canal público).
@@ -110,9 +158,15 @@ function chKb(id: number, c: string, k: Canal) {
 // ---------- postar ----------
 async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: string, k: Canal, to?: string, casa?: string) {
   const chat = to ?? String(k.chat_id), c = casaOf(casa ?? k.cfg.casa);
-  const caption = fill(x.cap, kind, await linkHTML(x, null, c, k), k);
   const photo = APP + (c === '365' ? (x.img365 ?? img365(x.img)) : x.img) + '?v=' + encodeURIComponent(gen ?? Date.now());
-  const r = await TG('sendPhoto', { chat_id: chat, photo, caption: to ? `[PRÉVIA · ${esc(k.title ?? '')}] ` + caption : caption, parse_mode: 'HTML' });
+  let r: any;
+  if (k.cfg.tpl?.text) { // padrão de mensagem do canal (com emojis personalizados)
+    const t = await tplCaption(x, kind, null, c, k), pre = to ? `[PRÉVIA · ${k.title ?? ''}]\n` : '';
+    r = await tgCaption('sendPhoto', { chat_id: chat, photo, caption: pre + t.text, caption_entities: t.entities.map(e => ({ ...e, offset: e.offset + pre.length })) });
+  } else {
+    const caption = fill(x.cap, kind, await linkHTML(x, null, c, k), k);
+    r = await TG('sendPhoto', { chat_id: chat, photo, caption: to ? `[PRÉVIA · ${esc(k.title ?? '')}] ` + caption : caption, parse_mode: 'HTML' });
+  }
   if (!r.ok || to) return r;
   const fid = r.result?.photo?.at?.(-1)?.file_id;
   const [row] = await sb('channel_posts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({
@@ -124,14 +178,16 @@ async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: str
 }
 // troca a imagem e a legenda de um post já publicado (casa nova, bilhete pronto ou print do dono)
 async function repaint(row: any, c: string, code: string | null, photo: string | null) {
-  const k = await canalById(row.canal_id), chat = String(k.chat_id), caption = fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code, c, k), k);
+  const k = await canalById(row.canal_id), chat = String(k.chat_id);
+  const T = k.cfg.tpl?.text ? await tplCaption({ legs: row.legs, odd: row.odd }, row.kind, code, c, k) : null;
+  const capFields = T ? { caption: T.text, caption_entities: T.entities } : { caption: fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code, c, k), k), parse_mode: 'HTML' };
   const fids = { ...(row.fids ?? {}) };
   const media = photo ?? fids.print ?? fids[c] ?? (APP + (c === '365' ? img365(row.img) : row.img) + '?v=' + Date.now());
   const kb = chKb(row.id, c, k);
-  let r = await TG('editMessageMedia', { chat_id: chat, message_id: row.channel_msg_id, media: { type: 'photo', media, caption, parse_mode: 'HTML' }, ...(kb ? { reply_markup: kb } : {}) });
+  let r = await tgCaption('editMessageMedia', { chat_id: chat, message_id: row.channel_msg_id, media: { type: 'photo', media, ...capFields }, ...(kb ? { reply_markup: kb } : {}) }, 'media');
   if (!r.ok && /not modified/i.test(r.description ?? '')) r = { ok: true };
   if (!r.ok) { // imagem antiga já saiu da pauta: troca só a legenda
-    r = await TG('editMessageCaption', { chat_id: chat, message_id: row.channel_msg_id, caption, parse_mode: 'HTML', ...(kb ? { reply_markup: kb } : {}) });
+    r = await tgCaption('editMessageCaption', { chat_id: chat, message_id: row.channel_msg_id, ...capFields, ...(kb ? { reply_markup: kb } : {}) });
     if (!r.ok && /not modified/i.test(r.description ?? '')) r = { ok: true };
   } else if (r.result?.photo) { const f = r.result.photo.at(-1).file_id; if (photo) fids.print = f; else if (!fids.print) fids[c] = f; }
   if (!r.ok) return { ok: false, erro: r.description };

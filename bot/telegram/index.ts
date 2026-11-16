@@ -1218,6 +1218,11 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
     return { text: `🏷️ <b>Mercados</b> · ${esc(k.title)}\n<i>Toque para ligar/desligar. Vale para as simples e para as pernas das múltiplas.</i>`,
       kb: { inline_keyboard: [...chunk(MK_ORDER.map(m => BTN(`${on(m) ? '✅' : '▫️'} ${MK_BTN[m]}`, `/cf ${k.id} mk ${m}`)), 3), [BTN('✅ Todos', `/cf ${k.id} mk all`)], back] } };
   }
+  if (scr === 'tpl') {
+    const t = c.tpl, n = (t?.entities ?? []).filter((e: any) => e.type === 'custom_emoji').length;
+    return { text: `📝 <b>Padrão de mensagem</b> · ${esc(k.title)}\n<blockquote>${t?.text ? `Personalizado${n ? ` · ${n} emoji(s) personalizado(s)` : ''}:\n${esc(t.text).slice(0, 600)}` : 'Padrão do bot (🏀 NBA 🏀 / 💰 unidade / sequência / link)'}</blockquote>\n<i>Mande um post no padrão do seu canal (copie ou encaminhe, com os emojis personalizados). A sequência dele vira a sequência de cada entrada e o link vira o link da entrada. Também dá para usar {SEQUENCIA}, {LINK}, {ODD} e {JOGADOR}.</i>\n<i>⚠️ Emoji personalizado em canal: o Telegram só deixa bots que têm um nome de usuário extra do Fragment. Sem isso, o post sai com os emojis comuns no lugar.</i>`,
+      kb: { inline_keyboard: [[BTN('📝 Enviar novo padrão', `/cf ${k.id} asktpl`)], ...(t?.text ? [[BTN('👀 Ver prévia', `/cf ${k.id} tplprev`), BTN('↩️ Voltar ao padrão do bot', `/cf ${k.id} tplreset`)]] : []), back] } };
+  }
   if (scr === 'mais') return { text: `⚙️ <b>Mais opções</b> · ${esc(k.title)}`, kb: { inline_keyboard: [
     [BTN(`${c.botoes ? '✅' : '▫️'} Botões 99play/BR365 nos posts`, `/cf ${k.id} botoes ${c.botoes ? 0 : 1}`)],
     [BTN(`${c.resultado ? '✅' : '▫️'} Responder ✅ GREEN / ❌ RED no canal`, `/cf ${k.id} resultado ${c.resultado ? 0 : 1}`)],
@@ -1246,7 +1251,7 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
 <blockquote>Simples: até <b>${c.max}</b>/dia · odd <b>${n2(+c.oddMin)}–${n2(+c.oddMax)}</b> · EV ${pct(+c.evMin)}+ · ${LADO_TXT[c.lado] ?? c.lado}
 Mercados: ${esc(mk)}
 Múltiplas: ${specBands(k).length}${c.multis?.length ? '' : ' (padrão 10/15/25 over e under)'}
-Casa: <b>${c.casa === '365' ? 'BR365' : '99play'}</b> · começa às ${c.inicio}h
+Casa: <b>${c.casa === '365' ? 'BR365' : '99play'}</b> · começa às ${c.inicio}h · mensagem: ${c.tpl?.text ? 'padrão do canal' : 'padrão do bot'}
 Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(r => r.kind === 'multipla').length} múltiplas · ${rows.filter(r => r.status === 'green').length} ✅ ${rows.filter(r => r.status === 'red').length} ❌</blockquote>`;
   return { text, kb: { inline_keyboard: [
     [BTN('🎯 Odd mínima', `/cn ${k.id} omin`), BTN('📈 Odd máxima', `/cn ${k.id} omax`)],
@@ -1254,7 +1259,8 @@ Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(
     [BTN('🏷️ Mercados', `/cn ${k.id} mk`), BTN('⚖️ Lado', `/cn ${k.id} lado`)],
     [BTN('🧩 Múltiplas', `/cn ${k.id} mul`), BTN('🏠 Casa', `/cn ${k.id} casa`)],
     [BTN('🔗 Links de afiliado', `/cn ${k.id} refs`), BTN('⏰ Horário', `/cn ${k.id} ini`)],
-    [BTN('⚙️ Mais opções', `/cn ${k.id} mais`), c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`)],
+    [BTN('📝 Padrão de mensagem', `/cn ${k.id} tpl`), BTN('⚙️ Mais opções', `/cn ${k.id} mais`)],
+    [c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`)],
     [BTN('⬅️ Canais', '/canais')]] } };
 }
 // /cf <canal> <campo> <valor>: grava e volta para a tela certa
@@ -1282,6 +1288,15 @@ async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
     cur.push({ odd: +odd, pernas: +pernas || null, lado: ['u', 'o', 'm'].includes(lado) ? lado : 'u' });
     await saveCfg(k, { multis: cur }); return cnCmd(chatId, [id, 'mul']);
   }
+  if (field === 'asktpl') {
+    await putCfgKey('PEND_' + chatId, `tpl ${k.id}`);
+    return { text: `📝 Mande agora <b>um post no padrão do canal</b>: copie e cole ou encaminhe (pode ser a foto com a legenda). Mantenha os emojis personalizados, a citação da sequência e o link: eu troco a sequência e o link em cada entrada.`, kb: { inline_keyboard: [[BTN('✖️ Cancelar', `/cn ${id} tpl`)]] } };
+  }
+  if (field === 'tplreset') { await saveCfg(k, { tpl: null }); return cnCmd(chatId, [id, 'tpl']); }
+  if (field === 'tplprev') {
+    const r = await canalFn('preview', `canal=${k.id}`);
+    return { text: r.ok ? `👀 Mandei aqui a prévia de uma simples e de uma múltipla no padrão do canal ${esc(k.title ?? '')}.` : `Sem prévia agora: ${esc(r.erro ?? 'pauta vazia')}`, kb: { inline_keyboard: [[BTN('⬅️ Padrão de mensagem', `/cn ${id} tpl`)]] } };
+  }
   if (field === 'askref' && ['99', '365'].includes(v)) {
     await putCfgKey('PEND_' + chatId, `ref${v} ${k.id}`);
     return { text: `🔗 Mande agora o seu <b>link de indicação da ${v === '99' ? '99play' : 'BR365'}</b> (o do painel de afiliado, ex.: <code>https://${v === '99' ? '99play.im' : 'br365.io'}/?ref=abc12</code>) ou só o código do ref.`, kb: { inline_keyboard: [[BTN('✖️ Cancelar', `/cn ${id} refs`)]] } };
@@ -1289,11 +1304,21 @@ async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
   return cnCmd(chatId, [id]);
 }
 // resposta ao "mande o seu link de indicação": grava o ref no canal
-async function pendingText(chatId: number, text: string): Promise<boolean> {
+async function pendingText(chatId: number, text: string, m: any = null): Promise<boolean> {
   const pend = await getCfgKey('PEND_' + chatId); if (!pend || text.startsWith('/')) return false;
   const [what, id] = pend.split(' '), k = await canalById(id);
   await delCfgKey('PEND_' + chatId);
   if (!(await canEdit(k, chatId))) return false;
+  if (what === 'tpl') { // padrão de mensagem: texto (ou legenda) + entities, com os emojis personalizados
+    const t = m?.text ?? m?.caption ?? text, ents = (m?.entities ?? m?.caption_entities ?? [])
+      .filter((e: any) => ['bold', 'italic', 'underline', 'strikethrough', 'spoiler', 'code', 'pre', 'blockquote', 'expandable_blockquote', 'text_link', 'custom_emoji'].includes(e.type))
+      .map((e: any) => ({ type: e.type, offset: e.offset, length: e.length, ...(e.url ? { url: e.url } : {}), ...(e.custom_emoji_id ? { custom_emoji_id: e.custom_emoji_id } : {}), ...(e.language ? { language: e.language } : {}) }));
+    await saveCfg(k, { tpl: { text: t, entities: ents } });
+    const n = ents.filter((e: any) => e.type === 'custom_emoji').length, seq = /\d{1,2}(?:\s*-\s*\d{1,2}){4,}|\{SEQU/i.test(t), link = ents.some((e: any) => e.type === 'text_link') || /\{LINK\}/i.test(t);
+    await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `✅ <b>Padrão salvo</b> para ${esc(k.title ?? '')}.\n<blockquote>${n} emoji(s) personalizado(s) · sequência: ${seq ? 'achei ✅' : 'não achei (vai sem)'} · link: ${link ? 'achei ✅' : 'vou pôr no fim'}</blockquote>\nTe mando a prévia agora.` });
+    await canalFn('preview', `canal=${k.id}`);
+    return true;
+  }
   const ref = (/[?&]ref=([A-Za-z0-9_-]+)/.exec(text) ?? /^\s*([A-Za-z0-9_-]{3,32})\s*$/.exec(text))?.[1];
   if (!ref) { await TG('sendMessage', { chat_id: chatId, text: 'Não achei o ref nesse link. Tente de novo pelo /canais.' }); return true; }
   await saveCfg(k, { [what === 'ref365' ? 'ref365' : 'ref99']: ref });
@@ -1323,7 +1348,7 @@ async function handle(update: any) {
   await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
     body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
   // resposta a um pedido do /canais (ex.: "mande o seu link de indicação")
-  if (!cq && update.message?.text && await pendingText(chatId, update.message.text)) return;
+  if (!cq && (update.message?.text || update.message?.caption) && await pendingText(chatId, update.message.text ?? update.message.caption, update.message)) return;
   // link de bilhete da 99play ou da BR365 (mesmo shareCode nas duas) compartilhado no privado do bot
   if (!cq) {
     const codes = [...new Set([...text.matchAll(SHARE_RE)].map(m => m[1]))];
