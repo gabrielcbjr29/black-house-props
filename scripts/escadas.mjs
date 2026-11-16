@@ -30,7 +30,8 @@ export function escadas(slate, { now = Date.now(), w = .4 } = {}) {
     const legs = ESC_MK.map(m => {
       const pr = P[m], b = pr.book.books['99play'], line = pr.book.line;
       const e = evaluate(pr, { line, oOver: b.o, oUnder: b.u, book: '99play' }, { w });
-      return { mk: m, line, odd: b.o, p: e.over.p, pr, side: 'over', l10: e.over.hits.L10, sq: pr.vals.slice(0, 10) };
+      // projeção usada na chance (Modelo BH misturado com o mercado) e a defesa do adversário nessa estatística (30ª = cede mais)
+      return { mk: m, line, odd: b.o, p: e.over.p, pr, side: 'over', l10: e.over.hits.L10, sq: pr.vals.slice(0, 10), proj: Math.round(e.muF * 10) / 10, dv: pr.rank?.rank ? [pr.rank.rank, pr.rank.of] : null };
     });
     const pm = parlayProb(legs.map(l => ({ pr: l.pr, p: l.p, line: l.line, side: 'over' }))).prob;
     const n10 = Math.min(10, ...legs.map(l => l.pr.vals.length));
@@ -39,7 +40,7 @@ export function escadas(slate, { now = Date.now(), w = .4 } = {}) {
     const pj = (pm * 15 + j10) / (15 + n10);
     out.push({
       pid, name: p.name, team: p.team, opp: any.opp, game: g.id, home: g.home, away: g.away, tip: g.timeUTC, num: p.num ?? null,
-      legs: legs.map(l => ({ mk: l.mk, line: l.line, odd: r3(l.odd), p: r3(l.p), l10: l.l10, sq: l.sq })),
+      legs: legs.map(l => ({ mk: l.mk, line: l.line, odd: r3(l.odd), p: r3(l.p), l10: l.l10, sq: l.sq, proj: l.proj, dv: l.dv })), isHome: g.home === p.team,
       pj: r3(pj), pm: r3(pm), fair: r3(1 / pj), sep: r3(legs.reduce((a, l) => a * l.odd, 1)), ind: r3(legs.reduce((a, l) => a * l.p, 1)), j10: [j10, n10], min: Math.round(any.ctx.exp),
     });
   }

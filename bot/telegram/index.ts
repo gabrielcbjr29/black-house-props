@@ -1054,30 +1054,52 @@ async function sendCards(chatId: number, arg?: string) {
 // public/data/escadas.json vem do pipeline (scripts/escadas.mjs): chance das três juntas com a correlação do jogador,
 // misturada com a forma recente; odd justa = 1/chance; duplas e triplas de jogos diferentes.
 const pc0 = (x: number) => Math.round(x * 100) + '%';
-const escLeg = (l: any) => `${({ PTS: 'PTS', REB: 'REB', AST: 'AST' } as any)[l.mk]} +${n1(+l.line)}`;
+const ESC_IC: Record<string, string> = { PTS: '🏀', REB: '🙌', AST: '🎯' }, ESC_AB: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast' };
+const escVs = (x: any) => x.isHome ? `${x.team} x ${x.opp}` : `${x.team} @ ${x.opp}`;
+const escGap = (l: any) => { const d = Math.round((l.proj - l.line) * 10) / 10; return `${d >= 0 ? '+' : ''}${n1(d)}`; };
+// defesa do adversário na estatística: 30ª = a que mais cede (bom para o "mais de")
+const escDv = (l: any) => l.dv ? ` · 🛡️ ${l.dv[0]}ª/${l.dv[1]}${l.dv[0] >= l.dv[1] - 5 ? ' favorável' : l.dv[0] <= 6 ? ' difícil' : ''}` : '';
+function escItem(x: any, i: number) {
+  return `<b>${i}. ${esc(x.name)}</b> <i>${escVs(x)} · ${hourBR(x.tip)}</i>
+🪜 ${x.legs.map((l: any) => `<b>+${n1(+l.line)}</b> ${ESC_AB[l.mk]}`).join(' · ')} · <b>${pc0(x.pj)}</b> as 3
+🧠 Projeção: ${x.legs.map((l: any) => `<b>${n1(l.proj)}</b> ${ESC_AB[l.mk]} <i>(${escGap(l)})</i>`).join(' · ')}
+📊 Juntas L10 <b>${x.j10[0]}/${x.j10[1]}</b> · cada: ${x.legs.map((l: any) => hitTxt(l.l10)).join(' · ')} · ⏱️ ${x.min} min
+💰 Odd justa <b>${n2(x.fair)}</b>`;
+}
 async function escadasCmd(arg: string): Promise<Out> {
   const E = await fetch(APP_URL + 'data/escadas.json?t=' + Math.floor(Date.now() / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
-  const back = [BTN('🪜 Escadas', '/escadas'), BTN('👥 Duplas', '/escadas d'), BTN('👥 Triplas', '/escadas t')];
-  if (!E?.list?.length || E.date !== etDate()) return { text: '🪜 <b>Escadas</b>\nAinda sem escadas hoje: elas saem quando a 99play tem as linhas de pontos, rebotes e assistências e o leitor está lendo.', kb: { inline_keyboard: [HOME] } };
+  const nav = [BTN('🪜 Escadas', '/escadas'), BTN('👥 Duplas', '/escadas d'), BTN('👥 Triplas', '/escadas t')];
+  if (!E?.list?.length || E.date !== etDate()) return { text: '<b>🪜 ESCADAS DO DIA</b>\n\nAinda sem escadas hoje: elas saem quando a 99play tem as linhas de pontos, rebotes e assistências e o leitor está lendo.', kb: { inline_keyboard: [HOME] } };
   const by = Object.fromEntries(E.list.map((x: any) => [x.pid, x]));
-  const head = (x: any) => `<b>${esc(x.name)}</b> (${x.team}) x ${x.opp} · ${hourBR(x.tip)}`;
-  const legs = (x: any) => x.legs.map(escLeg).join(' · ');
+  const sub0 = `<i>${dateBR(E.date)} · ${E.list.length} jogadores com as 3 linhas na 99play · atualizado ${hourBR(E.gen)}</i>`;
   const [sub, a1] = arg.split(/\s+/);
   if (sub === 'd' || sub === 't') {
     const C = sub === 'd' ? E.duplas : E.triplas;
-    const txt = (C ?? []).map((c: any, i: number) => `<b>${i + 1}. ${sub === 'd' ? 'Dupla' : 'Tripla'}</b> · as escadas juntas: <b>${pc0(c.p)}</b> · odd justa <b>${n2(c.fair)}</b>\n<blockquote>${c.pids.map((id: string) => by[id] ? `${head(by[id])}\n${legs(by[id])}` : '').join('\n')}</blockquote>`).join('\n');
-    return { text: `🪜 <b>${sub === 'd' ? 'DUPLAS' : 'TRIPLAS'} DE ESCADAS</b> <i>(jogos diferentes)</i>\n\n${txt || 'Sem combinação hoje.'}\n<i>Monte cada escada no Criar Aposta e junte na múltipla. Se a casa pagar acima da odd justa, tem valor.</i>`, kb: { inline_keyboard: [back, HOME] } };
+    const txt = (C ?? []).map((c: any, i: number) => `<b>${sub === 'd' ? 'DUPLA' : 'TRIPLA'} ${i + 1}</b> · as escadas juntas <b>${pc0(c.p)}</b> · odd justa <b>${n2(c.fair)}</b>\n` +
+      c.pids.filter((id: string) => by[id]).map((id: string) => { const x = by[id]; return `▫️ <b>${esc(x.name)}</b> <i>${escVs(x)} · ${hourBR(x.tip)}</i>\n   ${x.legs.map((l: any) => `+${n1(+l.line)} ${ESC_AB[l.mk]}`).join(' · ')} · ${pc0(x.pj)}`; }).join('\n')).join('\n\n');
+    return { text: `<b>🪜 ${sub === 'd' ? 'DUPLAS' : 'TRIPLAS'} DE ESCADAS · MODELO BH</b>\n${sub0}\n\n${txt || 'Sem combinação hoje.'}\n\n<i>Cada escada vai num Criar Aposta (jogos diferentes) e as escadas juntas formam a múltipla. Se a casa pagar acima da odd justa, tem valor.</i>` + FOOT,
+      kb: { inline_keyboard: [nav, HOME] } };
   }
-  if (sub === 'v' && by[a1]) { // detalhe: linhas, chance de cada uma, sequências
+  if (sub === 'v' && by[a1]) { // detalhe: cada linha com projeção, defesa, sequência
     const x = by[a1];
-    const lines = x.legs.map((l: any) => `${escLeg(l)} @${n2(l.odd)} · ${pc0(l.p)} · ${l.l10?.[0]}/${l.l10?.[1]} nos últ. 10\n🔢 <code>${(l.sq ?? []).join('-')}</code>`).join('\n');
-    return { text: `🪜 ${head(x)}\n<blockquote>${lines}</blockquote>\n✅ <b>As três juntas: ${pc0(x.pj)}</b> · bateram juntas em ${x.j10[0]}/${x.j10[1]} dos últimos 10 · ~${x.min} min\n💰 Odd justa: <b>${n2(x.fair)}</b>\n<i>Pagando acima de ${n2(x.fair)} no Criar Aposta, tem valor. As três separadas pagariam ${n2(x.sep)}; a casa paga menos no Criar Aposta porque as linhas andam juntas.</i>`,
-      kb: { inline_keyboard: [back, HOME] } };
+    const legTxt = x.legs.map((l: any) => `${ESC_IC[l.mk]} <b>${MK[l.mk][0].toUpperCase() + MK[l.mk].slice(1)} +${n1(+l.line)}</b> @${n2(l.odd)} · <b>${pc0(l.p)}</b>
+🧠 Projeção <b>${n1(l.proj)}</b> <i>(${escGap(l)} da linha)</i>${escDv(l)}
+${sqLine(l.sq, l.line, 'o')}
+🔢 <code>${(l.sq ?? []).join('-')}</code>`).join('\n\n');
+    return { text: `<b>🪜 ${esc(x.name)}</b> <i>${escVs(x)} · ${hourBR(x.tip)} · ⏱️ ${x.min} min</i>
+<blockquote>✅ <b>As 3 juntas: ${pc0(x.pj)}</b> · odd justa <b>${n2(x.fair)}</b>
+📊 Bateram as 3 juntas em <b>${x.j10[0]}/${x.j10[1]}</b> dos últimos 10
+💡 Separadas pagariam ${n2(x.sep)}: no Criar Aposta a casa paga menos, porque as linhas andam juntas</blockquote>
+
+${legTxt}
+
+<i>Pagando acima de ${n2(x.fair)} no Criar Aposta, tem valor. 🔢 = últimos 10 (mais recente primeiro).</i>` + FOOT,
+      kb: { inline_keyboard: [nav, HOME] } };
   }
-  const top = E.list.slice(0, 10);
-  const txt = top.map((x: any, i: number) => `<b>${i + 1}.</b> ${head(x)}\n${legs(x)} · <b>${pc0(x.pj)}</b> · justa <b>${n2(x.fair)}</b> · ${x.j10[0]}/${x.j10[1]} últ. 10`).join('\n\n');
-  return { text: `🪜 <b>ESCADAS DO DIA</b> · pontos + rebotes + assistências do mesmo jogador\n<i>Linhas da 99play · % = chance das três baterem juntas (correlação do jogador + forma recente)</i>\n\n${txt}\n\n<i>Toque no número para ver as sequências. Odd justa = 1 ÷ chance: se o Criar Aposta pagar acima, tem valor.</i>`,
-    kb: { inline_keyboard: [...chunk(top.map((x: any, i: number) => BTN(String(i + 1), `/escadas v ${x.pid}`)), 5), back, HOME] } };
+  const top = E.list.slice(0, 8);
+  return { text: `<b>🪜 ESCADAS DO DIA · MODELO BH</b>\n${sub0}\n<i>Pontos + rebotes + assistências "mais de" do mesmo jogador (Criar Aposta). % = chance das 3 baterem juntas.</i>\n\n` +
+    top.map((x: any, i: number) => escItem(x, i + 1)).join('\n\n') + `\n\n<i>🧠 Projeção do Modelo BH (entre parênteses, a folga sobre a linha). Toque no número para ver sequências e defesa. Odd justa = 1 ÷ chance: se o Criar Aposta pagar acima, tem valor.</i>` + FOOT,
+    kb: { inline_keyboard: [...chunk(top.map((x: any, i: number) => BTN(`${i + 1}. ${x.name.split(' ').slice(-1)[0]}`, `/escadas v ${x.pid}`)), 4), nav, HOME] } };
 }
 
 // ---------- hub de canais do Telegram (postagem automática na função canal) ----------
