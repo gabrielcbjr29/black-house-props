@@ -1066,6 +1066,48 @@ As postagens automáticas começam na próxima rodada (a partir das 10h). Use /c
   if (own) await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Usar este canal para as postagens automáticas?`,
     reply_markup: { inline_keyboard: [[{ text: '✅ Usar este canal', callback_data: `/canal set:${ch.id}` }]] } });
 }
+// ---------- controles dentro do canal (pedido de 16/11: nada disso no privado do bot) ----------
+const SHARE_RE = /(?:99play|br365)\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi;
+const postLabel = (p: any) => (p.kind === 'multipla' ? `Múltipla @${n2(+p.odd)} · ${new Set((p.legs ?? []).map((l: any) => l.game)).size} jogos`
+  : `${p.legs?.[0]?.name ?? '?'} · ${MKS[p.legs?.[0]?.mk] ?? p.legs?.[0]?.mk} ${p.legs?.[0]?.side === 'o' ? 'mais' : 'menos'} ${n1(+p.legs?.[0]?.line)}`).slice(0, 60);
+const delMsgs = (chat: number, ids: number[]) => Promise.all(ids.filter(Boolean).map(id => TG('deleteMessage', { chat_id: chat, message_id: id })));
+// o dono postou no canal um link de bilhete (respondendo um post, ou compartilhando direto da casa)
+async function canalPost(cp: any) {
+  const text = cp.text ?? cp.caption ?? '';
+  const codes = [...new Set([...text.matchAll(SHARE_RE)].map(m => m[1]))];
+  if (!codes.length) return;
+  const ch = cp.chat.id, photo = cp.photo?.at?.(-1)?.file_id ?? '', code = codes[0];
+  if (cp.reply_to_message) {
+    const r = await canalFn('relink', `ch=${cp.reply_to_message.message_id}&code=${encodeURIComponent(code)}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
+    if (r.ok) { await delMsgs(ch, [cp.message_id]); return; }
+    if (r.erro !== 'post não encontrado') { await TG('sendMessage', { chat_id: ch, disable_notification: true, reply_parameters: { message_id: cp.message_id }, text: `Não consegui atualizar o post: ${r.erro ?? 'erro'}` }); return; }
+  }
+  const abertos: any[] = await canalFn('abertos', '').catch(() => []);
+  if (!Array.isArray(abertos) || !abertos.length) return;
+  const q = await TG('sendMessage', { chat_id: ch, disable_notification: true, reply_parameters: { message_id: cp.message_id }, text: '🎟️ De qual post é este bilhete?',
+    reply_markup: { inline_keyboard: [...abertos.map(p => [BTN(postLabel(p), `/cb ${code} ${p.id}`)]), [BTN('✖️ Cancelar', `/cb ${code} x`)]] } });
+  await putCfgKey('CANAL_PEND_' + code, JSON.stringify({ photo, del: [cp.message_id, q.result?.message_id] }));
+}
+// botões dentro do canal: trocar a casa do post (/cs) ou ligar o bilhete ao post (/cb); só o dono
+async function canalCb(cq: any) {
+  const data: string = cq.data ?? '', ch = cq.message.chat.id;
+  if (String(cq.from?.id) !== (await cfg()).allowed[0]) { await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Só o dono do canal pode usar estes botões.' }); return; }
+  if (/^\/cs\s/.test(data)) {
+    const r = await csCmd(data.trim().split(/\s+/).slice(1));
+    await TG('answerCallbackQuery', { callback_query_id: cq.id, text: r ? r.text.replace(/<[^>]+>/g, '') : '✅ Casa do post trocada' });
+    return;
+  }
+  const m = /^\/cb (\S+) (\S+)$/.exec(data); if (!m) { await TG('answerCallbackQuery', { callback_query_id: cq.id }); return; }
+  const [, code, id] = m; let pend: any = {};
+  try { pend = JSON.parse((await getCfgKey('CANAL_PEND_' + code)) ?? '{}'); } catch { pend = {}; }
+  let ok = id === 'x', txt = 'Cancelado';
+  if (id !== 'x') {
+    const r = await canalFn('relink', `id=${encodeURIComponent(id)}&code=${encodeURIComponent(code)}${pend.photo ? '&photo=' + encodeURIComponent(pend.photo) : ''}`);
+    ok = !!r.ok; txt = r.ok ? `✅ Bilhete pronto na ${r.casa}${r.imagem ? ' (com o print)' : ''}` : `Não consegui: ${r.erro ?? 'erro'}`;
+  }
+  await TG('answerCallbackQuery', { callback_query_id: cq.id, text: txt });
+  if (ok) { await delMsgs(ch, [cq.message.message_id, ...(pend.del ?? [])]); await sb(`bot_config?key=eq.CANAL_PEND_${code}`, { method: 'DELETE' }).catch(() => null); }
+}
 async function canalFn(action: string, qs: string): Promise<any> {
   const secret = (await cfg()).secret;
   return fetch(`${FN('canal')}?${action}=${encodeURIComponent(secret)}${qs ? '&' + qs : ''}`).then(r => r.json()).catch(e => ({ ok: false, erro: String(e) }));
@@ -1079,7 +1121,8 @@ async function shareLinksText(codes: string[]) {
 async function cbCmd(chatId: number, rest: string[]): Promise<Out> {
   const [code, id] = rest; if (!code) return { text: 'Bilhete não encontrado.' };
   if (!id || id === '0') return { text: await shareLinksText([code]) };
-  const photo = await getCfgKey('CANAL_PEND_' + code);
+  const pendRaw = await getCfgKey('CANAL_PEND_' + code); let photo = pendRaw ?? '';
+  try { const j = JSON.parse(pendRaw ?? ''); if (j && typeof j === 'object') photo = j.photo ?? ''; } catch { /* print salvo como texto */ }
   const r = await canalFn('relink', `id=${encodeURIComponent(id)}&code=${encodeURIComponent(code)}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
   if (photo) await sb(`bot_config?key=eq.CANAL_PEND_${code}`, { method: 'DELETE' }).catch(() => null);
   return { text: r.ok ? `✅ Post do canal atualizado: bilhete pronto na <b>${esc(r.casa ?? '')}</b>${r.imagem ? ' e o seu print' : ''}.` : `Não consegui atualizar o post: ${esc(r.erro ?? 'erro')}` };
@@ -1114,8 +1157,10 @@ Conferidas: ${rows.filter(r => r.status === 'green').length} ✅ · ${rows.filte
 
 async function handle(update: any) {
   const cm = update.my_chat_member, cpost = update.channel_post;
+  if (cpost && String(cpost.chat?.id) === (await getCfgKey('CANAL_ID'))) { await canalPost(cpost); return; }
   if (cm?.chat?.type === 'channel' || cpost?.chat?.type === 'channel') { await canalSeen(cm, cpost); return; }
   const cq = update.callback_query;
+  if (cq?.message?.chat?.type === 'channel') { await canalCb(cq); return; }
   const msg = update.message ?? cq?.message;
   let text: string | undefined = update.message?.text ?? update.message?.caption ?? cq?.data;
   if (!msg || !text) return;

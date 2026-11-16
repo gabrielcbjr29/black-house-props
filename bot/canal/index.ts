@@ -12,7 +12,8 @@
 // bot_config: CANAL_ID (preenchido sozinho quando o canal é conectado), CANAL_ON (0 pausa), CANAL_MAX, CANAL_INICIO,
 // CANAL_UN (padrão "1 unidade"), CANAL_UN_MULTI, CANAL_RESULTADO (0 = não responder green/red no canal),
 // CANAL_RODAPE (texto final; "0" tira), CANAL_DONO (padrão: o primeiro de ALLOWED_CHATS), AFF_REF (99play),
-// AFF_REF_365 (BR365, padrão nac6j), CANAL_CASA (99 ou 365: casa padrão dos posts novos; cada post pode trocar no aviso).
+// AFF_REF_365 (BR365, padrão nac6j), CANAL_BOTOES (0 tira os botões 99play/BR365 dos posts), CANAL_AVISO_DM (1 volta os
+// avisos "Postado no canal" no privado), CANAL_CASA (99 ou 365: casa padrão dos posts novos; cada post pode trocar no aviso).
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
@@ -76,6 +77,12 @@ const minLegs = (x: any) => legsOf(x).map((l: any) => ({ pid: l.pid, name: l.nam
   mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip }));
 const img365 = (img: string) => img.replace(/^canal\//, 'canal/365/');
 // aviso no privado do dono: botão do jogo (na casa escolhida) + escolha da casa do post
+// botões embaixo do post no canal (pedido de 16/11: controles no canal, não no privado do bot). Só o dono consegue usar;
+// CANAL_BOTOES=0 tira (ex.: num canal público).
+async function chKb(id: number, c: string) {
+  if ((await cfg('CANAL_BOTOES', '1')) === '0') return undefined;
+  return { inline_keyboard: [Object.keys(CASAS).map(k => ({ text: `${k === c ? '✅ ' : ''}${CASAS[k].nome}`, callback_data: `/cs ${id} ${k}` }))] };
+}
 async function noticeKb(id: number, x: any, c: string, code?: string | null) {
   const go = code ? [{ text: `🎟️ Bilhete na ${CASAS[c].nome}`, url: await shareLink(code, c) }]
     : await Promise.all(gamesOf(x).slice(0, 3).map(async (l, i, a) => ({ text: a.length > 1 ? `🎟️ ${l.home} x ${l.away}` : `🎟️ Abrir o jogo na ${CASAS[c].nome}`, url: await evLink(l.ev, c) })));
@@ -93,7 +100,9 @@ async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: str
   const [row] = await sb('channel_posts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({
     date, kind, legs: minLegs(x), odd: x.odd, band: x.band ?? null, status: 'postada', link: await linkHTML(x, null, c), channel_msg_id: r.result.message_id,
     owner_chat: +(await owner()) || null, pkey: x.key, cap: x.cap, img: x.img, casa: c, fids: fid ? { [c]: fid } : {}, posted_at: new Date().toISOString() }) });
-  const own = await owner();
+  const kb = await chKb(row.id, c);
+  if (kb) await TG('editMessageReplyMarkup', { chat_id: chat, message_id: r.result.message_id, reply_markup: kb });
+  const own = (await cfg('CANAL_AVISO_DM', '0')) === '1' ? await owner() : '';
   if (own) {
     const m = await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', disable_notification: true, disable_web_page_preview: true, reply_markup: await noticeKb(row.id, x, c),
       text: `📢 <b>Postado no canal</b> · ${kind === 'multipla' ? `múltipla ${x.band} @${n2(x.odd)}` : 'simples'}\n<blockquote>${resumo(x)}</blockquote>\n<i>Fez o bilhete? Compartilhe da 99play ou da BR365 para o bot (ou responda esta mensagem com o link; o print pode ir junto) e o post vira bilhete pronto. Os botões de baixo trocam a casa do post.</i>` });
@@ -106,10 +115,11 @@ async function repaint(row: any, c: string, code: string | null, photo: string |
   const chat = await cfg('CANAL_ID'), caption = await fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code, c));
   const fids = { ...(row.fids ?? {}) };
   const media = photo ?? fids.print ?? fids[c] ?? (APP + (c === '365' ? img365(row.img) : row.img) + '?v=' + Date.now());
-  let r = await TG('editMessageMedia', { chat_id: chat, message_id: row.channel_msg_id, media: { type: 'photo', media, caption, parse_mode: 'HTML' } });
+  const kb = await chKb(row.id, c);
+  let r = await TG('editMessageMedia', { chat_id: chat, message_id: row.channel_msg_id, media: { type: 'photo', media, caption, parse_mode: 'HTML' }, ...(kb ? { reply_markup: kb } : {}) });
   if (!r.ok && /not modified/i.test(r.description ?? '')) r = { ok: true };
   if (!r.ok) { // imagem antiga já saiu da pauta: troca só a legenda
-    r = await TG('editMessageCaption', { chat_id: chat, message_id: row.channel_msg_id, caption, parse_mode: 'HTML' });
+    r = await TG('editMessageCaption', { chat_id: chat, message_id: row.channel_msg_id, caption, parse_mode: 'HTML', ...(kb ? { reply_markup: kb } : {}) });
     if (!r.ok && /not modified/i.test(r.description ?? '')) r = { ok: true };
   } else if (r.result?.photo) { const f = r.result.photo.at(-1).file_id; if (photo) fids.print = f; else if (!fids.print) fids[c] = f; }
   if (!r.ok) return { ok: false, erro: r.description };
@@ -176,12 +186,12 @@ async function run() {
 }
 
 // ---------- trocar o link (e a imagem) pelo bilhete pronto; trocar a casa do post ----------
-async function rowBy(msg: string | null, id: string | null) {
-  const q = id ? `id=eq.${encodeURIComponent(id)}` : `owner_msg_id=eq.${encodeURIComponent(msg ?? '')}`;
+async function rowBy(msg: string | null, id: string | null, ch: string | null = null) {
+  const q = id ? `id=eq.${encodeURIComponent(id)}` : ch ? `channel_msg_id=eq.${encodeURIComponent(ch)}` : `owner_msg_id=eq.${encodeURIComponent(msg ?? '')}`;
   return ((await sb(`channel_posts?${q}&select=*`)) ?? [])[0];
 }
-async function relink(msg: string | null, id: string | null, code: string, photo: string | null) {
-  const row = await rowBy(msg, id); if (!row) return { ok: false, erro: 'post não encontrado' };
+async function relink(msg: string | null, id: string | null, code: string, photo: string | null, ch: string | null = null) {
+  const row = await rowBy(msg, id, ch); if (!row) return { ok: false, erro: 'post não encontrado' };
   return repaint(row, casaOf(row.casa), code, photo);
 }
 async function setCasa(id: string, c: string) {
@@ -238,7 +248,7 @@ Deno.serve(async (req: Request) => {
     const secret = await cfg('WEBHOOK_SECRET');
     const ok = (k: string) => !!secret && u.searchParams.get(k) === secret;
     if (ok('run')) return json(await run());
-    if (ok('relink')) return json(await relink(u.searchParams.get('msg'), u.searchParams.get('id'), u.searchParams.get('code') ?? '', u.searchParams.get('photo')));
+    if (ok('relink')) return json(await relink(u.searchParams.get('msg'), u.searchParams.get('id'), u.searchParams.get('code') ?? '', u.searchParams.get('photo'), u.searchParams.get('ch')));
     if (ok('casa')) return json(await setCasa(u.searchParams.get('id') ?? '', u.searchParams.get('c') ?? '99'));
     if (ok('abertos')) { // posts de hoje (e de ontem à noite) ainda sem bilhete pronto, para o bot perguntar de qual é o link
       const d = etDate(), y = new Date(Date.parse(d + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
