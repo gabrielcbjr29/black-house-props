@@ -966,6 +966,17 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
+  if (cmd === 'tentativas') {
+    // primeiro escolhe o mercado (com a quantidade de entradas de hoje); "Todos" mantém a lista antiga
+    const g = GROUPS.tentativas, code = (rest[0] ?? '').toUpperCase();
+    const TN: Record<string, string> = { '2PA': '🎯 Tentativas de 2', '2PM': '✅ De 2 convertidos', '3PA': '🏹 Tentativas de 3', FTA: '🆓 Lances livres tentados', FGM: '🏀 Arremessos convertidos' };
+    const back = (o: Out) => { const kb = (o.kb as any)?.inline_keyboard; if (kb) kb.splice(Math.max(0, kb.length - 1), 0, [BTN('⬅️ Outros mercados de tentativas', '/tentativas')]); return o; };
+    if (g.mk.includes(code)) return back(list(d, d.rows.filter(r => r.m === code && inRange(r)), TN[code].toUpperCase(), clampN(rest[1]), raw, page, true, '', RANGE_TXT));
+    if (code === 'TODOS' || /^\d+$/.test(code)) return list(d, d.rows.filter(r => g.mk.includes(r.m) && inRange(r)), '🏀 ' + g.title.toUpperCase(), clampN(code === 'TODOS' ? rest[1] : rest[0]), raw, page, false, '', RANGE_TXT);
+    const n = (mk: string) => d.rows.filter(r => r.m === mk && inRange(r)).length;
+    const btns = ['2PA', '2PM', '3PA', 'FTA', 'FGM'].map(mk => BTN(`${TN[mk]} (${n(mk)})`, `/tentativas ${mk.toLowerCase()}`));
+    return { text: header(d, '🏹 TENTATIVAS E CONVERTIDOS') + '\nEscolha o mercado:', kb: { inline_keyboard: [...chunk(btns, 2), [BTN(`📋 Todos os mercados (${g.mk.reduce((s, mk) => s + n(mk), 0)})`, '/tentativas todos')], HOME] } };
+  }
   if (GROUPS[cmd]) { const g = GROUPS[cmd]; return list(d, d.rows.filter(r => g.mk.includes(r.m) && inRange(r)), '🏀 ' + g.title.toUpperCase(), clampN(rest[0]), raw, page, g.mk.length === 1, '', RANGE_TXT); }
   if (cmd === 'mais' || cmd === 'menos') {
     const s = cmd === 'mais' ? 'o' : 'u'; const gk = WORD2GROUP[norm(rest[0] ?? '')];
