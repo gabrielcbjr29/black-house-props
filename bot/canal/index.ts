@@ -28,12 +28,16 @@ async function sb(path: string, init: RequestInit = {}) {
   if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 160));
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
-let CFG: Record<string, string> | null = null;
+// configuração em cache por 30 s; a promessa é compartilhada para chamadas simultâneas não lerem um cache vazio
+let CFGP: Promise<Record<string, string>> | null = null, CFG_AT = 0;
 async function cfg(k: string, def = ''): Promise<string> {
-  if (!CFG) { CFG = {}; for (const x of (await sb('bot_config?select=key,value')) ?? []) CFG[x.key] = x.value; }
-  const v = CFG[k]; return v == null || v === '' ? def : v;
+  if (!CFGP || Date.now() - CFG_AT > 30_000) {
+    CFG_AT = Date.now();
+    CFGP = sb('bot_config?select=key,value').then((rows: any[]) => Object.fromEntries((rows ?? []).map(x => [x.key, x.value]))).catch(e => { CFGP = null; throw e; });
+  }
+  const v = (await CFGP)[k]; return v == null || v === '' ? def : v;
 }
-const setCfg = (key: string, value: string) => sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }) });
+const setCfg = (key: string, value: string) => (CFGP = null, sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }) }));
 const getJ = (f: string) => fetch(APP + f + '?t=' + Math.floor(Date.now() / 60_000), { headers: { 'Cache-Control': 'no-cache' } }).then(r => r.ok ? r.json() : null);
 const etDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 const hourBRnow = () => +new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23' }).format(new Date());
@@ -90,8 +94,8 @@ async function noticeKb(id: number, x: any, c: string, code?: string | null) {
 }
 
 // ---------- postar ----------
-async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: string, to?: string) {
-  const chat = to ?? await cfg('CANAL_ID'), c = casaOf(await cfg('CANAL_CASA', '99'));
+async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: string, to?: string, casa?: string) {
+  const chat = to ?? await cfg('CANAL_ID'), c = casaOf(casa ?? await cfg('CANAL_CASA', '99'));
   const caption = await fill(x.cap, kind, await linkHTML(x, null, c));
   const photo = APP + (c === '365' ? (x.img365 ?? img365(x.img)) : x.img) + '?v=' + encodeURIComponent(gen ?? Date.now());
   const r = await TG('sendPhoto', { chat_id: chat, photo, caption: to ? '[PRÉVIA] ' + caption : caption, parse_mode: 'HTML' });
@@ -257,8 +261,8 @@ Deno.serve(async (req: Request) => {
     if (ok('preview')) {
       const P = await getJ('canal.json'); const own = await owner();
       if (!P || !own) return json({ ok: false, erro: 'sem pauta ou sem dono' });
-      const s = P.singles?.[0], m = P.multis?.[0]; const pc = u.searchParams.get('c'); if (pc && CASAS[pc]) { await cfg('x'); CFG!['CANAL_CASA'] = pc; }
-      return json({ ok: true, simples: s ? (await post(s, 'simples', P.date, P.gen, own)).ok : null, multipla: m ? (await post(m, 'multipla', P.date, P.gen, own)).ok : null, pauta: { date: P.date, simples: P.singles?.length, multiplas: P.multis?.map((x: any) => x.band + '@' + x.odd) } });
+      const s = P.singles?.[0], m = P.multis?.[0]; const pc = u.searchParams.get('c') ?? undefined;
+      return json({ ok: true, simples: s ? (await post(s, 'simples', P.date, P.gen, own, pc)).ok : null, multipla: m ? (await post(m, 'multipla', P.date, P.gen, own, pc)).ok : null, pauta: { date: P.date, simples: P.singles?.length, multiplas: P.multis?.map((x: any) => x.band + '@' + x.odd) } });
     }
     return json({ ok: true });
   } catch (e) { return json({ ok: false, erro: String((e as Error).message) }, 500); }
