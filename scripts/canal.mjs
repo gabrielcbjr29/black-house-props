@@ -4,8 +4,9 @@
 // Quem posta é a função canal (Supabase), espaçando ao longo do dia; aqui só a pauta.
 //   Simples: entradas das estratégias com linha e odd da 99play, uma por jogador, EV 5%+ (3%+ se faltar), odd 1,40–3,50,
 //            leitura da 99play com menos de 2h. Ordem: EV.
-//   Múltiplas: faixas de odd 7–10, 12–17 e 20–25, uma perna por jogo, pernas de chance 57%+ e EV 0+, a de maior chance
-//              de bater em cada faixa; sem repetir jogador entre as faixas (só se faltar perna).
+//   Múltiplas: faixas de odd 7–10, 12–17 e 20–25, em duas versões (só over e só under), uma perna por jogo, pernas das
+//              linhas da 99play do bot com chance 57%+ e EV 0+, a de maior chance em cada faixa; sem repetir jogador entre as
+//              faixas do mesmo lado (só se faltar perna).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,29 +56,53 @@ export function singles(cands, max = 30) {
   return out.slice(0, max);
 }
 /* múltiplas: em cada faixa, a combinação de maior chance (uma perna por jogo, 2 a 6 pernas) */
-export function multiples(cands) {
-  const pool0 = cands.filter(x => x.p >= .57 && x.edge >= 0).sort((a, b) => b.p - a.p).slice(0, 16);
-  const used = new Set(), out = [];
-  for (const [band, lo, hi] of BANDS) {
-    let best = null;
-    const run = pool => {
-      const rec = (i, legs, odd, prob, games) => {
-        if (odd > hi) return;
-        if (odd >= lo && legs.length >= 2 && (!best || prob > best.prob)) best = { legs: [...legs], odd, prob };
-        if (legs.length >= 6) return;
-        for (let j = i; j < pool.length; j++) {
-          const x = pool[j]; if (games.has(x.game)) continue;
-          games.add(x.game); legs.push(x); rec(j + 1, legs, odd * x.odd, prob * x.p, games); legs.pop(); games.delete(x.game);
-        }
+/* pernas para múltiplas: todas as linhas da 99play do bot (os dois lados), não só as das estratégias, porque a escolha
+   de cada jogador nas estratégias quase sempre cai no under (pedido de 16/11: múltiplas de over e de under).
+   Jogador de rotação (24+ min), sem desfalque, nota A/B, chance 57%+, EV 0+, odd 1,40–3,50, leitura fresca. */
+export function legPool({ bot, slate, events = {}, now = Date.now() }) {
+  const gameOf = {};
+  for (const g of slate?.games ?? []) for (const t of [g.home, g.away]) gameOf[t] = g;
+  const best = new Map();
+  for (const r of bot?.rows ?? []) {
+    if (!r.c9 || !r.d || r.d < 1.4 || r.d > 3.5 || r.p < .57 || (r.e ?? -1) < 0 || (r.mn ?? 0) < 24 || (r.st && r.st !== 'ok')) continue;
+    if (!/^[AB]/.test(r.gr ?? '')) continue;
+    const g = gameOf[r.t]; if (!g || !g.timeUTC || Date.parse(g.timeUTC) <= now) continue;
+    if (r.t9 && (now - Date.parse(r.t9)) / 36e5 >= STALE_H) continue;
+    const x = { key: `${r.id}-${r.m}-${r.s}`, pid: r.id, name: r.n, team: r.t, opp: r.o, away: g.away, home: g.home, game: g.id, ev: events[g.id] ?? null,
+      mk: r.m, side: r.s, line: +r.l, odd: +r.d, p: +r.p, edge: +r.e, tip: g.timeUTC, sq: r.sq ?? null, t9: r.t9 ?? null };
+    const k = r.id + r.s, cur = best.get(k); if (!cur || x.p > cur.p) best.set(k, x); // uma perna por jogador e lado
+  }
+  return [...best.values()];
+}
+/* múltiplas: em cada faixa, a combinação de maior chance (uma perna por jogo, 2 a 6 pernas), separadas por lado:
+   só over e só under. band = "10-over", "10-under", ... */
+export function multiples(cands, lados = ['u', 'o']) {
+  const out = [];
+  for (const lado of lados) {
+    const pool0 = cands.filter(x => x.side === lado && x.p >= .57 && x.edge >= 0).sort((a, b) => b.p - a.p).slice(0, 16);
+    const used = new Set();
+    for (const [b, lo, hi] of BANDS) {
+      let best = null;
+      const run = pool => {
+        const rec = (i, legs, odd, prob, games) => {
+          if (odd > hi) return;
+          if (odd >= lo && legs.length >= 2 && (!best || prob > best.prob)) best = { legs: [...legs], odd, prob };
+          if (legs.length >= 6) return;
+          for (let j = i; j < pool.length; j++) {
+            const x = pool[j]; if (games.has(x.game)) continue;
+            games.add(x.game); legs.push(x); rec(j + 1, legs, odd * x.odd, prob * x.p, games); legs.pop(); games.delete(x.game);
+          }
+        };
+        rec(0, [], 1, 1, new Set());
       };
-      rec(0, [], 1, 1, new Set());
-    };
-    run(pool0.filter(x => !used.has(x.pid)));
-    if (!best) run(pool0); // sem pernas novas suficientes: pode repetir jogador de outra múltipla
-    if (!best) continue;
-    best.legs.forEach(l => used.add(l.pid));
-    const legs = best.legs.slice().sort((a, b) => Date.parse(a.tip) - Date.parse(b.tip));
-    out.push({ key: `m${band}-` + legs.map(l => keyOf(l)).join('.'), band, odd: Math.round(best.odd * 100) / 100, prob: Math.round(best.prob * 1000) / 1000, legs });
+      run(pool0.filter(x => !used.has(x.pid)));
+      if (!best) run(pool0); // sem pernas novas suficientes: pode repetir jogador de outra múltipla do mesmo lado
+      if (!best) continue;
+      best.legs.forEach(l => used.add(l.pid));
+      const legs = best.legs.slice().sort((a, b) => Date.parse(a.tip) - Date.parse(b.tip));
+      const band = `${b}-${lado === 'o' ? 'over' : 'under'}`;
+      out.push({ key: `m${band}-` + legs.map(l => keyOf(l)).join('.'), band, lado, odd: Math.round(best.odd * 100) / 100, prob: Math.round(best.prob * 1000) / 1000, legs });
+    }
   }
   return out;
 }
@@ -151,9 +176,9 @@ export const page365 = (css, inner) => `<!doctype html><html><head><meta charset
 export const page = (css, inner) => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body><div class="phone"><div class="brand">BLACK<span>HOUSE</span></div>${inner}<div class="sub">Sequências · NBA Props</div></div></body></html>`;
 
 /* pauta completa (sem desenhar): usada aqui e nos testes */
-export function plan({ strat, slate, events, now = Date.now() }) {
+export function plan({ strat, slate, events, bot, now = Date.now() }) {
   const c = candidates({ strat, slate, events, now });
-  const S = singles(c), M = multiples(c);
+  const S = singles(c), M = multiples(bot ? legPool({ bot, slate, events, now }) : c);
   const pack = x => { const f = `${x.legs ? 'm' + x.band : 's-' + x.key}.jpg`; return { ...x, img: `canal/${f}`, img365: `canal/365/${f}`, cap: caption(x) }; };
   return { date: slate?.meta?.date ?? strat?.date, gen: strat?.gen ?? null, singles: S.map(pack), multis: M.map(pack) };
 }
@@ -161,11 +186,11 @@ export function plan({ strat, slate, events, now = Date.now() }) {
 async function main() {
   const ROOT = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
   const J = f => JSON.parse(readFileSync(join(ROOT, 'data', f), 'utf8'));
-  const strat = J('strategies.json'), slate = J('slate.json');
+  const strat = J('strategies.json'), slate = J('slate.json'), bot = J('bot.json');
   const stPath = join(ROOT, '..', 'data', 'odds-state.json');
   const c99 = existsSync(stPath) ? JSON.parse(readFileSync(stPath, 'utf8')).providers?.c99 : null;
   const events = c99?.date === slate.meta?.date ? Object.fromEntries(Object.entries(c99.events ?? {}).map(([g, v]) => [g, v.ev])) : {};
-  const P = plan({ strat, slate, events });
+  const P = plan({ strat, slate, events, bot: bot?.date === slate.meta?.date ? bot : null });
   const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(join(dir, '365'), { recursive: true });
   const font = f => readFileSync(join(ROOT, 'fonts', f)).toString('base64');
   const css = CSS(font); const css365 = CSS365(font);

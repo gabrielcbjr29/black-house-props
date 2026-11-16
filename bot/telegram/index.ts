@@ -11,7 +11,7 @@
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
-type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; at: number };
+type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; dom99: string; dom365: string; at: number };
 let CFG: Cfg | null = null;
 async function cfg(): Promise<Cfg> {
   if (CFG && Date.now() - CFG.at < 60_000) return CFG;
@@ -25,7 +25,7 @@ async function cfg(): Promise<Cfg> {
   }
   const get = (k: string) => Deno.env.get(k) || v[k] || '';
   CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
-    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), affRef: get('AFF_REF') || 'rca5p', affRef365: get('AFF_REF_365') || 'nac6j', at: Date.now() };
+    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), affRef: get('AFF_REF') || 'rca5p', affRef365: get('AFF_REF_365') || 'nac6j', dom99: (get('DOM_99') || 'https://99play.im').replace(/\/+$/, ''), dom365: (get('DOM_365') || 'https://br365.io').replace(/\/+$/, ''), at: Date.now() };
   return CFG;
 }
 // banco (REST do próprio Supabase, com a chave de serviço): testes do Modelo BH
@@ -1115,7 +1115,7 @@ async function canalFn(action: string, qs: string): Promise<any> {
 async function shareLinksText(codes: string[]) {
   const c = await cfg();
   return `🔗 <b>Links rastreados</b> <i>(toque para copiar)</i>\n` + codes.map(code =>
-    `<b>99play</b> <i>(ref ${esc(c.affRef)})</i>\n<code>https://99play.io/sports?ref=${encodeURIComponent(c.affRef)}&amp;shareCode=${code}</code>\n<b>BR365</b> <i>(ref ${esc(c.affRef365)})</i>\n<code>https://br365.io/sports?ref=${encodeURIComponent(c.affRef365)}&amp;shareCode=${code}</code>`).join('\n\n');
+    `<b>99play</b> <i>(ref ${esc(c.affRef)})</i>\n<code>${c.dom99}/sports?ref=${encodeURIComponent(c.affRef)}&amp;shareCode=${code}</code>\n<b>BR365</b> <i>(ref ${esc(c.affRef365)})</i>\n<code>${c.dom365}/sports?ref=${encodeURIComponent(c.affRef365)}&amp;shareCode=${code}</code>`).join('\n\n');
 }
 // /cb <shareCode> <post>: liga o bilhete ao post escolhido (0 = só os links); /cs <post> <99|365>: troca a casa do post
 async function cbCmd(chatId: number, rest: string[]): Promise<Out> {
@@ -1151,7 +1151,7 @@ As postagens automáticas começam na próxima rodada (a partir das 10h).`, kb: 
 <blockquote>Hoje: <b>${s.length}</b> simples · <b>${m.length}</b> múltiplas${m.length ? ` (${m.map(x => x.band + ' @' + n2(+x.odd)).join(', ')})` : ''}
 Com bilhete pronto: ${rows.filter(r => r.share_code).length}
 Conferidas: ${rows.filter(r => r.status === 'green').length} ✅ · ${rows.filter(r => r.status === 'red').length} ❌</blockquote>
-<i>Posta das 10h até 40 min antes de cada jogo: até 20 simples e as múltiplas 10 / 15 / 25. Para trocar o link de um post pelo bilhete pronto, responda o aviso "Postado no canal" com o link da 99play.</i>`;
+<i>Posta das 10h até 40 min antes de cada jogo: até 20 simples e as múltiplas 10 / 15 / 25 em under (12h/15h/17h) e over (13h/16h/18h). Para trocar o link de um post pelo bilhete pronto, responda o aviso "Postado no canal" com o link da 99play.</i>`;
   return { text: text + `\n\n🏠 Casa padrão dos próximos posts: <b>${casa === '365' ? 'BR365' : '99play'}</b> <i>(cada post também troca no aviso)</i>`, kb: isOwner ? { inline_keyboard: [[on ? { text: '⏸️ Pausar o canal', callback_data: '/canal off' } : { text: '▶️ Retomar o canal', callback_data: '/canal on' }], [{ text: `${casa === '99' ? '✅ ' : ''}99play`, callback_data: '/canal casa 99' }, { text: `${casa === '365' ? '✅ ' : ''}BR365`, callback_data: '/canal casa 365' }]] } : undefined };
 }
 

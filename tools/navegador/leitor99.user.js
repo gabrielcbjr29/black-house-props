@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         Black House · leitor 99play
 // @namespace    blackhouse
-// @version      1.0
+// @version      1.1
 // @description  Enquanto uma aba da 99play estiver aberta no seu navegador, lê as linhas de jogador da NBA de hora em hora (aos :35) e manda para o Black House.
 // @match        https://99play.io/*
+// @match        https://99play.im/*
+// @match        https://*.99play.im/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==

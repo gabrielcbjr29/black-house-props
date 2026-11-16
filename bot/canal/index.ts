@@ -18,7 +18,10 @@ const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
 const MKS: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assist.', '3PM': 'de 3 conv.', PRA: 'PRA', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'arr. conv.', FGA: 'arr. tentados', '2PM': 'de 2 conv.', '2PA': 'de 2 tentados', '3PA': 'de 3 tentadas', FTM: 'LL conv.', FTA: 'LL tentados', STL: 'roubos', BLK: 'tocos', SB: 'roub+tocos', TOV: 'erros', PF: 'faltas' };
+// horário (Brasília) a partir do qual cada múltipla sai: under 12h/15h/17h, over uma hora depois
 const SLOT: Record<string, number> = { '10': 12, '15': 15, '25': 17 };
+const slotOf = (band: string) => (SLOT[parseInt(band)] ?? 15) + (/over/.test(band) ? 1 : 0);
+const bandKey = (b: string) => /-/.test(b) ? b : `${b}-under`; // posts antigos (antes de 16/11 15h) eram só under
 const LEAD = 40 * 6e4, STEP = 15 * 6e4, STALE = 2 * 36e5;
 
 const json = (x: unknown, status = 200) => new Response(JSON.stringify(x), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -54,15 +57,17 @@ const owner = async () => await cfg('CANAL_DONO', (await cfg('ALLOWED_CHATS')).s
 // ---------- legenda ----------
 // duas casas com o mesmo shareCode e o mesmo id de evento (plataforma Altenar); só muda o domínio e o ref de afiliado
 const CASAS: Record<string, { nome: string; base: string; refKey: string; ref: string }> = {
-  '99': { nome: '99play', base: 'https://99play.io/sports', refKey: 'AFF_REF', ref: 'rca5p' },
-  '365': { nome: 'BR365', base: 'https://br365.io/sports', refKey: 'AFF_REF_365', ref: 'nac6j' },
+  '99': { nome: '99play', base: 'https://99play.im', refKey: 'AFF_REF', ref: 'rca5p' },
+  '365': { nome: 'BR365', base: 'https://br365.io', refKey: 'AFF_REF_365', ref: 'nac6j' },
 };
+// domínio de cada casa em bot_config (DOM_99 / DOM_365): quando a casa trocar de domínio, muda lá sem mexer no código
+const baseOf = async (c: string) => (await cfg(c === '365' ? 'DOM_365' : 'DOM_99', CASAS[c].base)).replace(/\/+$/, '') + '/sports';
 const casaOf = (c?: string | null) => CASAS[c ?? ''] ? c! : '99';
 const refOf = async (c: string) => encodeURIComponent(await cfg(CASAS[c].refKey, CASAS[c].ref));
 const legsOf = (x: any) => x.legs ?? [x];
 // link do jogo SEM o ref (com o ref o evento não abre, avisou o usuário em 16/11); o ref vai só no link do bilhete pronto
-const evLink = async (ev: number | null, c = '99') => `${CASAS[c].base}${ev ? `#/event/${ev}` : ''}`;
-const shareLink = async (code: string, c = '99') => `${CASAS[c].base}?ref=${await refOf(c)}&shareCode=${encodeURIComponent(code)}`;
+const evLink = async (ev: number | null, c = '99') => `${await baseOf(c)}${ev ? `#/event/${ev}` : ''}`;
+const shareLink = async (code: string, c = '99') => `${await baseOf(c)}?ref=${await refOf(c)}&shareCode=${encodeURIComponent(code)}`;
 const gamesOf = (x: any) => { const g = new Map<string, any>(); for (const l of legsOf(x)) if (!g.has(l.game)) g.set(l.game, l); return [...g.values()]; };
 async function linkHTML(x: any, code?: string | null, c = '99') {
   if (code) return `🎟️ <a href="${await shareLink(code, c)}">Clique aqui para pegar o bilhete pronto.</a>`;
@@ -158,7 +163,8 @@ async function run() {
     return { ...out, skip: 'pauta vazia' };
   }
   const done: any[] = await sb(`channel_posts?date=eq.${date}&select=pkey,kind,band,legs`) ?? [];
-  const keys = new Set(done.map(d => d.pkey)), bands = new Set(done.filter(d => d.kind === 'multipla').map(d => d.band));
+  const keys = new Set(done.map(d => d.pkey)), bands = new Set(done.filter(d => d.kind === 'multipla').map(d => bandKey(d.band)));
+  const lado = await cfg('CANAL_MULTI_LADO', 'ambos'); // ambos | over | under
   const pids = new Set(done.filter(d => d.kind === 'simples').flatMap(d => (d.legs ?? []).map((l: any) => l.pid)));
   const posted: string[] = [];
   // simples: espalha as que faltam pelas rodadas até o último jogo; a que está perto do jogo vai primeiro
@@ -179,9 +185,10 @@ async function run() {
   }
   // múltiplas: uma por faixa no dia, a partir do horário da faixa (ou antes, se o primeiro jogo estiver perto)
   for (const m of P.multis ?? []) {
-    if (bands.has(m.band) || !fresh(m, now)) continue;
+    if (bands.has(bandKey(m.band)) || !fresh(m, now)) continue;
+    if (lado !== 'ambos' && !m.band.endsWith(lado)) continue;
     const first = Math.min(...m.legs.map((l: any) => Date.parse(l.tip)));
-    if (h < (SLOT[m.band] ?? 15) && first - now > 90 * 6e4) continue;
+    if (h < slotOf(m.band) && first - now > 90 * 6e4) continue;
     const r = await post(m, 'multipla', date, P.gen);
     posted.push(r.ok ? `múltipla ${m.band} @${m.odd}` : `erro múltipla ${m.band}: ${r.description}`);
     await new Promise(ok => setTimeout(ok, 1500));

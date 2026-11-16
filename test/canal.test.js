@@ -37,7 +37,8 @@ test('canal: múltiplas nas faixas 7–10, 12–17 e 20–25, uma perna por jogo
   const M = multiples(candidates({ strat: { picks }, slate, now: NOW }));
   assert.equal(M.length, 3);
   for (const m of M) {
-    const [, lo, hi] = BANDS.find(b => b[0] === m.band);
+    const [, lo, hi] = BANDS.find(b => b[0] === m.band.split('-')[0]);
+    assert.ok(m.band.endsWith('-under') && m.legs.every(l => l.side === 'u'));
     assert.ok(m.odd >= lo && m.odd <= hi, `${m.band} @${m.odd}`);
     assert.equal(new Set(m.legs.map(l => l.game)).size, m.legs.length);
     assert.ok(m.legs.every((l, i, a) => !i || Date.parse(a[i - 1].tip) <= Date.parse(l.tip)));
@@ -71,4 +72,17 @@ test('canal: card no estilo BR365 (só a seleção, odd com ponto) e caminho da 
   assert.match(m, /Odd total<\/b><b>7\.25/);
   const P = plan({ strat: { picks: [pk('TOR')] }, slate, now: NOW });
   assert.ok(P.singles[0].img365.startsWith('canal/365/s-'));
+});
+
+test('canal: múltiplas de over e de under a partir das linhas da 99play do bot', async () => {
+  const { legPool } = await import('../scripts/canal.mjs');
+  const teams = ['MIL', 'TOR', 'BOS', 'LAC', 'WAS', 'SAC', 'ATL', 'NYK', 'DAL', 'CHA', 'HOU', 'OKC'];
+  const rows = teams.flatMap((t, i) => ['o', 'u'].map(sd => ({ id: 'r' + i, n: 'J' + i, t, o: opp[t], m: 'PTS', s: sd, l: 10.5, d: 1.6 + (i % 4) * .1, p: .63 - i * .002, e: .02,
+    gr: 'A', mn: 30, st: 'ok', c9: 1, t9: '2026-11-15T14:30:00Z', sq: [1, 2] })));
+  rows.push({ ...rows[0], id: 'x', s: 'o', mn: 12 }, { ...rows[0], id: 'y', s: 'o', c9: 0 }, { ...rows[0], id: 'z', s: 'o', gr: 'C' });
+  const pool = legPool({ bot: { rows }, slate, now: NOW });
+  assert.ok(!pool.some(x => ['x', 'y', 'z'].includes(x.pid)));
+  const M = multiples(pool);
+  assert.deepEqual(M.map(m => m.band).sort(), ['10-over', '10-under', '15-over', '15-under', '25-over', '25-under']);
+  for (const m of M) assert.ok(m.legs.every(l => l.side === (m.band.endsWith('over') ? 'o' : 'u')));
 });
