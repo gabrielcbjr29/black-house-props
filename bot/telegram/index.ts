@@ -917,7 +917,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status'), { text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status'), BTN('📢 Canal', '/canal')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -958,6 +958,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
+  if (cmd === 'canal') return canalCmd(chatId, arg);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
@@ -1034,10 +1035,52 @@ async function sendCards(chatId: number, arg?: string) {
   await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>', reply_markup: { inline_keyboard: [[BTN('🔥 Top do dia em texto', '/top'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('🏠 Menu', '/menu')]] } });
 }
 
+// ---------- canal do Telegram (postagem automática na função canal) ----------
+const FN = (name: string) => `${Deno.env.get('SUPABASE_URL') ?? 'https://brtexfomhlvltdsuezsi.supabase.co'}/functions/v1/${name}`;
+const getCfgKey = async (k: string) => (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value as string | undefined;
+const putCfgKey = (k: string, v: string) => sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: k, value: v, updated_at: new Date().toISOString() }) });
+// o bot virou admin de um canal (my_chat_member) ou alguém postou num canal onde ele está (channel_post)
+async function canalSeen(cm: any, cp: any) {
+  const c = await cfg(), ch = (cm ?? cp).chat, own = c.allowed[0];
+  if (String(ch.id) === (await getCfgKey('CANAL_ID'))) return;
+  if (cm && cm.new_chat_member?.status !== 'administrator') return;
+  if (cm && own && c.allowed.includes(String(cm.from?.id))) {
+    await putCfgKey('CANAL_ID', String(ch.id)); await putCfgKey('CANAL_TITLE', ch.title ?? '');
+    await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `✅ <b>Canal conectado:</b> ${esc(ch.title ?? String(ch.id))}
+As postagens automáticas começam na próxima rodada (a partir das 10h). Use /canal para ver o status ou pausar.` });
+    return;
+  }
+  if (own) await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Usar este canal para as postagens automáticas?`,
+    reply_markup: { inline_keyboard: [[{ text: '✅ Usar este canal', callback_data: `/canal set:${ch.id}` }]] } });
+}
+async function canalCmd(chatId: number, arg: string): Promise<Out> {
+  const c = await cfg(), isOwner = String(chatId) === c.allowed[0];
+  if (isOwner && arg.startsWith('set:')) {
+    const id = arg.slice(4), info = await TG('getChat', { chat_id: id });
+    if (!info.ok) return { text: `Não consegui acessar o canal (${esc(info.description ?? '')}). Confira se o bot é administrador com permissão de postar.` };
+    await putCfgKey('CANAL_ID', id); await putCfgKey('CANAL_TITLE', info.result?.title ?? '');
+    return { text: `✅ <b>Canal conectado:</b> ${esc(info.result?.title ?? id)}
+As postagens automáticas começam na próxima rodada (a partir das 10h).`, kb: { inline_keyboard: [[{ text: '📢 Status do canal', callback_data: '/canal' }]] } };
+  }
+  if (isOwner && (arg === 'off' || arg === 'on')) await putCfgKey('CANAL_ON', arg === 'off' ? '0' : '1');
+  const id = await getCfgKey('CANAL_ID'), title = await getCfgKey('CANAL_TITLE'), on = (await getCfgKey('CANAL_ON')) !== '0';
+  if (!id) return { text: `📢 <b>Canal</b>\nAinda não conectado. Coloque o bot como administrador do canal (com permissão de postar) e mande qualquer mensagem no canal: eu peço a confirmação aqui.` };
+  const today = etDate(), rows: any[] = await sb(`channel_posts?date=eq.${today}&select=kind,status,band,odd,share_code`).catch(() => []) ?? [];
+  const s = rows.filter(r => r.kind === 'simples'), m = rows.filter(r => r.kind === 'multipla');
+  const text = `📢 <b>Canal: ${esc(title || id)}</b> · ${on ? '🟢 postando' : '⏸️ pausado'}
+<blockquote>Hoje: <b>${s.length}</b> simples · <b>${m.length}</b> múltiplas${m.length ? ` (${m.map(x => x.band + ' @' + n2(+x.odd)).join(', ')})` : ''}
+Com bilhete pronto: ${rows.filter(r => r.share_code).length}
+Conferidas: ${rows.filter(r => r.status === 'green').length} ✅ · ${rows.filter(r => r.status === 'red').length} ❌</blockquote>
+<i>Posta das 10h até 40 min antes de cada jogo: até 20 simples e as múltiplas 10 / 15 / 25. Para trocar o link de um post pelo bilhete pronto, responda o aviso "Postado no canal" com o link da 99play.</i>`;
+  return { text, kb: isOwner ? { inline_keyboard: [[on ? { text: '⏸️ Pausar o canal', callback_data: '/canal off' } : { text: '▶️ Retomar o canal', callback_data: '/canal on' }]] } : undefined };
+}
+
 async function handle(update: any) {
+  const cm = update.my_chat_member, cpost = update.channel_post;
+  if (cm?.chat?.type === 'channel' || cpost?.chat?.type === 'channel') { await canalSeen(cm, cpost); return; }
   const cq = update.callback_query;
   const msg = update.message ?? cq?.message;
-  let text: string | undefined = update.message?.text ?? cq?.data;
+  let text: string | undefined = update.message?.text ?? update.message?.caption ?? cq?.data;
   if (!msg || !text) return;
   const chatId: number = msg.chat.id;
   const allowed = (await cfg()).allowed;
@@ -1053,6 +1096,15 @@ async function handle(update: any) {
   // link de bilhete da 99play colado no chat: devolve o link rastreado com o ref de afiliado (bot_config AFF_REF)
   if (!cq) {
     const codes = [...text.matchAll(/99play\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi)].map(m => m[1]);
+    // resposta ao aviso "Postado no canal": troca o link do post pelo bilhete pronto (e a imagem pelo print, se veio)
+    const rep = update.message?.reply_to_message;
+    if (codes.length && rep) {
+      const photo = update.message?.photo?.at?.(-1)?.file_id ?? '';
+      const secret = (await cfg()).secret;
+      const r = await fetch(`${FN('canal')}?relink=${encodeURIComponent(secret)}&msg=${rep.message_id}&code=${encodeURIComponent(codes[0])}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`).then(r => r.json()).catch(e => ({ ok: false, erro: String(e) }));
+      if (r.ok) { await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', reply_parameters: { message_id: update.message.message_id }, text: `✅ Post do canal atualizado: link do bilhete pronto${r.imagem ? ' e o seu print' : ''}.` }); return; }
+      if (r.erro !== 'post não encontrado') { await TG('sendMessage', { chat_id: chatId, text: `Não consegui atualizar o post do canal: ${r.erro ?? 'erro'}` }); return; }
+    }
     if (codes.length) {
       const ref = (await cfg()).affRef;
       const links = [...new Set(codes)].map(c => `https://99play.io/sports?ref=${encodeURIComponent(ref)}&shareCode=${c}`);
@@ -1160,12 +1212,12 @@ Deno.serve(async (req: Request) => {
     // dentro do Supabase a função vê só /telegram-bot; o endereço público tem /functions/v1 na frente
     const base = Deno.env.get('SUPABASE_URL');
     const self = base ? `${base}/functions/v1/telegram-bot` : `https://${url.host}${url.pathname}`;
-    const hook = await TG('setWebhook', { url: self, secret_token: SECRET, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true });
+    const hook = await TG('setWebhook', { url: self, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'channel_post', 'my_chat_member'], drop_pending_updates: true });
     const cmds = await TG('setMyCommands', { commands: [
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canal', 'Canal: postagens automáticas'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
