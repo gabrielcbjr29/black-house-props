@@ -236,6 +236,7 @@ async function run() {
         const rep = others.has(identOf(x)); if (rep && shared >= cap) continue;
         const r = await post(x, 'simples', date, P.gen, k);
         posted.push(r.ok ? `simples ${x.name}` : `erro ${x.name}: ${r.description}`);
+        if (!r.ok && await postFail(k, date, r.description)) break;
         if (r.ok) { if (rep) shared++; doneAll.push({ canal_id: k.id, kind: 'simples', pkey: x.key, legs: [{ pid: x.pid, mk: x.mk, side: x.side }] }); }
         await new Promise(ok => setTimeout(ok, 1200));
       }
@@ -246,11 +247,23 @@ async function run() {
       if (h < slotOf(m) && first - now > 90 * 6e4) continue;
       const r = await post(m, 'multipla', date, P.gen, k);
       posted.push(r.ok ? `múltipla ${m.band} @${m.odd}` : `erro múltipla ${m.band}: ${r.description}`);
+      if (!r.ok && await postFail(k, date, r.description)) break;
       await new Promise(ok => setTimeout(ok, 1200));
     }
     res[k.title ?? k.id] = { simples_hoje: nS + posted.filter(p => p.startsWith('simples')).length, repetidas: shared, posted };
   }
   return { ...out, date, canais: res };
+}
+// o Telegram recusou o post por permissão (bot tirado do canal, sem "postar mensagens"...): avisa o dono 1x por dia
+async function postFail(k: Canal, date: string, desc = '') {
+  if (!/rights|forbidden|not found|kicked|not a member|administrator|CHAT_WRITE|have no/i.test(desc)) return false;
+  const key = `CANAL_ERRO_${k.id}_${date}`;
+  if (!(await cfg(key))) {
+    const own = await owner(k);
+    if (own) await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `⚠️ <b>Não consegui postar em ${esc(k.title ?? 'um canal')}</b>: ${esc(desc)}\nConfira se o bot ainda é administrador com permissão de postar (/canais → canal → 🔐 Permissões).` });
+    await setCfg(key, '1');
+  }
+  return true;
 }
 // pauta vazia: quase sempre é o leitor da 99play parado (sem linha da 99play não sai entrada). Avisa o dono uma vez por dia.
 async function emptyWarn(k: Canal, date: string) {

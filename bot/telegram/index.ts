@@ -1069,6 +1069,17 @@ async function saveCfg(k: Canal, patch: Record<string, unknown>) {
   await sb(`canais?id=eq.${k.id}`, { method: 'PATCH', body: JSON.stringify({ cfg: { ...raw, ...patch } }) });
 }
 // o bot virou admin de um canal (my_chat_member) ou alguém postou num canal onde ele está (channel_post)
+const GRP = (t?: string) => t === 'group' || t === 'supergroup';
+// permissões do bot no canal/grupo: postar, editar e apagar (apagar = limpar o link do bilhete e a pergunta)
+let BOT_ID = 0;
+async function botRights(chat: number | string) {
+  if (!BOT_ID) BOT_ID = (await TG('getMe', {})).result?.id ?? 0;
+  const r = await TG('getChatMember', { chat_id: chat, user_id: BOT_ID }), m = r.result ?? {}, adm = m.status === 'administrator';
+  const ch = (await TG('getChat', { chat_id: chat })).result?.type === 'channel';
+  const items = [['Postar mensagens', ch ? adm && m.can_post_messages : m.status === 'administrator' || m.status === 'member'],
+    ['Editar mensagens', ch ? adm && m.can_edit_messages : true], ['Apagar mensagens', adm && m.can_delete_messages]] as [string, boolean][];
+  return { ok: r.ok && items.every(x => x[1]), txt: items.map(([n, v]) => `${v ? '✅' : '❌'} ${n}`).join(' · '), erro: r.ok ? '' : r.description };
+}
 async function canalSeen(cm: any, cp: any) {
   const c = await cfg(), ch = (cm ?? cp).chat, adm = c.allowed[0];
   const known = ((await sb(`canais?chat_id=eq.${ch.id}&select=*`).catch(() => [])) ?? [])[0];
@@ -1077,22 +1088,22 @@ async function canalSeen(cm: any, cp: any) {
     if (cm && (st === 'left' || st === 'kicked')) { // tiraram o bot do canal: para de postar
       await sb(`canais?id=eq.${known.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: false }) });
       await TG('sendMessage', { chat_id: known.owner ?? adm, parse_mode: 'HTML', text: `⏸️ O bot saiu do canal <b>${esc(known.title ?? '')}</b>; as postagens automáticas pararam.` });
-    } else if (cm && st === 'administrator' && !known.ativo) {
+    } else if (cm && (st === 'administrator' || (GRP(ch.type) && st === 'member')) && !known.ativo) {
       await sb(`canais?id=eq.${known.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: true, title: ch.title ?? known.title }) });
       await TG('sendMessage', { chat_id: known.owner ?? adm, parse_mode: 'HTML', text: `✅ Canal <b>${esc(ch.title ?? '')}</b> reconectado. Configuração em /canais.` });
     }
     return;
   }
-  if (cm && st !== 'administrator') return;
+  if (cm && !(st === 'administrator' || (GRP(ch.type) && st === 'member'))) return;
   if (cm && c.allowed.includes(String(cm.from?.id))) await canalAdd(ch.id, ch.title, cm.from.id);
   else if (adm) await TG('sendMessage', { chat_id: adm, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Conectar ao hub de postagem automática (você como dono)?`,
     reply_markup: { inline_keyboard: [[BTN('✅ Conectar este canal', `/canais add ${ch.id}`)]] } });
 }
 async function canalAdd(chatId: number | string, title: string | undefined, owner: number | string) {
   await sb('canais?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: +chatId, title: title ?? null, owner: +owner, ativo: true }) });
-  const k = await canalByChat(chatId), own = await isAdmin(owner);
-  await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', text: `✅ <b>Canal conectado:</b> ${esc(title ?? String(chatId))}\nAs postagens automáticas começam na próxima rodada (a partir das 10h), com a configuração padrão.${own ? '' : '\n\n⚠️ <b>Cadastre os seus links de afiliado</b> antes: sem eles, os bilhetes prontos saem sem ref.'}`,
-    reply_markup: { inline_keyboard: [[BTN('⚙️ Configurar o canal', `/cn ${k?.id}`)], ...(own ? [] : [[BTN('🔗 Meus links de afiliado', `/cn ${k?.id} refs`)]])] } });
+  const k = await canalByChat(chatId), own = await isAdmin(owner), perm = await botRights(chatId);
+  await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', text: `✅ <b>Canal conectado:</b> ${esc(title ?? String(chatId))}\nAs postagens automáticas começam na próxima atualização (até 1h), a partir das 10h, com a configuração padrão.\n<blockquote>${perm.txt}</blockquote>${perm.ok ? '' : '\n⚠️ <b>Falta permissão</b>: no canal, Administradores → bot → ligue o que está com ❌.'}${own ? '' : '\n\n⚠️ <b>Cadastre os seus links de afiliado</b>: sem eles, os bilhetes prontos saem sem ref.'}`,
+    reply_markup: { inline_keyboard: [[BTN('⚙️ Configurar o canal', `/cn ${k?.id}`)], ...(own ? [] : [[BTN('🔗 Meus links de afiliado', `/cn ${k?.id} refs`)]]), ...(perm.ok ? [] : [[BTN('🔄 Conferir permissões', `/cn ${k?.id} perm`)]])] } });
 }
 // ---------- controles dentro do canal ----------
 const SHARE_RE = /(?:99play|br365)\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi;
@@ -1218,6 +1229,25 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
     return { text: `🏷️ <b>Mercados</b> · ${esc(k.title)}\n<i>Toque para ligar/desligar. Vale para as simples e para as pernas das múltiplas.</i>`,
       kb: { inline_keyboard: [...chunk(MK_ORDER.map(m => BTN(`${on(m) ? '✅' : '▫️'} ${MK_BTN[m]}`, `/cf ${k.id} mk ${m}`)), 3), [BTN('✅ Todos', `/cf ${k.id} mk all`)], back] } };
   }
+  if (scr === 'perm') {
+    const perm = await botRights(k.chat_id);
+    return { text: `🔐 <b>Permissões do bot</b> · ${esc(k.title)}\n<blockquote>${perm.txt}</blockquote>${perm.ok ? '✅ Tudo certo.' : `⚠️ No canal: Administradores → @blackhouse_props_bot → ligue o que está com ❌.${perm.erro ? `\n<i>${esc(perm.erro)}</i>` : ''}`}`,
+      kb: { inline_keyboard: [[BTN('🔄 Conferir de novo', `/cn ${k.id} perm`)], back] } };
+  }
+  if (scr === 'perf') {
+    const since = (d: number) => etDate(Date.now() - d * 864e5);
+    const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=gte.${since(30)}&status=in.(green,red,void)&select=date,kind,status,profit,legs`).catch(() => []) ?? [];
+    const sum = (xs: any[]) => { const n = xs.filter(x => x.status !== 'void').length, g = xs.filter(x => x.status === 'green').length, u = xs.reduce((a, x) => a + (+x.profit || 0), 0);
+      return n ? `${g}/${n} (${Math.round(100 * g / n)}%) · <b>${u >= 0 ? '+' : ''}${n2(u)}u</b> · ROI ${u >= 0 ? '+' : ''}${Math.round(100 * u / n)}%` : '—'; };
+    const per = (d: number, kind: string) => sum(rows.filter(r => r.date >= since(d) && r.kind === kind));
+    const byMk: Record<string, any[]> = {}; for (const r of rows.filter(r => r.kind === 'simples')) (byMk[r.legs?.[0]?.mk] ??= []).push(r);
+    const mk = Object.entries(byMk).map(([m, xs]) => [m, xs.reduce((a, x) => a + (+x.profit || 0), 0), xs.length] as [string, number, number]).filter(x => x[2] >= 3).sort((a, b) => b[1] - a[1]);
+    return { text: `📈 <b>Desempenho</b> · ${esc(k.title)} <i>(1u por entrada, só o que já foi conferido)</i>
+<blockquote><b>7 dias</b>\nSimples: ${per(7, 'simples')}\nMúltiplas: ${per(7, 'multipla')}\n\n<b>30 dias</b>\nSimples: ${per(30, 'simples')}\nMúltiplas: ${per(30, 'multipla')}</blockquote>${mk.length ? `\n<b>Mercados (simples, 30 dias, 3+ entradas)</b>\n<blockquote>${mk.slice(0, 8).map(([m, u, n]) => `${MK_BTN[m] ?? m}: ${u >= 0 ? '+' : ''}${n2(u)}u em ${n}`).join('\n')}</blockquote>\n<i>Mercado que só perde? Desligue em 🏷️ Mercados.</i>` : ''}`,
+      kb: { inline_keyboard: [back] } };
+  }
+  if (scr === 'rm') return { text: `🗑️ <b>Remover ${esc(k.title)} do hub?</b>\nO bot para de postar nesse canal (os posts antigos ficam). Para voltar, é só tirar e colocar o bot de novo como administrador.`,
+    kb: { inline_keyboard: [[BTN('🗑️ Sim, remover', `/cf ${k.id} remover`)], back] } };
   if (scr === 'tpl') {
     const t = c.tpl, n = (t?.entities ?? []).filter((e: any) => e.type === 'custom_emoji').length;
     return { text: `📝 <b>Padrão de mensagem</b> · ${esc(k.title)}\n<blockquote>${t?.text ? `Personalizado${n ? ` · ${n} emoji(s) personalizado(s)` : ''}:\n${esc(t.text).slice(0, 600)}` : 'Padrão do bot (🏀 NBA 🏀 / 💰 unidade / sequência / link)'}</blockquote>\n<i>Mande um post no padrão do seu canal (copie ou encaminhe, com os emojis personalizados). A sequência dele vira a sequência de cada entrada e o link vira o link da entrada. Também dá para usar {SEQUENCIA}, {LINK}, {ODD} e {JOGADOR}.</i>\n<i>⚠️ Emoji personalizado em canal: o Telegram só deixa bots que têm um nome de usuário extra do Fragment. Sem isso, o post sai com os emojis comuns no lugar.</i>`,
@@ -1260,7 +1290,8 @@ Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(
     [BTN('🧩 Múltiplas', `/cn ${k.id} mul`), BTN('🏠 Casa', `/cn ${k.id} casa`)],
     [BTN('🔗 Links de afiliado', `/cn ${k.id} refs`), BTN('⏰ Horário', `/cn ${k.id} ini`)],
     [BTN('📝 Padrão de mensagem', `/cn ${k.id} tpl`), BTN('⚙️ Mais opções', `/cn ${k.id} mais`)],
-    [c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`)],
+    [BTN('📈 Desempenho', `/cn ${k.id} perf`), BTN('🔐 Permissões', `/cn ${k.id} perm`)],
+    [c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`), BTN('🗑️ Remover', `/cn ${k.id} rm`)],
     [BTN('⬅️ Canais', '/canais')]] } };
 }
 // /cf <canal> <campo> <valor>: grava e volta para a tela certa
@@ -1291,6 +1322,10 @@ async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
   if (field === 'asktpl') {
     await putCfgKey('PEND_' + chatId, `tpl ${k.id}`);
     return { text: `📝 Mande agora <b>um post no padrão do canal</b>: copie e cole ou encaminhe (pode ser a foto com a legenda). Mantenha os emojis personalizados, a citação da sequência e o link: eu troco a sequência e o link em cada entrada.`, kb: { inline_keyboard: [[BTN('✖️ Cancelar', `/cn ${id} tpl`)]] } };
+  }
+  if (field === 'remover') {
+    await sb(`canais?id=eq.${k.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: false }) });
+    return { text: `🗑️ <b>${esc(k.title ?? '')}</b> saiu do hub. O bot não posta mais lá.`, kb: { inline_keyboard: [[BTN('⬅️ Canais', '/canais')]] } };
   }
   if (field === 'tplreset') { await saveCfg(k, { tpl: null }); return cnCmd(chatId, [id, 'tpl']); }
   if (field === 'tplprev') {
@@ -1330,9 +1365,16 @@ async function pendingText(chatId: number, text: string, m: any = null): Promise
 async function handle(update: any) {
   const cm = update.my_chat_member, cpost = update.channel_post;
   if (cpost?.chat?.type === 'channel') { const k = await canalByChat(cpost.chat.id); if (k) await canalPost(cpost, k); else await canalSeen(null, cpost); return; }
-  if (cm?.chat?.type === 'channel') { await canalSeen(cm, null); return; }
+  if (cm && (cm.chat?.type === 'channel' || GRP(cm.chat?.type))) { await canalSeen(cm, null); return; }
+  // grupos do hub: só o dono mexe (link de bilhete); nada de responder "bot privado" dentro de grupo
+  const gm = update.message && GRP(update.message.chat?.type) ? update.message : null;
+  if (gm) {
+    if (gm.migrate_to_chat_id) { await sb(`canais?chat_id=eq.${gm.chat.id}`, { method: 'PATCH', body: JSON.stringify({ chat_id: gm.migrate_to_chat_id }) }).catch(() => null); return; }
+    const k = await canalByChat(gm.chat.id); if (k && await canEdit(k, gm.from?.id)) await canalPost(gm, k);
+    return;
+  }
   const cq = update.callback_query;
-  if (cq?.message?.chat?.type === 'channel') { await canalCb(cq); return; }
+  if (cq && (cq.message?.chat?.type === 'channel' || GRP(cq.message?.chat?.type))) { await canalCb(cq); return; }
   const msg = update.message ?? cq?.message;
   let text: string | undefined = update.message?.text ?? update.message?.caption ?? cq?.data;
   if (!msg || !text) return;
