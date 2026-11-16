@@ -92,8 +92,18 @@ async function linkHTML(x: any, code?: string | null, c = '99', k?: Canal) {
   const parts = await Promise.all(games.map(async l => `<a href="${await evLink(l.ev, c)}">${l.home} x ${l.away}</a>`));
   return `🎟️ Abrir os jogos na ${CASAS[c].nome}: ${parts.join(' · ')}`;
 }
-function fill(cap: string, kind: string, link: string, k: Canal) {
-  const un = (kind === 'multipla' && k.cfg.unMulti) || k.cfg.un || '1 unidade', rod = k.cfg.rodape ?? '';
+// ---------- unidade (fixa ou variável pela força da entrada) ----------
+// variável (só simples): EV 10%+ com chance 60%+ → 2x a base; EV 6%+ → 1,5x; o resto → 1x. Múltiplas: sempre a base.
+const varUn = (k: Canal) => !!k.cfg.unVar || (+k.cfg.unBase || 1) !== 1;
+function stakeOf(x: any, kind: string, k: Canal) {
+  const base = +k.cfg.unBase || 1;
+  if (kind !== 'simples' || !k.cfg.unVar) return base;
+  const e = +x.edge || 0, p = +x.p || 0;
+  return base * (e >= .10 && p >= .60 ? 2 : e >= .06 ? 1.5 : 1);
+}
+const unText = (st: number) => st === 1 ? '1 unidade' : `${String(Math.round(st * 100) / 100).replace('.', ',')} unidades`;
+function fill(cap: string, kind: string, link: string, k: Canal, st = 1) {
+  const un = varUn(k) ? unText(st) : (kind === 'multipla' && k.cfg.unMulti) || k.cfg.un || '1 unidade', rod = k.cfg.rodape ?? '';
   return cap.replace('{UN}', esc(un)).replace('{LINK}', link) + (!rod || rod === '0' ? '' : `\n\n<i>${esc(rod)}</i>`);
 }
 const resumo = (x: any) => legsOf(x).map((l: any) => `${esc(l.name)} · ${MKS[l.mk] ?? l.mk} ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)} @${n2(l.odd)}`).join('\n');
@@ -104,7 +114,7 @@ const resumo = (x: any) => legsOf(x).map((l: any) => `${esc(l.name)} · ${MKS[l.
 // {ODD} e {JOGADOR} viram a odd e o(s) jogador(es). Offsets em UTF-16, como o Telegram (e o JavaScript) contam.
 type Ent = { type: string; offset: number; length: number; url?: string; custom_emoji_id?: string; language?: string };
 const SEQ_RE = /\d{1,2}(?:\s*-\s*\d{1,2}){4,}/;
-function tplApply(tpl: { text: string; entities?: Ent[] }, v: { seq: string; url: string; linkText: string; odd: string; names: string }) {
+function tplApply(tpl: { text: string; entities?: Ent[] }, v: { seq: string; url: string; linkText: string; odd: string; names: string; un?: string }) {
   let text = tpl.text ?? '', ents: Ent[] = (tpl.entities ?? []).map(e => ({ ...e }));
   const repl = (start: number, end: number, str: string, add?: Ent) => {
     const d = str.length - (end - start);
@@ -122,18 +132,19 @@ function tplApply(tpl: { text: string; entities?: Ent[] }, v: { seq: string; url
   const sub = (re: RegExp, str: string, add?: Ent) => { const m = re.exec(text); if (!m) return false; repl(m.index, m.index + m[0].length, str, add); return true; };
   if (!sub(/\{SEQU[EÊ]NCIA\}|\{SEQ\}/i, v.seq || '—')) sub(SEQ_RE, v.seq || '—'); // nunca deixa a sequência do post de exemplo
   while (sub(/\{ODD\}/i, v.odd)); while (sub(/\{JOGADORE?S?\}/i, v.names));
+  if (v.un && !sub(/\{UNIDADES?\}/i, v.un)) sub(/\d+(?:[.,]\d+)?\s*unidades?/i, v.un); // unidade variável
   let linked = false;
   for (const e of ents) if (e.type === 'text_link') { e.url = v.url; linked = true; }
   if (sub(/\{LINK\}/i, v.linkText, { type: 'text_link', offset: 0, length: 0, url: v.url })) linked = true;
   if (!linked) { const start = text.length + 2; text += '\n\n' + v.linkText; ents.push({ type: 'text_link', offset: start, length: v.linkText.length, url: v.url }); }
   return { text, entities: ents.filter(e => e.length > 0 && e.offset >= 0 && e.offset + e.length <= text.length) };
 }
-async function tplCaption(x: any, kind: string, code: string | null, c: string, k: Canal) {
+async function tplCaption(x: any, kind: string, code: string | null, c: string, k: Canal, st = 1) {
   const legs = legsOf(x), seqs = legs.filter((l: any) => l.sq?.length);
   const seq = legs.length === 1 ? (seqs[0]?.sq ?? []).slice(0, 10).join('-') : seqs.map((l: any) => `${l.name}: ${l.sq.slice(0, 10).join('-')}`).join('\n');
   const url = code ? await shareLink(code, c, k) : await evLink(legs[0].ev, c);
   return tplApply(k.cfg.tpl, { seq, url, linkText: code ? 'Clique aqui para pegar o bilhete pronto.' : `Clique aqui para abrir o jogo na ${CASAS[c].nome}.`,
-    odd: n2(+x.odd), names: legs.map((l: any) => l.name).join(', ') });
+    odd: n2(+x.odd), names: legs.map((l: any) => l.name).join(', '), un: varUn(k) ? unText(st) : undefined });
 }
 // manda com as entities; se o Telegram recusar os emojis personalizados (bot sem permissão no canal), manda sem eles
 async function tgCaption(method: string, body: any, capKey: 'caption' | 'media' = 'caption') {
@@ -157,30 +168,32 @@ function chKb(id: number, c: string, k: Canal) {
 
 // ---------- postar ----------
 async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: string, k: Canal, to?: string, casa?: string) {
-  const chat = to ?? String(k.chat_id), c = casaOf(casa ?? k.cfg.casa);
+  const chat = to ?? String(k.chat_id), c = casaOf(casa ?? k.cfg.casa), st = stakeOf(x, kind, k);
   const photo = APP + (c === '365' ? (x.img365 ?? img365(x.img)) : x.img) + '?v=' + encodeURIComponent(gen ?? Date.now());
   let r: any;
   if (k.cfg.tpl?.text) { // padrão de mensagem do canal (com emojis personalizados)
-    const t = await tplCaption(x, kind, null, c, k), pre = to ? `[PRÉVIA · ${k.title ?? ''}]\n` : '';
+    const t = await tplCaption(x, kind, null, c, k, st), pre = to ? `[PRÉVIA · ${k.title ?? ''}]\n` : '';
     r = await tgCaption('sendPhoto', { chat_id: chat, photo, caption: pre + t.text, caption_entities: t.entities.map(e => ({ ...e, offset: e.offset + pre.length })) });
   } else {
-    const caption = fill(x.cap, kind, await linkHTML(x, null, c, k), k);
+    const caption = fill(x.cap, kind, await linkHTML(x, null, c, k), k, st);
     r = await TG('sendPhoto', { chat_id: chat, photo, caption: to ? `[PRÉVIA · ${esc(k.title ?? '')}] ` + caption : caption, parse_mode: 'HTML' });
   }
   if (!r.ok || to) return r;
   const fid = r.result?.photo?.at?.(-1)?.file_id;
   const [row] = await sb('channel_posts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({
     canal_id: k.id, date, kind, legs: minLegs(x), odd: x.odd, band: x.band ?? null, status: 'postada', link: await linkHTML(x, null, c, k), channel_msg_id: r.result.message_id,
-    owner_chat: k.owner ?? null, pkey: x.key, cap: x.cap, img: x.img, casa: c, fids: fid ? { [c]: fid } : {}, posted_at: new Date().toISOString() }) });
+    owner_chat: k.owner ?? null, pkey: x.key, cap: x.cap, img: x.img, casa: c, fids: fid ? { [c]: fid } : {}, stake: st, posted_at: new Date().toISOString() }) });
   const kb = chKb(row.id, c, k);
   if (kb) await TG('editMessageReplyMarkup', { chat_id: chat, message_id: r.result.message_id, reply_markup: kb });
+  if (k.cfg.espelho && k.cfg.espelhoModo === 'na_hora') await mirror(row, k);
   return r;
 }
 // troca a imagem e a legenda de um post já publicado (casa nova, bilhete pronto ou print do dono)
 async function repaint(row: any, c: string, code: string | null, photo: string | null) {
   const k = await canalById(row.canal_id), chat = String(k.chat_id);
-  const T = k.cfg.tpl?.text ? await tplCaption({ legs: row.legs, odd: row.odd }, row.kind, code, c, k) : null;
-  const capFields = T ? { caption: T.text, caption_entities: T.entities } : { caption: fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code, c, k), k), parse_mode: 'HTML' };
+  const st = +row.stake || 1;
+  const T = k.cfg.tpl?.text ? await tplCaption({ legs: row.legs, odd: row.odd }, row.kind, code, c, k, st) : null;
+  const capFields = T ? { caption: T.text, caption_entities: T.entities } : { caption: fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code, c, k), k, st), parse_mode: 'HTML' };
   const fids = { ...(row.fids ?? {}) };
   const media = photo ?? fids.print ?? fids[c] ?? (APP + (c === '365' ? img365(row.img) : row.img) + '?v=' + Date.now());
   const kb = chKb(row.id, c, k);
@@ -192,7 +205,24 @@ async function repaint(row: any, c: string, code: string | null, photo: string |
   } else if (r.result?.photo) { const f = r.result.photo.at(-1).file_id; if (photo) fids.print = f; else if (!fids.print) fids[c] = f; }
   if (!r.ok) return { ok: false, erro: r.description };
   await sb(`channel_posts?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify({ casa: c, fids, ...(code ? { share_code: code, link: await shareLink(code, c, k) } : {}) }) });
-  return { ok: true, id: row.id, casa: CASAS[c].nome, imagem: !!photo };
+  // canal oficial (espelho): copia quando o bilhete pronto é ligado; se já tinha copiado, atualiza a cópia
+  let espelho = false;
+  if (k.cfg.espelho) {
+    if (row.espelho_msg) {
+      const m2 = await tgCaption('editMessageMedia', { chat_id: row.espelho_chat, message_id: row.espelho_msg, media: { type: 'photo', media: photo ?? fids.print ?? fids[c] ?? media, ...capFields } }, 'media');
+      if (!m2.ok && !/not modified/i.test(m2.description ?? '')) await tgCaption('editMessageCaption', { chat_id: row.espelho_chat, message_id: row.espelho_msg, ...capFields });
+      espelho = true;
+    } else if (code || k.cfg.espelhoModo === 'na_hora') espelho = await mirror({ ...row, share_code: code ?? row.share_code }, k);
+  }
+  return { ok: true, id: row.id, casa: CASAS[c].nome, imagem: !!photo, espelho };
+}
+// copia o post (sem os botões de controle) para o canal oficial ligado a este canal
+async function mirror(row: any, k: Canal) {
+  const t = (await canais()).find(x => String(x.id) === String(k.cfg.espelho)); if (!t) return false;
+  const r = await TG('copyMessage', { chat_id: t.chat_id, from_chat_id: k.chat_id, message_id: row.channel_msg_id, reply_markup: { inline_keyboard: [] } });
+  if (!r.ok) { await postFail(t, etDate(), r.description); return false; }
+  await sb(`channel_posts?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify({ espelho_chat: t.chat_id, espelho_msg: r.result.message_id }) });
+  return true;
 }
 const fresh = (x: any, now: number) => legsOf(x).every((l: any) => Date.parse(l.tip) > now + LEAD && (!l.t9 || now - Date.parse(l.t9) < STALE));
 
@@ -201,7 +231,8 @@ async function run() {
   const out: Record<string, unknown> = {};
   out.conferidas = await settle().catch(e => ({ erro: String(e) }));
   if ((await cfg('CANAL_ON', '1')) === '0') return { ...out, skip: 'canais pausados (CANAL_ON=0)' };
-  const ks = (await canais()).filter(k => k.cfg.on !== false);
+  const ks = (await canais()).filter(k => k.cfg.on !== false && k.cfg.modo !== 'espelho');
+  out.semanal = await weekly(ks).catch(e => ({ erro: String(e) }));
   if (!ks.length) return { ...out, skip: 'nenhum canal conectado' };
   const P = await getJ('canal.json'), date = etDate();
   if (!P || P.date !== date) return { ...out, skip: `pauta de ${P?.date ?? '—'}, hoje é ${date}` };
@@ -296,7 +327,7 @@ async function setCasa(id: string, c: string) {
 
 // ---------- conferir: green/red respondendo o próprio post; resumo do dia só para o dono ----------
 async function settle() {
-  const open: any[] = await sb('channel_posts?status=eq.postada&select=id,canal_id,date,kind,legs,odd,band,channel_msg_id') ?? [];
+  const open: any[] = await sb('channel_posts?status=eq.postada&select=id,canal_id,date,kind,legs,odd,band,channel_msg_id,stake,espelho_chat,espelho_msg') ?? [];
   if (!open.length) return 0;
   const res = await getJ('results.json'); if (!res?.stats) return 0;
   const done = (date: string, team: string) => !!res.games?.[date]?.some((g: any[]) => g[1] === team || g[2] === team);
@@ -312,12 +343,13 @@ async function settle() {
     const live = legs.filter((_: any, i: number) => st[i] !== 'void');
     const status = st.includes('red') ? 'red' : !live.length ? 'void' : 'green';
     const odd = live.reduce((o: number, l: any) => o * +l.odd, 1);
-    const profit = status === 'green' ? Math.round((odd - 1) * 100) / 100 : status === 'red' ? -1 : 0;
+    const stk = +p.stake || 1, profit = status === 'green' ? Math.round(stk * (odd - 1) * 100) / 100 : status === 'red' ? -stk : 0;
     await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ status, profit, settled_at: new Date().toISOString() }) });
     const k = await canalById(p.canal_id), chat = k?.chat_id;
     if (k?.cfg.resultado !== false && chat && p.channel_msg_id) {
       const text = status === 'green' ? `✅ <b>GREEN</b>${live.length < legs.length ? ` <i>(perna anulada; odd ${n2(odd)})</i>` : ''}` : status === 'red' ? '❌ <b>RED</b>' : '↩️ <b>Anulada</b> <i>(jogador não entrou)</i>';
       await TG('sendMessage', { chat_id: chat, text, parse_mode: 'HTML', reply_parameters: { message_id: p.channel_msg_id, allow_sending_without_reply: true }, disable_notification: true });
+      if (p.espelho_msg) await TG('sendMessage', { chat_id: p.espelho_chat, text, parse_mode: 'HTML', reply_parameters: { message_id: p.espelho_msg, allow_sending_without_reply: true }, disable_notification: true });
     }
     days.add(`${p.date}|${p.canal_id}`); n++;
   }
@@ -334,8 +366,34 @@ async function dayReport(date: string, cid: string) {
   const S = part('simples'), M = part('multipla'), U = S.u + M.u;
   const u = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2).replace('.', ',') + 'u';
   const [, mm, dd] = date.split('-');
-  await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📊 <b>${esc(k.title ?? 'Canal')} · ${dd}/${mm}</b>\n<blockquote>Simples: ${S.g} ✅ · ${S.r} ❌ de ${S.n} · <b>${u(S.u)}</b>\nMúltiplas: ${M.g} ✅ · ${M.r} ❌ de ${M.n} · <b>${u(M.u)}</b>\nDia: <b>${u(U)}</b> (1u por entrada)</blockquote>` });
+  await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📊 <b>${esc(k.title ?? 'Canal')} · ${dd}/${mm}</b>\n<blockquote>Simples: ${S.g} ✅ · ${S.r} ❌ de ${S.n} · <b>${u(S.u)}</b>\nMúltiplas: ${M.g} ✅ · ${M.r} ❌ de ${M.n} · <b>${u(M.u)}</b>\nDia: <b>${u(U)}</b> (em unidades)</blockquote>` });
   await setCfg(key, '1');
+}
+
+// ---------- resumo semanal no canal (segunda, a partir das 10h): placar completo da semana + os melhores greens ----------
+// Mostra greens e reds (placar honesto); os destaques são os greens de maior odd. Com canal oficial ligado, vai para o
+// oficial e conta só o que foi copiado para lá.
+async function weekly(ks: Canal[]) {
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(new Date());
+  if (wd !== 'Mon' || hourBRnow() < 10) return 0;
+  const today = etDate(), day = (n: number) => new Date(Date.parse(today + 'T12:00:00Z') - n * 864e5).toISOString().slice(0, 10);
+  const from = day(7), to = day(1); let n = 0;
+  for (const k of ks.filter(k => k.cfg.semanal)) {
+    const key = `CANAL_SEMANA_${k.id}_${today}`; if (await cfg(key)) continue;
+    const t = k.cfg.espelho ? (await canais()).find(x => String(x.id) === String(k.cfg.espelho)) : null;
+    let rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=gte.${from}&date=lte.${to}&status=in.(green,red)&select=kind,status,profit,odd,legs,espelho_msg`) ?? [];
+    if (t) rows = rows.filter(r => r.espelho_msg);
+    await setCfg(key, '1');
+    if (!rows.length) continue;
+    const g = rows.filter(r => r.status === 'green'), u = rows.reduce((a, r) => a + (+r.profit || 0), 0);
+    const top = g.sort((a, b) => +b.odd - +a.odd).slice(0, 8).map(r => r.kind === 'multipla' ? `✅ Múltipla @${n2(+r.odd)} (${(r.legs ?? []).length} pernas)`
+      : `✅ ${esc(r.legs?.[0]?.name ?? '')} ${r.legs?.[0]?.side === 'o' ? 'mais' : 'menos'} ${n1(+r.legs?.[0]?.line)} ${MKS[r.legs?.[0]?.mk] ?? ''} @${n2(+r.odd)}`);
+    const dm = (d: string) => d.slice(8, 10) + '/' + d.slice(5, 7);
+    const text = `📊 <b>RESUMO DA SEMANA</b> · ${dm(from)} a ${dm(to)}\n<blockquote>✅ ${g.length} greens · ❌ ${rows.length - g.length} reds · ${Math.round(100 * g.length / rows.length)}% de acerto\n💰 Resultado: <b>${u >= 0 ? '+' : ''}${n2(u)} unidades</b></blockquote>\n🔥 <b>Destaques</b>\n${top.join('\n')}`;
+    const r = await TG('sendMessage', { chat_id: (t ?? k).chat_id, text, parse_mode: 'HTML' });
+    if (r.ok) n++;
+  }
+  return n;
 }
 
 Deno.serve(async (req: Request) => {
@@ -359,7 +417,7 @@ Deno.serve(async (req: Request) => {
         pauta: { date: P.date, simples: pauta.singles?.length, multiplas: pauta.multis?.map((x: any) => x.band + '@' + x.odd) } });
     }
     if (u.searchParams.has('hub')) { // público: só o necessário para a divisão (sem chat, dono ou links)
-      const ks = (await canais()).filter(k => k.cfg.on !== false), d = etDate();
+      const ks = (await canais()).filter(k => k.cfg.on !== false && k.cfg.modo !== 'espelho'), d = etDate();
       const pick = (c: any) => ({ max: c.max, oddMin: c.oddMin, oddMax: c.oddMax, evMin: c.evMin, mercados: c.mercados, lado: c.lado, multis: c.multis });
       const postados = (await sb(`channel_posts?date=eq.${d}&select=canal_id,kind,pkey,band,legs`) ?? []).map((p: any) => ({ ...p, legs: (p.legs ?? []).map((l: any) => ({ pid: l.pid, mk: l.mk, side: l.side })) }));
       return json({ date: d, canais: ks.map(k => ({ id: k.id, cfg: pick(k.cfg) })), postados });

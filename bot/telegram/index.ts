@@ -1103,7 +1103,7 @@ async function canalAdd(chatId: number | string, title: string | undefined, owne
   await sb('canais?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: +chatId, title: title ?? null, owner: +owner, ativo: true }) });
   const k = await canalByChat(chatId), own = await isAdmin(owner), perm = await botRights(chatId);
   await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', text: `✅ <b>Canal conectado:</b> ${esc(title ?? String(chatId))}\nAs postagens automáticas começam na próxima atualização (até 1h), a partir das 10h, com a configuração padrão.\n<blockquote>${perm.txt}</blockquote>${perm.ok ? '' : '\n⚠️ <b>Falta permissão</b>: no canal, Administradores → bot → ligue o que está com ❌.'}${own ? '' : '\n\n⚠️ <b>Cadastre os seus links de afiliado</b>: sem eles, os bilhetes prontos saem sem ref.'}`,
-    reply_markup: { inline_keyboard: [[BTN('⚙️ Configurar o canal', `/cn ${k?.id}`)], ...(own ? [] : [[BTN('🔗 Meus links de afiliado', `/cn ${k?.id} refs`)]]), ...(perm.ok ? [] : [[BTN('🔄 Conferir permissões', `/cn ${k?.id} perm`)]])] } });
+    reply_markup: { inline_keyboard: [[BTN('⚙️ Configurar o canal', `/cn ${k?.id}`)], ...((await canalRows(`&owner=eq.${owner}`)).length > 1 ? [[BTN('🪞 É o canal oficial de outro canal?', `/cn ${k?.id} espde`)]] : []), ...(own ? [] : [[BTN('🔗 Meus links de afiliado', `/cn ${k?.id} refs`)]]), ...(perm.ok ? [] : [[BTN('🔄 Conferir permissões', `/cn ${k?.id} perm`)]])] } });
 }
 // ---------- controles dentro do canal ----------
 const SHARE_RE = /(?:99play|br365)\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi;
@@ -1142,7 +1142,7 @@ async function canalCb(cq: any) {
   let ok = id === 'x', txt = 'Cancelado';
   if (id !== 'x') {
     const r = await canalFn('relink', `id=${encodeURIComponent(id)}&code=${encodeURIComponent(code)}${pend.photo ? '&photo=' + encodeURIComponent(pend.photo) : ''}`);
-    ok = !!r.ok; txt = r.ok ? `✅ Bilhete pronto na ${r.casa}${r.imagem ? ' (com o print)' : ''}` : `Não consegui: ${r.erro ?? 'erro'}`;
+    ok = !!r.ok; txt = r.ok ? `✅ Bilhete pronto na ${r.casa}${r.imagem ? ' (com o print)' : ''}${r.espelho ? ' · copiado no oficial' : ''}` : `Não consegui: ${r.erro ?? 'erro'}`;
   }
   await TG('answerCallbackQuery', { callback_query_id: cq.id, text: txt });
   if (ok) { await delMsgs(ch, [cq.message.message_id, ...(pend.del ?? [])]); await delCfgKey('CANAL_PEND_' + code); }
@@ -1207,7 +1207,8 @@ async function canaisCmd(chatId: number, arg: string): Promise<Out> {
   const ks = adm ? await canalRows() : await canalRows(`&owner=eq.${chatId}`);
   if (!ks.length) return { text: '📢 <b>Canais</b>\nVocê ainda não tem canal conectado. Coloque o bot como <b>administrador</b> do seu canal (com permissão de postar, editar e apagar mensagens): ele aparece aqui sozinho.' };
   const today = etDate(), rows: any[] = await sb(`channel_posts?date=eq.${today}&select=canal_id,kind,status`).catch(() => []) ?? [];
-  const line = (k: Canal) => { const r = rows.filter(x => x.canal_id === k.id); return `${k.cfg.on ? '🟢' : '⏸️'} <b>${esc(k.title ?? String(k.chat_id))}</b> · hoje ${r.filter(x => x.kind === 'simples').length} simples, ${r.filter(x => x.kind === 'multipla').length} múltiplas`; };
+  const line = (k: Canal) => { const r = rows.filter(x => x.canal_id === k.id);
+    return k.cfg.modo === 'espelho' ? `🪞 <b>${esc(k.title ?? String(k.chat_id))}</b> · canal oficial (cópia)` : `${k.cfg.on ? '🟢' : '⏸️'} <b>${esc(k.title ?? String(k.chat_id))}</b> · hoje ${r.filter(x => x.kind === 'simples').length} simples, ${r.filter(x => x.kind === 'multipla').length} múltiplas`; };
   return { text: `📢 <b>Hub de canais</b>\n<blockquote>${ks.map(line).join('\n')}</blockquote>\n<i>Os canais dividem as melhores entradas do dia em rodízio, sem prioridade; cada um repete no máximo 30% com os outros. Toque num canal para configurar.</i>`,
     kb: { inline_keyboard: [...ks.map(k => [BTN(`⚙️ ${k.title ?? k.chat_id}`, `/cn ${k.id}`)]), HOME] } };
 }
@@ -1229,6 +1230,20 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
     return { text: `🏷️ <b>Mercados</b> · ${esc(k.title)}\n<i>Toque para ligar/desligar. Vale para as simples e para as pernas das múltiplas.</i>`,
       kb: { inline_keyboard: [...chunk(MK_ORDER.map(m => BTN(`${on(m) ? '✅' : '▫️'} ${MK_BTN[m]}`, `/cf ${k.id} mk ${m}`)), 3), [BTN('✅ Todos', `/cf ${k.id} mk all`)], back] } };
   }
+  if (scr === 'un') return { text: `💰 <b>Unidade</b> · ${esc(k.title)}\n<blockquote>Base: <b>${String(+c.unBase || 1).replace('.', ',')}u</b> · ${c.unVar ? 'variável pela força da entrada' : 'fixa'}</blockquote>\n<i>Variável (só simples): EV 10%+ com chance 60%+ → 2× a base · EV 6%+ → 1,5× · o resto → 1×. Múltiplas ficam na base. O texto "1 unidade" do post muda sozinho e o desempenho conta o valor certo.</i>`,
+    kb: { inline_keyboard: [[BTN(`${c.unVar ? '' : '✅ '}Fixa`, `/cf ${k.id} unVar 0`), BTN(`${c.unVar ? '✅ ' : ''}Variável (1–2×)`, `/cf ${k.id} unVar 1`)], opts('unBase', [0.5, 1, 2], v => String(v).replace('.', ',') + 'u base', +c.unBase || 1)[0], back] } };
+  if (scr === 'esp') {
+    const mine = (await isAdmin(chatId) ? await canalRows() : await canalRows(`&owner=eq.${chatId}`)).filter(x => x.id !== k.id && x.cfg.modo !== 'espelho' || String(x.id) === String(c.espelho));
+    const alvo = mine.find(x => String(x.id) === String(c.espelho));
+    return { text: `🪞 <b>Canal oficial (espelho)</b> · ${esc(k.title)}\n<blockquote>${alvo ? `Copiando para <b>${esc(alvo.title ?? '')}</b> · ${c.espelhoModo === 'na_hora' ? 'na hora do post' : 'quando o bilhete pronto é ligado'}` : 'Desligado'}</blockquote>\n<i>Use este canal como sala de controle: os posts saem aqui (com os botões) e a cópia limpa, sem botões, vai para o canal oficial. O canal oficial não entra na divisão do hub. O green/red também é respondido lá.\nPara aparecer na lista, o bot precisa ser administrador do canal oficial (ele conecta sozinho).</i>`,
+      kb: { inline_keyboard: [...mine.filter(x => x.id !== k.id).map(x => [BTN(`${String(x.id) === String(c.espelho) ? '✅ ' : ''}${x.title ?? x.chat_id}`, `/cf ${k.id} esp ${x.id}`)]),
+        ...(alvo ? [[BTN(`${c.espelhoModo === 'na_hora' ? '' : '✅ '}Ao ligar o bilhete`, `/cf ${k.id} espModo bilhete`), BTN(`${c.espelhoModo === 'na_hora' ? '✅ ' : ''}Na hora`, `/cf ${k.id} espModo na_hora`)], [BTN('❌ Desligar espelho', `/cf ${k.id} esp 0`)]] : []), back] } };
+  }
+  if (scr === 'espde') { // o canal recém-conectado é o oficial (cópia) de outro canal do mesmo dono
+    const srcs = (await isAdmin(chatId) ? await canalRows() : await canalRows(`&owner=eq.${chatId}`)).filter(x => x.id !== k.id && x.cfg.modo !== 'espelho');
+    return { text: `🪞 <b>${esc(k.title)}</b> é o canal oficial de qual canal?\n<i>Ele passa a receber a cópia limpa dos posts de lá e sai da divisão do hub.</i>`,
+      kb: { inline_keyboard: [...srcs.map(x => [BTN(`${x.title ?? x.chat_id}`, `/cf ${x.id} esp ${k.id}`)]), [BTN('Não, é um canal normal', `/cn ${k.id}`)]] } };
+  }
   if (scr === 'perm') {
     const perm = await botRights(k.chat_id);
     return { text: `🔐 <b>Permissões do bot</b> · ${esc(k.title)}\n<blockquote>${perm.txt}</blockquote>${perm.ok ? '✅ Tudo certo.' : `⚠️ No canal: Administradores → @blackhouse_props_bot → ligue o que está com ❌.${perm.erro ? `\n<i>${esc(perm.erro)}</i>` : ''}`}`,
@@ -1236,13 +1251,13 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
   }
   if (scr === 'perf') {
     const since = (d: number) => etDate(Date.now() - d * 864e5);
-    const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=gte.${since(30)}&status=in.(green,red,void)&select=date,kind,status,profit,legs`).catch(() => []) ?? [];
-    const sum = (xs: any[]) => { const n = xs.filter(x => x.status !== 'void').length, g = xs.filter(x => x.status === 'green').length, u = xs.reduce((a, x) => a + (+x.profit || 0), 0);
-      return n ? `${g}/${n} (${Math.round(100 * g / n)}%) · <b>${u >= 0 ? '+' : ''}${n2(u)}u</b> · ROI ${u >= 0 ? '+' : ''}${Math.round(100 * u / n)}%` : '—'; };
+    const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=gte.${since(30)}&status=in.(green,red,void)&select=date,kind,status,profit,legs,stake`).catch(() => []) ?? [];
+    const sum = (xs: any[]) => { const ys = xs.filter(x => x.status !== 'void'), n = ys.length, g = ys.filter(x => x.status === 'green').length, u = ys.reduce((a, x) => a + (+x.profit || 0), 0), st = ys.reduce((a, x) => a + (+x.stake || 1), 0);
+      return n ? `${g}/${n} (${Math.round(100 * g / n)}%) · <b>${u >= 0 ? '+' : ''}${n2(u)}u</b> · ROI ${u >= 0 ? '+' : ''}${Math.round(100 * u / st)}%` : '—'; };
     const per = (d: number, kind: string) => sum(rows.filter(r => r.date >= since(d) && r.kind === kind));
     const byMk: Record<string, any[]> = {}; for (const r of rows.filter(r => r.kind === 'simples')) (byMk[r.legs?.[0]?.mk] ??= []).push(r);
     const mk = Object.entries(byMk).map(([m, xs]) => [m, xs.reduce((a, x) => a + (+x.profit || 0), 0), xs.length] as [string, number, number]).filter(x => x[2] >= 3).sort((a, b) => b[1] - a[1]);
-    return { text: `📈 <b>Desempenho</b> · ${esc(k.title)} <i>(1u por entrada, só o que já foi conferido)</i>
+    return { text: `📈 <b>Desempenho</b> · ${esc(k.title)} <i>(em unidades, só o que já foi conferido)</i>
 <blockquote><b>7 dias</b>\nSimples: ${per(7, 'simples')}\nMúltiplas: ${per(7, 'multipla')}\n\n<b>30 dias</b>\nSimples: ${per(30, 'simples')}\nMúltiplas: ${per(30, 'multipla')}</blockquote>${mk.length ? `\n<b>Mercados (simples, 30 dias, 3+ entradas)</b>\n<blockquote>${mk.slice(0, 8).map(([m, u, n]) => `${MK_BTN[m] ?? m}: ${u >= 0 ? '+' : ''}${n2(u)}u em ${n}`).join('\n')}</blockquote>\n<i>Mercado que só perde? Desligue em 🏷️ Mercados.</i>` : ''}`,
       kb: { inline_keyboard: [back] } };
   }
@@ -1256,7 +1271,8 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
   if (scr === 'mais') return { text: `⚙️ <b>Mais opções</b> · ${esc(k.title)}`, kb: { inline_keyboard: [
     [BTN(`${c.botoes ? '✅' : '▫️'} Botões 99play/BR365 nos posts`, `/cf ${k.id} botoes ${c.botoes ? 0 : 1}`)],
     [BTN(`${c.resultado ? '✅' : '▫️'} Responder ✅ GREEN / ❌ RED no canal`, `/cf ${k.id} resultado ${c.resultado ? 0 : 1}`)],
-    [BTN(`${c.rodape ? '✅' : '▫️'} Rodapé 🔞 18+`, `/cf ${k.id} rodape ${c.rodape ? 0 : 1}`)], back] } };
+    [BTN(`${c.rodape ? '✅' : '▫️'} Rodapé 🔞 18+`, `/cf ${k.id} rodape ${c.rodape ? 0 : 1}`)],
+    [BTN(`${c.semanal ? '✅' : '▫️'} Resumo semanal no canal (segunda, 10h)`, `/cf ${k.id} semanal ${c.semanal ? 0 : 1}`)], back] } };
   if (scr === 'refs') return { text: `🔗 <b>Links de afiliado</b> · ${esc(k.title)}\n<blockquote>99play: <b>${esc(c.ref99 || (String(k.owner) === (await cfg()).allowed[0] ? (await cfg()).affRef + ' (padrão do bot)' : '— sem ref'))}</b>\nBR365: <b>${esc(c.ref365 || (String(k.owner) === (await cfg()).allowed[0] ? (await cfg()).affRef365 + ' (padrão do bot)' : '— sem ref'))}</b></blockquote>\n<i>O ref vai só no link do bilhete pronto (o link do jogo sai sem ref).</i>`,
     kb: { inline_keyboard: [[BTN('🔗 Definir 99play', `/cf ${k.id} askref 99`), BTN('🔗 Definir BR365', `/cf ${k.id} askref 365`)], back] } };
   if (scr === 'mul') {
@@ -1275,6 +1291,11 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
     return { text: `➕ <b>Nova múltipla</b> · odd ~${odd} · ${pernas === '0' ? '2 a 6' : pernas} pernas\nLado?`, kb: { inline_keyboard: [[BTN('Under', `/cf ${k.id} madd ${pernas} ${odd} u`), BTN('Over', `/cf ${k.id} madd ${pernas} ${odd} o`), BTN('Misto', `/cf ${k.id} madd ${pernas} ${odd} m`)], [BTN('⬅️ Voltar', `/cn ${k.id} madd ${pernas}`)]] } };
   }
   // painel principal
+  if (c.modo === 'espelho') {
+    const src = (await canalRows()).find(x => String(x.cfg.espelho) === String(k.id));
+    return { text: `🪞 <b>${esc(k.title ?? '')}</b> é o canal oficial de <b>${esc(src?.title ?? '—')}</b>.\nRecebe a cópia limpa dos posts de lá e não entra na divisão do hub.`,
+      kb: { inline_keyboard: [...(src ? [[BTN(`⚙️ ${src.title}`, `/cn ${src.id}`)]] : []), [BTN('🔐 Permissões', `/cn ${k.id} perm`), BTN('🗑️ Remover', `/cn ${k.id} rm`)], [BTN('⬅️ Canais', '/canais')]] } };
+  }
   const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=eq.${etDate()}&select=kind,status`).catch(() => []) ?? [];
   const mk = c.mercados?.length ? c.mercados.map((m: string) => MK_BTN[m] ?? m).join(', ') : 'todos';
   const text = `📢 <b>${esc(k.title ?? String(k.chat_id))}</b> · ${c.on ? '🟢 postando' : '⏸️ pausado'}
@@ -1282,6 +1303,7 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
 Mercados: ${esc(mk)}
 Múltiplas: ${specBands(k).length}${c.multis?.length ? '' : ' (padrão 10/15/25 over e under)'}
 Casa: <b>${c.casa === '365' ? 'BR365' : '99play'}</b> · começa às ${c.inicio}h · mensagem: ${c.tpl?.text ? 'padrão do canal' : 'padrão do bot'}
+Unidade: ${String(+c.unBase || 1).replace('.', ',')}u ${c.unVar ? 'variável' : 'fixa'}${c.espelho ? ' · 🪞 com canal oficial' : ''}${c.semanal ? ' · resumo semanal' : ''}
 Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(r => r.kind === 'multipla').length} múltiplas · ${rows.filter(r => r.status === 'green').length} ✅ ${rows.filter(r => r.status === 'red').length} ❌</blockquote>`;
   return { text, kb: { inline_keyboard: [
     [BTN('🎯 Odd mínima', `/cn ${k.id} omin`), BTN('📈 Odd máxima', `/cn ${k.id} omax`)],
@@ -1290,6 +1312,7 @@ Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(
     [BTN('🧩 Múltiplas', `/cn ${k.id} mul`), BTN('🏠 Casa', `/cn ${k.id} casa`)],
     [BTN('🔗 Links de afiliado', `/cn ${k.id} refs`), BTN('⏰ Horário', `/cn ${k.id} ini`)],
     [BTN('📝 Padrão de mensagem', `/cn ${k.id} tpl`), BTN('⚙️ Mais opções', `/cn ${k.id} mais`)],
+    [BTN('💰 Unidade', `/cn ${k.id} un`), BTN('🪞 Canal oficial', `/cn ${k.id} esp`)],
     [BTN('📈 Desempenho', `/cn ${k.id} perf`), BTN('🔐 Permissões', `/cn ${k.id} perm`)],
     [c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`), BTN('🗑️ Remover', `/cn ${k.id} rm`)],
     [BTN('⬅️ Canais', '/canais')]] } };
@@ -1322,6 +1345,19 @@ async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
   if (field === 'asktpl') {
     await putCfgKey('PEND_' + chatId, `tpl ${k.id}`);
     return { text: `📝 Mande agora <b>um post no padrão do canal</b>: copie e cole ou encaminhe (pode ser a foto com a legenda). Mantenha os emojis personalizados, a citação da sequência e o link: eu troco a sequência e o link em cada entrada.`, kb: { inline_keyboard: [[BTN('✖️ Cancelar', `/cn ${id} tpl`)]] } };
+  }
+  if (field === 'unVar') { await saveCfg(k, { unVar: v === '1' }); return cnCmd(chatId, [id, 'un']); }
+  if (field === 'unBase') { const x = +v; if ([0.5, 1, 2].includes(x)) await saveCfg(k, { unBase: x }); return cnCmd(chatId, [id, 'un']); }
+  if (field === 'semanal') { await saveCfg(k, { semanal: v === '1' }); return cnCmd(chatId, [id, 'mais']); }
+  if (field === 'espModo' && ['bilhete', 'na_hora'].includes(v)) { await saveCfg(k, { espelhoModo: v }); return cnCmd(chatId, [id, 'esp']); }
+  if (field === 'esp') {
+    const old = k.cfg.espelho ? await canalById(k.cfg.espelho) : undefined;
+    if (old) await saveCfg(old, { modo: null });
+    if (v === '0') { await saveCfg(k, { espelho: null }); return cnCmd(chatId, [id, 'esp']); }
+    const t = await canalById(v);
+    if (!(await canEdit(t, chatId)) || t.id === k.id) return { text: 'Canal oficial inválido.', kb: { inline_keyboard: [[BTN('⬅️ Voltar', `/cn ${id} esp`)]] } };
+    await saveCfg(t, { modo: 'espelho' }); await saveCfg(k, { espelho: t.id, espelhoModo: k.cfg.espelhoModo ?? 'bilhete' });
+    return cnCmd(chatId, [id, 'esp']);
   }
   if (field === 'remover') {
     await sb(`canais?id=eq.${k.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: false }) });
