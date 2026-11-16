@@ -55,7 +55,8 @@ const CASAS: Record<string, { nome: string; base: string; refKey: string; ref: s
 const casaOf = (c?: string | null) => CASAS[c ?? ''] ? c! : '99';
 const refOf = async (c: string) => encodeURIComponent(await cfg(CASAS[c].refKey, CASAS[c].ref));
 const legsOf = (x: any) => x.legs ?? [x];
-const evLink = async (ev: number | null, c = '99') => `${CASAS[c].base}?ref=${await refOf(c)}${ev ? `#/event/${ev}` : ''}`;
+// link do jogo SEM o ref (com o ref o evento não abre, avisou o usuário em 16/11); o ref vai só no link do bilhete pronto
+const evLink = async (ev: number | null, c = '99') => `${CASAS[c].base}${ev ? `#/event/${ev}` : ''}`;
 const shareLink = async (code: string, c = '99') => `${CASAS[c].base}?ref=${await refOf(c)}&shareCode=${encodeURIComponent(code)}`;
 const gamesOf = (x: any) => { const g = new Map<string, any>(); for (const l of legsOf(x)) if (!g.has(l.game)) g.set(l.game, l); return [...g.values()]; };
 async function linkHTML(x: any, code?: string | null, c = '99') {
@@ -246,7 +247,7 @@ Deno.serve(async (req: Request) => {
     if (ok('preview')) {
       const P = await getJ('canal.json'); const own = await owner();
       if (!P || !own) return json({ ok: false, erro: 'sem pauta ou sem dono' });
-      const s = P.singles?.[0], m = P.multis?.[0];
+      const s = P.singles?.[0], m = P.multis?.[0]; const pc = u.searchParams.get('c'); if (pc && CASAS[pc]) { await cfg('x'); CFG!['CANAL_CASA'] = pc; }
       return json({ ok: true, simples: s ? (await post(s, 'simples', P.date, P.gen, own)).ok : null, multipla: m ? (await post(m, 'multipla', P.date, P.gen, own)).ok : null, pauta: { date: P.date, simples: P.singles?.length, multiplas: P.multis?.map((x: any) => x.band + '@' + x.odd) } });
     }
     return json({ ok: true });
