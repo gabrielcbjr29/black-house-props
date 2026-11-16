@@ -93,6 +93,20 @@ async function run() {
   if (!P || P.date !== date) return { ...out, skip: `pauta de ${P?.date ?? '—'}, hoje é ${date}` };
   const h = hourBRnow(), now = Date.now();
   if (h < +(await cfg('CANAL_INICIO', '10'))) return { ...out, skip: `antes de ${await cfg('CANAL_INICIO', '10')}h` };
+  if (!P.singles?.length && !P.multis?.length) {
+    // pauta vazia: quase sempre é o leitor da 99play parado (sem linha da 99play não sai entrada). Avisa o dono uma vez por dia.
+    if (!(await cfg('CANAL_AVISO_' + date))) {
+      const [snap] = await sb('c99_snapshots?select=taken_at&order=taken_at.desc&limit=1').catch(() => []) ?? [];
+      const age = snap ? (Date.now() - Date.parse(snap.taken_at)) / 36e5 : Infinity;
+      const quando = snap ? new Date(snap.taken_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+      const own = await owner();
+      if (own) await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: age >= 2
+        ? `📢 <b>Canal parado</b>: a pauta de hoje está vazia porque o leitor da 99play não lê desde <b>${quando}</b>.\nAbra a 99play no PC (com o Tampermonkey ligado) e deixe a aba aberta: na próxima atualização as entradas entram e o canal volta a postar sozinho.`
+        : `📢 <b>Canal</b>: a pauta de hoje ainda está vazia (nenhuma entrada passou nos filtros). Assim que aparecer, o canal posta sozinho.` });
+      await setCfg('CANAL_AVISO_' + date, '1');
+    }
+    return { ...out, skip: 'pauta vazia' };
+  }
   const done: any[] = await sb(`channel_posts?date=eq.${date}&select=pkey,kind,band,legs`) ?? [];
   const keys = new Set(done.map(d => d.pkey)), bands = new Set(done.filter(d => d.kind === 'multipla').map(d => d.band));
   const pids = new Set(done.filter(d => d.kind === 'simples').flatMap(d => (d.legs ?? []).map((l: any) => l.pid)));
