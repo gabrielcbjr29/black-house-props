@@ -118,6 +118,10 @@ jobs:
           npx playwright install --with-deps chromium
           node scripts/cards.mjs public
       # pauta do canal do Telegram: simples + múltiplas 10/15/25 com card no padrão do canal (a função canal posta)
+      # escadas (pontos + rebotes + assistências do mesmo jogador): o bot mostra em 🪜 Escadas
+      - name: Gerar as escadas
+        continue-on-error: true
+        run: node scripts/escadas.mjs public
       - name: Gerar a pauta do canal
         continue-on-error: true
         timeout-minutes: 5

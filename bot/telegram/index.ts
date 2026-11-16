@@ -917,7 +917,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status'), BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -959,6 +959,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
   if (cmd === 'canal' || cmd === 'canais') return canaisCmd(chatId, arg);
+  if (cmd === 'escadas' || cmd === 'escada') return escadasCmd(arg);
   if (cmd === 'cn') return cnCmd(chatId, rest);
   if (cmd === 'cf') return cfCmd(chatId, rest);
   if (cmd === 'cb') return cbCmd(chatId, rest);
@@ -1047,6 +1048,36 @@ async function sendCards(chatId: number, arg?: string) {
   const res = pick.length === 1 ? await TG('sendPhoto', { chat_id: chatId, photo: media[0].media, caption: media[0].caption, parse_mode: 'HTML' }) : await TG('sendMediaGroup', { chat_id: chatId, media });
   if (!res.ok) { await TG('sendMessage', { chat_id: chatId, text: pick.map((r, i) => card(r, i + 1)).join('\n') + '\n' + FOOT, parse_mode: 'HTML', disable_web_page_preview: true }); }
   await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>', reply_markup: { inline_keyboard: [[BTN('🔥 Top do dia em texto', '/top'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('🏠 Menu', '/menu')]] } });
+}
+
+// ---------- 🪜 escadas (pontos + rebotes + assistências "mais de" do mesmo jogador, como no Criar Aposta) ----------
+// public/data/escadas.json vem do pipeline (scripts/escadas.mjs): chance das três juntas com a correlação do jogador,
+// misturada com a forma recente; odd justa = 1/chance; duplas e triplas de jogos diferentes.
+const pc0 = (x: number) => Math.round(x * 100) + '%';
+const escLeg = (l: any) => `${({ PTS: 'PTS', REB: 'REB', AST: 'AST' } as any)[l.mk]} +${n1(+l.line)}`;
+async function escadasCmd(arg: string): Promise<Out> {
+  const E = await fetch(APP_URL + 'data/escadas.json?t=' + Math.floor(Date.now() / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
+  const back = [BTN('🪜 Escadas', '/escadas'), BTN('👥 Duplas', '/escadas d'), BTN('👥 Triplas', '/escadas t')];
+  if (!E?.list?.length || E.date !== etDate()) return { text: '🪜 <b>Escadas</b>\nAinda sem escadas hoje: elas saem quando a 99play tem as linhas de pontos, rebotes e assistências e o leitor está lendo.', kb: { inline_keyboard: [HOME] } };
+  const by = Object.fromEntries(E.list.map((x: any) => [x.pid, x]));
+  const head = (x: any) => `<b>${esc(x.name)}</b> (${x.team}) x ${x.opp} · ${hourBR(x.tip)}`;
+  const legs = (x: any) => x.legs.map(escLeg).join(' · ');
+  const [sub, a1] = arg.split(/\s+/);
+  if (sub === 'd' || sub === 't') {
+    const C = sub === 'd' ? E.duplas : E.triplas;
+    const txt = (C ?? []).map((c: any, i: number) => `<b>${i + 1}. ${sub === 'd' ? 'Dupla' : 'Tripla'}</b> · as escadas juntas: <b>${pc0(c.p)}</b> · odd justa <b>${n2(c.fair)}</b>\n<blockquote>${c.pids.map((id: string) => by[id] ? `${head(by[id])}\n${legs(by[id])}` : '').join('\n')}</blockquote>`).join('\n');
+    return { text: `🪜 <b>${sub === 'd' ? 'DUPLAS' : 'TRIPLAS'} DE ESCADAS</b> <i>(jogos diferentes)</i>\n\n${txt || 'Sem combinação hoje.'}\n<i>Monte cada escada no Criar Aposta e junte na múltipla. Se a casa pagar acima da odd justa, tem valor.</i>`, kb: { inline_keyboard: [back, HOME] } };
+  }
+  if (sub === 'v' && by[a1]) { // detalhe: linhas, chance de cada uma, sequências
+    const x = by[a1];
+    const lines = x.legs.map((l: any) => `${escLeg(l)} @${n2(l.odd)} · ${pc0(l.p)} · ${l.l10?.[0]}/${l.l10?.[1]} nos últ. 10\n🔢 <code>${(l.sq ?? []).join('-')}</code>`).join('\n');
+    return { text: `🪜 ${head(x)}\n<blockquote>${lines}</blockquote>\n✅ <b>As três juntas: ${pc0(x.pj)}</b> · bateram juntas em ${x.j10[0]}/${x.j10[1]} dos últimos 10 · ~${x.min} min\n💰 Odd justa: <b>${n2(x.fair)}</b>\n<i>Pagando acima de ${n2(x.fair)} no Criar Aposta, tem valor. As três separadas pagariam ${n2(x.sep)}; a casa paga menos no Criar Aposta porque as linhas andam juntas.</i>`,
+      kb: { inline_keyboard: [back, HOME] } };
+  }
+  const top = E.list.slice(0, 10);
+  const txt = top.map((x: any, i: number) => `<b>${i + 1}.</b> ${head(x)}\n${legs(x)} · <b>${pc0(x.pj)}</b> · justa <b>${n2(x.fair)}</b> · ${x.j10[0]}/${x.j10[1]} últ. 10`).join('\n\n');
+  return { text: `🪜 <b>ESCADAS DO DIA</b> · pontos + rebotes + assistências do mesmo jogador\n<i>Linhas da 99play · % = chance das três baterem juntas (correlação do jogador + forma recente)</i>\n\n${txt}\n\n<i>Toque no número para ver as sequências. Odd justa = 1 ÷ chance: se o Criar Aposta pagar acima, tem valor.</i>`,
+    kb: { inline_keyboard: [...chunk(top.map((x: any, i: number) => BTN(String(i + 1), `/escadas v ${x.pid}`)), 5), back, HOME] } };
 }
 
 // ---------- hub de canais do Telegram (postagem automática na função canal) ----------
@@ -1557,7 +1588,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canais', 'Canais: postagem automática e configuração'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
