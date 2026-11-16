@@ -57,3 +57,18 @@ test('canal: legenda no padrão (NBA, unidade, sequência, link) e card com a ca
   assert.equal(P.date, '2026-11-15');
   assert.ok(P.singles.every(s => s.img.startsWith('canal/s-') && s.cap.includes('{LINK}')));
 });
+
+test('canal: card no estilo BR365 (só a seleção, odd com ponto) e caminho da imagem 365', async () => {
+  const { card365HTML } = await import('../scripts/canal.mjs');
+  const s = { name: 'Devin Booker', team: 'PHX', side: 'o', line: 5.5, odd: 1.74, mk: 'AST', home: 'PHX', away: 'LAL' };
+  const h = card365HTML(s);
+  assert.match(h, /Devin Booker — Devin Booker \(PHX\) mais 5,5/);
+  assert.match(h, />1\.74</);
+  assert.match(h, /Assistências Mais de\/Menos de \(incluindo Prorrogação\)/);
+  assert.match(h, /Phoenix Suns x LA Lakers/);
+  assert.doesNotMatch(h, /BLACK|Odd total/);
+  const m = card365HTML({ odd: 7.25, legs: [s, { ...s, name: 'Kevin Durant' }] });
+  assert.match(m, /Odd total<\/b><b>7\.25/);
+  const P = plan({ strat: { picks: [pk('TOR')] }, slate, now: NOW });
+  assert.ok(P.singles[0].img365.startsWith('canal/365/s-'));
+});

@@ -11,7 +11,7 @@
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
-type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; at: number };
+type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; at: number };
 let CFG: Cfg | null = null;
 async function cfg(): Promise<Cfg> {
   if (CFG && Date.now() - CFG.at < 60_000) return CFG;
@@ -25,7 +25,7 @@ async function cfg(): Promise<Cfg> {
   }
   const get = (k: string) => Deno.env.get(k) || v[k] || '';
   CFG = { token: get('TELEGRAM_BOT_TOKEN'), secret: get('WEBHOOK_SECRET'), allowed: get('ALLOWED_CHATS').split(',').map(s => s.trim()).filter(Boolean),
-    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), affRef: get('AFF_REF') || 'rca5p', at: Date.now() };
+    dataUrl: get('DATA_URL') || 'https://gabrielcbjr29.github.io/black-house-props/data/bot.json', report: get('REPORT_TOKEN'), affRef: get('AFF_REF') || 'rca5p', affRef365: get('AFF_REF_365') || 'nac6j', at: Date.now() };
   return CFG;
 }
 // banco (REST do próprio Supabase, com a chave de serviço): testes do Modelo BH
@@ -959,6 +959,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
   if (cmd === 'canal') return canalCmd(chatId, arg);
+  if ((cmd === 'cb' || cmd === 'cs') && String(chatId) !== (await cfg()).allowed[0]) return { text: 'Só o dono do canal pode fazer isso.' };
+  if (cmd === 'cb') return cbCmd(chatId, rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
@@ -1064,6 +1066,28 @@ As postagens automáticas começam na próxima rodada (a partir das 10h). Use /c
   if (own) await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Usar este canal para as postagens automáticas?`,
     reply_markup: { inline_keyboard: [[{ text: '✅ Usar este canal', callback_data: `/canal set:${ch.id}` }]] } });
 }
+async function canalFn(action: string, qs: string): Promise<any> {
+  const secret = (await cfg()).secret;
+  return fetch(`${FN('canal')}?${action}=${encodeURIComponent(secret)}${qs ? '&' + qs : ''}`).then(r => r.json()).catch(e => ({ ok: false, erro: String(e) }));
+}
+async function shareLinksText(codes: string[]) {
+  const c = await cfg();
+  return `🔗 <b>Links rastreados</b> <i>(toque para copiar)</i>\n` + codes.map(code =>
+    `<b>99play</b> <i>(ref ${esc(c.affRef)})</i>\n<code>https://99play.io/sports?ref=${encodeURIComponent(c.affRef)}&amp;shareCode=${code}</code>\n<b>BR365</b> <i>(ref ${esc(c.affRef365)})</i>\n<code>https://br365.io/sports?ref=${encodeURIComponent(c.affRef365)}&amp;shareCode=${code}</code>`).join('\n\n');
+}
+// /cb <shareCode> <post>: liga o bilhete ao post escolhido (0 = só os links); /cs <post> <99|365>: troca a casa do post
+async function cbCmd(chatId: number, rest: string[]): Promise<Out> {
+  const [code, id] = rest; if (!code) return { text: 'Bilhete não encontrado.' };
+  if (!id || id === '0') return { text: await shareLinksText([code]) };
+  const photo = await getCfgKey('CANAL_PEND_' + code);
+  const r = await canalFn('relink', `id=${encodeURIComponent(id)}&code=${encodeURIComponent(code)}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
+  if (photo) await sb(`bot_config?key=eq.CANAL_PEND_${code}`, { method: 'DELETE' }).catch(() => null);
+  return { text: r.ok ? `✅ Post do canal atualizado: bilhete pronto na <b>${esc(r.casa ?? '')}</b>${r.imagem ? ' e o seu print' : ''}.` : `Não consegui atualizar o post: ${esc(r.erro ?? 'erro')}` };
+}
+async function csCmd(rest: string[]): Promise<Out | null> {
+  const [id, c] = rest; const r = await canalFn('casa', `id=${encodeURIComponent(id ?? '')}&c=${encodeURIComponent(c ?? '99')}`);
+  return r.ok ? null : { text: `Não consegui trocar a casa do post: ${esc(r.erro ?? 'erro')}` };
+}
 async function canalCmd(chatId: number, arg: string): Promise<Out> {
   const c = await cfg(), isOwner = String(chatId) === c.allowed[0];
   if (isOwner && arg.startsWith('set:')) {
@@ -1074,6 +1098,8 @@ async function canalCmd(chatId: number, arg: string): Promise<Out> {
 As postagens automáticas começam na próxima rodada (a partir das 10h).`, kb: { inline_keyboard: [[{ text: '📢 Status do canal', callback_data: '/canal' }]] } };
   }
   if (isOwner && (arg === 'off' || arg === 'on')) await putCfgKey('CANAL_ON', arg === 'off' ? '0' : '1');
+  if (isOwner && /^casa (99|365)$/.test(arg)) await putCfgKey('CANAL_CASA', arg.slice(5));
+  const casa = (await getCfgKey('CANAL_CASA')) === '365' ? '365' : '99';
   const id = await getCfgKey('CANAL_ID'), title = await getCfgKey('CANAL_TITLE'), on = (await getCfgKey('CANAL_ON')) !== '0';
   if (!id) return { text: `📢 <b>Canal</b>\nAinda não conectado. Coloque o bot como administrador do canal (com permissão de postar) e mande qualquer mensagem no canal: eu peço a confirmação aqui.` };
   const today = etDate(), rows: any[] = await sb(`channel_posts?date=eq.${today}&select=kind,status,band,odd,share_code`).catch(() => []) ?? [];
@@ -1083,7 +1109,7 @@ As postagens automáticas começam na próxima rodada (a partir das 10h).`, kb: 
 Com bilhete pronto: ${rows.filter(r => r.share_code).length}
 Conferidas: ${rows.filter(r => r.status === 'green').length} ✅ · ${rows.filter(r => r.status === 'red').length} ❌</blockquote>
 <i>Posta das 10h até 40 min antes de cada jogo: até 20 simples e as múltiplas 10 / 15 / 25. Para trocar o link de um post pelo bilhete pronto, responda o aviso "Postado no canal" com o link da 99play.</i>`;
-  return { text, kb: isOwner ? { inline_keyboard: [[on ? { text: '⏸️ Pausar o canal', callback_data: '/canal off' } : { text: '▶️ Retomar o canal', callback_data: '/canal on' }]] } : undefined };
+  return { text: text + `\n\n🏠 Casa padrão dos próximos posts: <b>${casa === '365' ? 'BR365' : '99play'}</b> <i>(cada post também troca no aviso)</i>`, kb: isOwner ? { inline_keyboard: [[on ? { text: '⏸️ Pausar o canal', callback_data: '/canal off' } : { text: '▶️ Retomar o canal', callback_data: '/canal on' }], [{ text: `${casa === '99' ? '✅ ' : ''}99play`, callback_data: '/canal casa 99' }, { text: `${casa === '365' ? '✅ ' : ''}BR365`, callback_data: '/canal casa 365' }]] } : undefined };
 }
 
 async function handle(update: any) {
@@ -1104,25 +1130,39 @@ async function handle(update: any) {
   // ignore-duplicates: quem já tem inscrição (inclusive desligada) não muda
   await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
     body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
-  // link de bilhete da 99play colado no chat: devolve o link rastreado com o ref de afiliado (bot_config AFF_REF)
+  // link de bilhete da 99play ou da BR365 (mesmo shareCode nas duas) colado/compartilhado no chat
   if (!cq) {
-    const codes = [...text.matchAll(/99play\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi)].map(m => m[1]);
+    const codes = [...new Set([...text.matchAll(/(?:99play|br365)\.[a-z.]+\/[^\s]*?[?&]shareCode=([A-Za-z0-9]+)/gi)].map(m => m[1]))];
+    const isOwner = String(chatId) === (await cfg()).allowed[0];
+    const photo = update.message?.photo?.at?.(-1)?.file_id ?? '';
     // resposta ao aviso "Postado no canal": troca o link do post pelo bilhete pronto (e a imagem pelo print, se veio)
     const rep = update.message?.reply_to_message;
-    if (codes.length && rep) {
-      const photo = update.message?.photo?.at?.(-1)?.file_id ?? '';
-      const secret = (await cfg()).secret;
-      const r = await fetch(`${FN('canal')}?relink=${encodeURIComponent(secret)}&msg=${rep.message_id}&code=${encodeURIComponent(codes[0])}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`).then(r => r.json()).catch(e => ({ ok: false, erro: String(e) }));
-      if (r.ok) { await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', reply_parameters: { message_id: update.message.message_id }, text: `✅ Post do canal atualizado: link do bilhete pronto${r.imagem ? ' e o seu print' : ''}.` }); return; }
+    if (codes.length && rep && isOwner) {
+      const r = await canalFn('relink', `msg=${rep.message_id}&code=${encodeURIComponent(codes[0])}${photo ? '&photo=' + encodeURIComponent(photo) : ''}`);
+      if (r.ok) { await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', reply_parameters: { message_id: update.message.message_id }, text: `✅ Post do canal atualizado: bilhete pronto na <b>${esc(r.casa ?? '')}</b>${r.imagem ? ' e o seu print' : ''}.` }); return; }
       if (r.erro !== 'post não encontrado') { await TG('sendMessage', { chat_id: chatId, text: `Não consegui atualizar o post do canal: ${r.erro ?? 'erro'}` }); return; }
     }
-    if (codes.length) {
-      const ref = (await cfg()).affRef;
-      const links = [...new Set(codes)].map(c => `https://99play.io/sports?ref=${encodeURIComponent(ref)}&shareCode=${c}`);
-      await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true,
-        text: `🔗 <b>Link rastreado</b> <i>(ref ${esc(ref)}, toque para copiar)</i>\n${links.map(l => `<code>${esc(l)}</code>`).join('\n')}` });
-      return;
+    // compartilhou direto da casa (sem responder): pergunta de qual post é, com os posts ainda sem bilhete
+    if (codes.length && isOwner) {
+      const abertos: any[] = await canalFn('abertos', '').catch(() => []);
+      if (Array.isArray(abertos) && abertos.length) {
+        if (photo) await putCfgKey('CANAL_PEND_' + codes[0], photo);
+        const lab = (p: any) => p.kind === 'multipla' ? `Múltipla @${n2(+p.odd)} · ${new Set((p.legs ?? []).map((l: any) => l.game)).size} jogos`
+          : `${p.legs?.[0]?.name ?? '?'} · ${MKS[p.legs?.[0]?.mk] ?? p.legs?.[0]?.mk} ${p.legs?.[0]?.side === 'o' ? 'mais' : 'menos'} ${n1(+p.legs?.[0]?.line)}`;
+        await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', reply_parameters: { message_id: update.message.message_id },
+          text: `🎟️ <b>Bilhete recebido.</b> De qual post do canal é?${photo ? '\n<i>O print vai junto.</i>' : ''}`,
+          reply_markup: { inline_keyboard: [...abertos.map(p => [BTN(lab(p).slice(0, 60), `/cb ${codes[0]} ${p.id}`)]), [BTN('🔗 Só quero os links', `/cb ${codes[0]} 0`)]] } });
+        return;
+      }
     }
+    if (codes.length) { await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true, text: await shareLinksText(codes) }); return; }
+  }
+  // trocar a casa de um post do canal (botões do aviso "Postado no canal"): responde com um aviso rápido, sem nova mensagem
+  if (cq && /^\/cs\s/.test(text)) {
+    const own = String(chatId) === (await cfg()).allowed[0];
+    const r = own ? await csCmd(text.trim().split(/\s+/).slice(1)) : { text: 'Só o dono do canal pode fazer isso.' };
+    await TG('answerCallbackQuery', { callback_query_id: cq.id, text: r ? r.text.replace(/<[^>]+>/g, '') : '✅ Casa do post trocada' });
+    return;
   }
   // teclado fixo (botões de baixo): vira comando
   if (!cq && KBMAP[text.trim()]) text = KBMAP[text.trim()];

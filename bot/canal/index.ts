@@ -4,13 +4,15 @@
 //   ?relink=<WEBHOOK_SECRET>&msg=<id da mensagem de aviso>&code=<shareCode>[&photo=<file_id>]
 //                             troca o link do post pelo bilhete pronto (e a imagem pelo print, se vier); o
 //                             telegram-bot chama quando o dono responde o aviso com o link da 99play
+//   ?casa=<WEBHOOK_SECRET>&id=<post>&c=99|365  troca a casa do post (link e card); ?abertos= lista posts sem bilhete
 //   ?preview=<WEBHOOK_SECRET> manda a próxima simples e a próxima múltipla só para o dono, como prévia
 // Postagem: a partir de CANAL_INICIO (padrão 10h de Brasília), espaçada até 40 min antes de cada jogo; até
 // CANAL_MAX simples (padrão 20; uma por jogador no dia); múltiplas 10 / 15 / 25 a partir de 12h / 15h / 17h (ou
 // antes, se o primeiro jogo dela estiver perto). Odd velha (leitor da 99play parado há 2h+) não vai para o canal.
 // bot_config: CANAL_ID (preenchido sozinho quando o canal é conectado), CANAL_ON (0 pausa), CANAL_MAX, CANAL_INICIO,
 // CANAL_UN (padrão "1 unidade"), CANAL_UN_MULTI, CANAL_RESULTADO (0 = não responder green/red no canal),
-// CANAL_RODAPE (texto final; "0" tira), CANAL_DONO (padrão: o primeiro de ALLOWED_CHATS), AFF_REF.
+// CANAL_RODAPE (texto final; "0" tira), CANAL_DONO (padrão: o primeiro de ALLOWED_CHATS), AFF_REF (99play),
+// AFF_REF_365 (BR365, padrão nac6j), CANAL_CASA (99 ou 365: casa padrão dos posts novos; cada post pode trocar no aviso).
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
@@ -45,15 +47,23 @@ async function TG(method: string, body: unknown) {
 const owner = async () => await cfg('CANAL_DONO', (await cfg('ALLOWED_CHATS')).split(',')[0]?.trim() ?? '');
 
 // ---------- legenda ----------
+// duas casas com o mesmo shareCode e o mesmo id de evento (plataforma Altenar); só muda o domínio e o ref de afiliado
+const CASAS: Record<string, { nome: string; base: string; refKey: string; ref: string }> = {
+  '99': { nome: '99play', base: 'https://99play.io/sports', refKey: 'AFF_REF', ref: 'rca5p' },
+  '365': { nome: 'BR365', base: 'https://br365.io/sports', refKey: 'AFF_REF_365', ref: 'nac6j' },
+};
+const casaOf = (c?: string | null) => CASAS[c ?? ''] ? c! : '99';
+const refOf = async (c: string) => encodeURIComponent(await cfg(CASAS[c].refKey, CASAS[c].ref));
 const legsOf = (x: any) => x.legs ?? [x];
-const evLink = async (ev: number | null) => `https://99play.io/sports?ref=${encodeURIComponent(await cfg('AFF_REF', 'rca5p'))}${ev ? `#/event/${ev}` : ''}`;
-const shareLink = async (code: string) => `https://99play.io/sports?ref=${encodeURIComponent(await cfg('AFF_REF', 'rca5p'))}&shareCode=${encodeURIComponent(code)}`;
-async function linkHTML(x: any, code?: string | null) {
-  if (code) return `🎟️ <a href="${await shareLink(code)}">Clique aqui para pegar o bilhete pronto.</a>`;
-  const games = new Map<string, any>(); for (const l of legsOf(x)) if (!games.has(l.game)) games.set(l.game, l);
-  if (games.size <= 1) return `🎟️ <a href="${await evLink(legsOf(x)[0].ev)}">Clique aqui para abrir o jogo na 99play.</a>`;
-  const parts = await Promise.all([...games.values()].map(async l => `<a href="${await evLink(l.ev)}">${l.home} x ${l.away}</a>`));
-  return `🎟️ Abrir os jogos na 99play: ${parts.join(' · ')}`;
+const evLink = async (ev: number | null, c = '99') => `${CASAS[c].base}?ref=${await refOf(c)}${ev ? `#/event/${ev}` : ''}`;
+const shareLink = async (code: string, c = '99') => `${CASAS[c].base}?ref=${await refOf(c)}&shareCode=${encodeURIComponent(code)}`;
+const gamesOf = (x: any) => { const g = new Map<string, any>(); for (const l of legsOf(x)) if (!g.has(l.game)) g.set(l.game, l); return [...g.values()]; };
+async function linkHTML(x: any, code?: string | null, c = '99') {
+  if (code) return `🎟️ <a href="${await shareLink(code, c)}">Clique aqui para pegar o bilhete pronto.</a>`;
+  const games = gamesOf(x);
+  if (games.length <= 1) return `🎟️ <a href="${await evLink(legsOf(x)[0].ev, c)}">Clique aqui para abrir o jogo na ${CASAS[c].nome}.</a>`;
+  const parts = await Promise.all(games.map(async l => `<a href="${await evLink(l.ev, c)}">${l.home} x ${l.away}</a>`));
+  return `🎟️ Abrir os jogos na ${CASAS[c].nome}: ${parts.join(' · ')}`;
 }
 async function fill(cap: string, kind: string, link: string) {
   const un = kind === 'multipla' ? await cfg('CANAL_UN_MULTI', await cfg('CANAL_UN', '1 unidade')) : await cfg('CANAL_UN', '1 unidade');
@@ -63,24 +73,49 @@ async function fill(cap: string, kind: string, link: string) {
 const resumo = (x: any) => legsOf(x).map((l: any) => `${esc(l.name)} · ${MKS[l.mk] ?? l.mk} ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)} @${n2(l.odd)}`).join('\n');
 const minLegs = (x: any) => legsOf(x).map((l: any) => ({ pid: l.pid, name: l.name, team: l.team, opp: l.opp, home: l.home, away: l.away, game: l.game, ev: l.ev,
   mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip }));
+const img365 = (img: string) => img.replace(/^canal\//, 'canal/365/');
+// aviso no privado do dono: botão do jogo (na casa escolhida) + escolha da casa do post
+async function noticeKb(id: number, x: any, c: string, code?: string | null) {
+  const go = code ? [{ text: `🎟️ Bilhete na ${CASAS[c].nome}`, url: await shareLink(code, c) }]
+    : await Promise.all(gamesOf(x).slice(0, 3).map(async (l, i, a) => ({ text: a.length > 1 ? `🎟️ ${l.home} x ${l.away}` : `🎟️ Abrir o jogo na ${CASAS[c].nome}`, url: await evLink(l.ev, c) })));
+  return { inline_keyboard: [go, Object.keys(CASAS).map(k => ({ text: `${k === c ? '✅ ' : ''}${CASAS[k].nome}`, callback_data: `/cs ${id} ${k}` }))] };
+}
 
 // ---------- postar ----------
 async function post(x: any, kind: 'simples' | 'multipla', date: string, gen: string, to?: string) {
-  const chat = to ?? await cfg('CANAL_ID');
-  const caption = await fill(x.cap, kind, await linkHTML(x));
-  const photo = APP + x.img + '?v=' + encodeURIComponent(gen ?? Date.now());
+  const chat = to ?? await cfg('CANAL_ID'), c = casaOf(await cfg('CANAL_CASA', '99'));
+  const caption = await fill(x.cap, kind, await linkHTML(x, null, c));
+  const photo = APP + (c === '365' ? (x.img365 ?? img365(x.img)) : x.img) + '?v=' + encodeURIComponent(gen ?? Date.now());
   const r = await TG('sendPhoto', { chat_id: chat, photo, caption: to ? '[PRÉVIA] ' + caption : caption, parse_mode: 'HTML' });
   if (!r.ok || to) return r;
+  const fid = r.result?.photo?.at?.(-1)?.file_id;
   const [row] = await sb('channel_posts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({
-    date, kind, legs: minLegs(x), odd: x.odd, band: x.band ?? null, status: 'postada', link: await linkHTML(x), channel_msg_id: r.result.message_id,
-    owner_chat: +(await owner()) || null, pkey: x.key, cap: x.cap, img: x.img, posted_at: new Date().toISOString() }) });
+    date, kind, legs: minLegs(x), odd: x.odd, band: x.band ?? null, status: 'postada', link: await linkHTML(x, null, c), channel_msg_id: r.result.message_id,
+    owner_chat: +(await owner()) || null, pkey: x.key, cap: x.cap, img: x.img, casa: c, fids: fid ? { [c]: fid } : {}, posted_at: new Date().toISOString() }) });
   const own = await owner();
   if (own) {
-    const m = await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', disable_notification: true, disable_web_page_preview: true,
-      text: `📢 <b>Postado no canal</b> · ${kind === 'multipla' ? `múltipla ${x.band} @${n2(x.odd)}` : 'simples'}\n<blockquote>${resumo(x)}</blockquote>\n<i>Fez o bilhete? Responda esta mensagem com o link da 99play (pode ir junto com o print) e eu troco o link do post pelo bilhete pronto.</i>` });
+    const m = await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', disable_notification: true, disable_web_page_preview: true, reply_markup: await noticeKb(row.id, x, c),
+      text: `📢 <b>Postado no canal</b> · ${kind === 'multipla' ? `múltipla ${x.band} @${n2(x.odd)}` : 'simples'}\n<blockquote>${resumo(x)}</blockquote>\n<i>Fez o bilhete? Compartilhe da 99play ou da BR365 para o bot (ou responda esta mensagem com o link; o print pode ir junto) e o post vira bilhete pronto. Os botões de baixo trocam a casa do post.</i>` });
     if (m.ok) await sb(`channel_posts?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify({ owner_msg_id: m.result.message_id }) }).catch(() => null);
   }
   return r;
+}
+// troca a imagem e a legenda de um post já publicado (casa nova, bilhete pronto ou print do dono)
+async function repaint(row: any, c: string, code: string | null, photo: string | null) {
+  const chat = await cfg('CANAL_ID'), caption = await fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code, c));
+  const fids = { ...(row.fids ?? {}) };
+  const media = photo ?? fids.print ?? fids[c] ?? (APP + (c === '365' ? img365(row.img) : row.img) + '?v=' + Date.now());
+  let r = await TG('editMessageMedia', { chat_id: chat, message_id: row.channel_msg_id, media: { type: 'photo', media, caption, parse_mode: 'HTML' } });
+  if (!r.ok && /not modified/i.test(r.description ?? '')) r = { ok: true };
+  if (!r.ok) { // imagem antiga já saiu da pauta: troca só a legenda
+    r = await TG('editMessageCaption', { chat_id: chat, message_id: row.channel_msg_id, caption, parse_mode: 'HTML' });
+    if (!r.ok && /not modified/i.test(r.description ?? '')) r = { ok: true };
+  } else if (r.result?.photo) { const f = r.result.photo.at(-1).file_id; if (photo) fids.print = f; else if (!fids.print) fids[c] = f; }
+  if (!r.ok) return { ok: false, erro: r.description };
+  await sb(`channel_posts?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify({ casa: c, fids, ...(code ? { share_code: code, link: await shareLink(code, c) } : {}) }) });
+  const own = await owner();
+  if (own && row.owner_msg_id) await TG('editMessageReplyMarkup', { chat_id: own, message_id: row.owner_msg_id, reply_markup: await noticeKb(row.id, { legs: row.legs }, c, code) });
+  return { ok: true, id: row.id, casa: CASAS[c].nome, imagem: !!photo };
 }
 const fresh = (x: any, now: number) => legsOf(x).every((l: any) => Date.parse(l.tip) > now + LEAD && (!l.t9 || now - Date.parse(l.t9) < STALE));
 
@@ -139,18 +174,18 @@ async function run() {
   return { ...out, date, simples_postadas_hoje: nS + posted.filter(p => p.startsWith('simples')).length, faltam: Math.max(0, need - posted.length), posted };
 }
 
-// ---------- trocar o link (e a imagem) pelo bilhete pronto ----------
-async function relink(msg: string, code: string, photo: string | null) {
-  const [row] = await sb(`channel_posts?owner_msg_id=eq.${encodeURIComponent(msg)}&select=*`) ?? [];
-  if (!row) return { ok: false, erro: 'post não encontrado' };
-  const caption = await fill(row.cap, row.kind, await linkHTML({ legs: row.legs }, code));
-  const chat = await cfg('CANAL_ID');
-  const r = photo
-    ? await TG('editMessageMedia', { chat_id: chat, message_id: row.channel_msg_id, media: { type: 'photo', media: photo, caption, parse_mode: 'HTML' } })
-    : await TG('editMessageCaption', { chat_id: chat, message_id: row.channel_msg_id, caption, parse_mode: 'HTML' });
-  if (!r.ok && !/not modified/i.test(r.description ?? '')) return { ok: false, erro: r.description };
-  await sb(`channel_posts?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify({ share_code: code, link: await shareLink(code) }) });
-  return { ok: true, id: row.id, imagem: !!photo };
+// ---------- trocar o link (e a imagem) pelo bilhete pronto; trocar a casa do post ----------
+async function rowBy(msg: string | null, id: string | null) {
+  const q = id ? `id=eq.${encodeURIComponent(id)}` : `owner_msg_id=eq.${encodeURIComponent(msg ?? '')}`;
+  return ((await sb(`channel_posts?${q}&select=*`)) ?? [])[0];
+}
+async function relink(msg: string | null, id: string | null, code: string, photo: string | null) {
+  const row = await rowBy(msg, id); if (!row) return { ok: false, erro: 'post não encontrado' };
+  return repaint(row, casaOf(row.casa), code, photo);
+}
+async function setCasa(id: string, c: string) {
+  const row = await rowBy(null, id); if (!row) return { ok: false, erro: 'post não encontrado' };
+  return repaint(row, casaOf(c), row.share_code ?? null, null);
 }
 
 // ---------- conferir: green/red respondendo o próprio post; resumo do dia só para o dono ----------
@@ -202,7 +237,12 @@ Deno.serve(async (req: Request) => {
     const secret = await cfg('WEBHOOK_SECRET');
     const ok = (k: string) => !!secret && u.searchParams.get(k) === secret;
     if (ok('run')) return json(await run());
-    if (ok('relink')) return json(await relink(u.searchParams.get('msg') ?? '', u.searchParams.get('code') ?? '', u.searchParams.get('photo')));
+    if (ok('relink')) return json(await relink(u.searchParams.get('msg'), u.searchParams.get('id'), u.searchParams.get('code') ?? '', u.searchParams.get('photo')));
+    if (ok('casa')) return json(await setCasa(u.searchParams.get('id') ?? '', u.searchParams.get('c') ?? '99'));
+    if (ok('abertos')) { // posts de hoje (e de ontem à noite) ainda sem bilhete pronto, para o bot perguntar de qual é o link
+      const d = etDate(), y = new Date(Date.parse(d + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+      return json(await sb(`channel_posts?date=in.(${d},${y})&share_code=is.null&status=eq.postada&select=id,kind,band,odd,legs,casa&order=id.desc&limit=8`) ?? []);
+    }
     if (ok('preview')) {
       const P = await getJ('canal.json'); const own = await owner();
       if (!P || !own) return json({ ok: false, erro: 'sem pauta ou sem dono' });

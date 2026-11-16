@@ -135,13 +135,26 @@ h1{margin:0;font-size:28px;font-weight:800;display:flex;align-items:center;gap:1
 .pl{margin:0;font-weight:800;font-size:19px}.pl.blue{color:#1f5fbf;font-size:22px}.dt{margin:6px 0 0;color:#66748a;font-size:15px}
 footer{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;background:#f2f4f7}footer span{font-size:18px;color:#3a4558}footer b{font-size:26px}
 .sub{text-align:center;color:#8a909c;font-size:14px;margin-top:16px;letter-spacing:1px}`;
+// ---------- card no estilo do bilhete da BR365 (pedido de 16/11): só a linha da seleção, sem moldura nem marca ----------
+const odd365 = x => (+x).toFixed(2);
+const leg365 = l => `<div class="r"><span class="xx">×</span><div class="c1"><div class="l1"><b>${esc(l.name)} — ${esc(l.name)} (${l.team}) ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)}</b><b class="od">${odd365(l.odd)}</b></div>
+<div class="l2">${MKF[l.mk] ?? l.mk} Mais de/Menos de (incluindo Prorrogação)</div><div class="l3">${esc(TEAM[l.home] ?? l.home)} x ${esc(TEAM[l.away] ?? l.away)}</div></div></div>`;
+export const card365HTML = x => `<div class="s365">${(x.legs ?? [x]).map(leg365).join('')}${x.legs ? `<div class="tot"><b>Odd total</b><b>${odd365(x.odd)}</b></div>` : ''}</div>`;
+export const CSS365 = font => `@font-face{font-family:MR;src:url(data:font/woff2;base64,${font('manrope.woff2')}) format('woff2');font-weight:200 800}
+*{box-sizing:border-box}body{margin:0;background:#fff;font-family:MR,Roboto,Arial,sans-serif}
+.s365{width:540px;background:#fff;padding:4px 0}.r{display:flex;gap:14px;padding:14px 18px 14px 16px;border-bottom:1px solid #e9ecef}.r:last-child{border-bottom:0}
+.xx{color:#5f6b66;font-size:24px;line-height:20px;flex:none;width:14px}.c1{flex:1;min-width:0}
+.l1{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.l1 b{color:#155e36;font-size:17px;font-weight:800;line-height:1.3}.l1 .od{color:#2f3a35;font-weight:700;font-size:16px;white-space:nowrap}
+.l2{color:#155e36;font-weight:700;font-size:15px;margin-top:3px;line-height:1.3}.l3{color:#6c7570;font-size:14px;margin-top:3px}
+.tot{display:flex;justify-content:space-between;padding:12px 18px 12px 46px;border-top:2px solid #e2e6e4;color:#155e36;font-size:17px}.tot b:last-child{color:#2f3a35}`;
+export const page365 = (css, inner) => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${inner}</body></html>`;
 export const page = (css, inner) => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body><div class="phone"><div class="brand">BLACK<span>HOUSE</span></div>${inner}<div class="sub">Sequências · NBA Props</div></div></body></html>`;
 
 /* pauta completa (sem desenhar): usada aqui e nos testes */
 export function plan({ strat, slate, events, now = Date.now() }) {
   const c = candidates({ strat, slate, events, now });
   const S = singles(c), M = multiples(c);
-  const pack = x => ({ ...x, img: `canal/${x.legs ? 'm' + x.band : 's-' + x.key}.jpg`, cap: caption(x) });
+  const pack = x => { const f = `${x.legs ? 'm' + x.band : 's-' + x.key}.jpg`; return { ...x, img: `canal/${f}`, img365: `canal/365/${f}`, cap: caption(x) }; };
   return { date: slate?.meta?.date ?? strat?.date, gen: strat?.gen ?? null, singles: S.map(pack), multis: M.map(pack) };
 }
 
@@ -153,15 +166,17 @@ async function main() {
   const c99 = existsSync(stPath) ? JSON.parse(readFileSync(stPath, 'utf8')).providers?.c99 : null;
   const events = c99?.date === slate.meta?.date ? Object.fromEntries(Object.entries(c99.events ?? {}).map(([g, v]) => [g, v.ev])) : {};
   const P = plan({ strat, slate, events });
-  const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
+  const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(join(dir, '365'), { recursive: true });
   const font = f => readFileSync(join(ROOT, 'fonts', f)).toString('base64');
-  const css = CSS(font);
+  const css = CSS(font); const css365 = CSS365(font);
   const { chromium } = await import('playwright');
   const b = await chromium.launch(); const pg = await b.newPage({ viewport: { width: 540, height: 800 }, deviceScaleFactor: 2 });
   let n = 0;
   for (const x of [...P.singles, ...P.multis]) {
     await pg.setContent(page(css, cardHTML(x)), { waitUntil: 'load' });
     await (await pg.$('.phone')).screenshot({ path: join(ROOT, 'data', x.img), type: 'jpeg', quality: 90 }); n++;
+    await pg.setContent(page365(css365, card365HTML(x)), { waitUntil: 'load' });
+    await (await pg.$('.s365')).screenshot({ path: join(ROOT, 'data', x.img365), type: 'jpeg', quality: 92 });
   }
   await b.close();
   writeFileSync(join(ROOT, 'data', 'canal.json'), JSON.stringify(P));
