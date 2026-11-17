@@ -8,6 +8,7 @@
 //              linhas da 99play do bot com chance 57%+ e EV 0+, a de maior chance em cada faixa; sem repetir jogador entre as
 //              faixas do mesmo lado (só se faltar perna).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { lines99 } from '../public/clv.js';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JER } from '../public/engine.js';
@@ -321,6 +322,8 @@ async function main() {
   const events = c99?.date === slate.meta?.date ? Object.fromEntries(Object.entries(c99.events ?? {}).map(([g, v]) => [g, v.ev])) : {};
   // hub de canais: configurações e o que já foi postado hoje (endpoint público da função canal, sem dados sensíveis)
   const hub = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/canal?hub=1').then(r => r.ok ? r.json() : null).catch(() => null);
+  // linhas da 99play em arquivo leve: a função canal grava o fechamento de cada entrada postada (CLV) até o jogo começar
+  writeFileSync(join(ROOT, 'data', 'linhas99.json'), JSON.stringify(lines99(slate)));
   const botOk = bot?.date === slate.meta?.date ? bot : null;
   const P = hub?.canais?.length && botOk ? { ...planHub({ bot: botOk, slate, events, hub }), gen: strat?.gen ?? null } : plan({ strat, slate, events, bot: botOk });
   const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(join(dir, '365'), { recursive: true });

@@ -15,6 +15,9 @@
 // partir do horário de cada uma (ou antes, se o primeiro jogo estiver perto). Odd velha (leitor parado há 2h+) não sai.
 // bot_config: CANAL_ON (0 pausa todos os canais), DOM_99 / DOM_365 (domínio das casas), AFF_REF / AFF_REF_365 (refs do
 // administrador, usados no canal dele quando o canal não tem ref próprio).
+//   ?resultados=<canal>&t=<token>[&fmt=csv][&dias=N]  (painel e planilha do canal) entradas com resultado e fechamento/CLV;
+//                              token por canal (o dono vê os links em /canais → canal → 📊 Resultados)
+import { updateClosing, postClv, legVerdict } from '../../public/clv.js';
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
@@ -230,6 +233,7 @@ const identOf = (l: any) => `${l.pid}-${l.mk}`;
 async function run() {
   const out: Record<string, unknown> = {};
   out.conferidas = await settle().catch(e => ({ erro: String(e) }));
+  out.fechamento = await closing().catch(e => ({ erro: String(e) }));
   if ((await cfg('CANAL_ON', '1')) === '0') return { ...out, skip: 'canais pausados (CANAL_ON=0)' };
   const ks = (await canais()).filter(k => k.cfg.on !== false && k.cfg.modo !== 'espelho');
   out.semanal = await weekly(ks).catch(e => ({ erro: String(e) }));
@@ -285,6 +289,52 @@ async function run() {
   }
   return { ...out, date, canais: res };
 }
+// ---------- fechamento (CLV): a odd/linha da 99play em cada perna, regravada a cada rodada até o jogo começar ----------
+async function closing() {
+  const open: any[] = await sb('channel_posts?status=eq.postada&select=id,legs') ?? [];
+  const now = Date.now(), live = open.filter(p => (p.legs ?? []).some((l: any) => Date.parse(l.tip) > now));
+  if (!live.length) return 0;
+  const L = await getJ('linhas99.json'); if (!L?.l) return 0;
+  let n = 0;
+  for (const p of live) {
+    const r = updateClosing(p.legs, L.l, { now, gen: L.gen });
+    if (r.changed) { await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ legs: r.legs }) }); n++; }
+  }
+  return n;
+}
+// ---------- resultados do canal para o painel e a planilha (token próprio de cada canal) ----------
+async function tokOf(id: number | string) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${await cfg('WEBHOOK_SECRET')}:resultados:${id}`));
+  return [...new Uint8Array(d)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function resultados(cid: string, dias: number) {
+  const k = (await canais()).find(c => String(c.id) === String(cid)); if (!k) return null;
+  const from = new Date(Date.parse(etDate() + 'T12:00:00Z') - (dias - 1) * 864e5).toISOString().slice(0, 10);
+  const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=gte.${from}&select=id,date,created_at,kind,band,odd,stake,status,profit,legs&order=id.asc`) ?? [];
+  const res = await getJ('results.json').catch(() => null);
+  const real = (date: string, l: any) => { const a = res?.stats?.[date]?.[l.pid]; if (!a || !(a[0] > 0)) return null; return String(l.stat).split('+').reduce((s: number, x: string) => s + (IDX[x]?.(a) ?? 0), 0); };
+  return { canal: k.title, de: from, ate: etDate(), gen: new Date().toISOString(), posts: rows.map(p => ({
+    id: p.id, date: p.date, hora: hourBR(p.created_at), kind: p.kind, band: p.band, odd: +p.odd, stake: +p.stake || 1, status: p.status, profit: +p.profit || 0,
+    clv: (({ vs, ...c }) => c)(postClv({ odd: +p.odd, legs: p.legs })),
+    legs: (p.legs ?? []).map((l: any) => ({ name: l.name, team: l.team, opp: l.opp, mk: l.mk, side: l.side, line: +l.line, odd: +l.odd, tip: l.tip, cline: l.cline ?? null, close: l.close ?? null, real: real(p.date, l), v: legVerdict(l).v })),
+  })) };
+}
+const MKL: Record<string, string> = { PTS: 'Pontos', REB: 'Rebotes', AST: 'Assistências', '3PM': 'Bolas de 3 convertidas', PRA: 'Pts+Reb+Ast', PR: 'Pts+Reb', PA: 'Pts+Ast', RA: 'Reb+Ast', FGM: 'Arremessos convertidos', FGA: 'Arremessos tentados', '2PM': 'Arremessos de 2 convertidos', '2PA': 'Arremessos de 2 tentados', '3PA': 'Bolas de 3 tentadas', FTM: 'Lances livres convertidos', FTA: 'Lances livres tentados', STL: 'Roubos', BLK: 'Tocos', SB: 'Roubos+Tocos', TOV: 'Erros', PF: 'Faltas' };
+function toCSV(R: any) {
+  const q = (x: unknown) => { const s = x == null ? '' : String(x); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ['Data', 'Hora', 'Tipo', 'Faixa', 'Entrada', 'Mercado', 'Lado', 'Linha', 'Odd', 'Linha fechamento', 'Odd fechamento', 'CLV %', 'Bateu o fechamento', 'Resultado real', 'Resultado', 'Stake', 'Lucro (un)'];
+  const out = [head.join(',')];
+  for (const p of R.posts) {
+    const s = p.kind === 'simples', l = p.legs[0] ?? {};
+    const entrada = p.legs.map((x: any) => `${x.name} ${MKL[x.mk] ?? x.mk} ${x.side === 'o' ? 'mais' : 'menos'} ${x.line} @${x.odd}`).join(' | ');
+    out.push([p.date, p.hora, s ? 'Simples' : 'Múltipla', p.band ?? '', entrada, s ? (MKL[l.mk] ?? l.mk) : `${p.legs.length} pernas`, s ? (l.side === 'o' ? 'Mais' : 'Menos') : '', s ? l.line : '', p.odd,
+      s ? (l.cline ?? '') : '', p.clv.closeOdd ?? (s ? '' : `${p.clv.f} a favor / ${p.clv.c} contra`), p.clv.clv == null ? '' : Math.round(p.clv.clv * 1000) / 10,
+      p.clv.bateu == null ? '' : p.clv.bateu ? 'Sim' : 'Não', s ? (l.real ?? '') : p.legs.map((x: any) => x.real ?? '-').join(' | '),
+      { green: 'Green', red: 'Red', void: 'Anulada', postada: 'Aberta' }[p.status as string] ?? p.status, p.stake, p.status === 'postada' ? '' : p.profit].map(q).join(','));
+  }
+  return out.join('\n') + '\n';
+}
+
 // o Telegram recusou o post por permissão (bot tirado do canal, sem "postar mensagens"...): avisa o dono 1x por dia
 async function postFail(k: Canal, date: string, desc = '') {
   if (!/rights|forbidden|not found|kicked|not a member|administrator|CHAT_WRITE|have no/i.test(desc)) return false;
@@ -356,8 +406,15 @@ async function settle() {
   for (const d of days) { const [date, cid] = d.split('|'); await dayReport(date, cid).catch(e => console.error('resumo', e)); }
   return n;
 }
+// linha do fechamento no resumo do dono: quantas simples pegaram odd/linha melhor que a de fechamento e como foram
+function fech(all: any[]) {
+  const S = all.filter(p => p.kind === 'simples' && p.status !== 'void').map(p => ({ p, b: postClv({ odd: +p.odd, legs: p.legs }).bateu }));
+  const lidas = S.filter(x => x.b !== null); if (!lidas.length) return '';
+  const fav = lidas.filter(x => x.b), g = fav.filter(x => x.p.status === 'green').length;
+  return `\nFechamento: ${fav.length} de ${lidas.length} simples bateram o fechamento${fav.length ? ` (${g} green)` : ''}`;
+}
 async function dayReport(date: string, cid: string) {
-  const all: any[] = await sb(`channel_posts?date=eq.${date}&canal_id=eq.${cid}&select=kind,status,profit,odd,band`) ?? [];
+  const all: any[] = await sb(`channel_posts?date=eq.${date}&canal_id=eq.${cid}&select=kind,status,profit,odd,band,legs`) ?? [];
   const key = `CANAL_RESUMO_${cid}_${date}`;
   if (!all.length || all.some(p => p.status === 'postada') || (await cfg(key))) return;
   const k = await canalById(cid), own = await owner(k); if (!own) return;
@@ -366,7 +423,7 @@ async function dayReport(date: string, cid: string) {
   const S = part('simples'), M = part('multipla'), U = S.u + M.u;
   const u = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2).replace('.', ',') + 'u';
   const [, mm, dd] = date.split('-');
-  await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📊 <b>${esc(k.title ?? 'Canal')} · ${dd}/${mm}</b>\n<blockquote>Simples: ${S.g} ✅ · ${S.r} ❌ de ${S.n} · <b>${u(S.u)}</b>\nMúltiplas: ${M.g} ✅ · ${M.r} ❌ de ${M.n} · <b>${u(M.u)}</b>\nDia: <b>${u(U)}</b> (em unidades)</blockquote>` });
+  await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📊 <b>${esc(k.title ?? 'Canal')} · ${dd}/${mm}</b>\n<blockquote>Simples: ${S.g} ✅ · ${S.r} ❌ de ${S.n} · <b>${u(S.u)}</b>\nMúltiplas: ${M.g} ✅ · ${M.r} ❌ de ${M.n} · <b>${u(M.u)}</b>\nDia: <b>${u(U)}</b> (em unidades)${fech(all)}</blockquote>` });
   await setCfg(key, '1');
 }
 
@@ -416,6 +473,16 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, canal: k.title, simples: s ? (await post(s, 'simples', P.date, P.gen, k, own, pc)).ok : null, multipla: m ? (await post(m, 'multipla', P.date, P.gen, k, own, pc)).ok : null,
         pauta: { date: P.date, simples: pauta.singles?.length, multiplas: pauta.multis?.map((x: any) => x.band + '@' + x.odd) } });
     }
+    if (u.searchParams.has('resultados')) { // painel e planilha do canal: público só com o token daquele canal
+      const cors = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
+      const cid = u.searchParams.get('resultados') ?? '';
+      if (!secret || u.searchParams.get('t') !== await tokOf(cid)) return new Response(JSON.stringify({ ok: false, erro: 'link inválido' }), { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } });
+      const R = await resultados(cid, Math.min(400, Math.max(1, +(u.searchParams.get('dias') ?? 120) || 120)));
+      if (!R) return new Response(JSON.stringify({ ok: false, erro: 'canal não encontrado' }), { status: 404, headers: { ...cors, 'Content-Type': 'application/json' } });
+      if (u.searchParams.get('fmt') === 'csv') return new Response(toCSV(R), { headers: { ...cors, 'Content-Type': 'text/csv; charset=utf-8' } });
+      return new Response(JSON.stringify(R), { headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8' } });
+    }
+    if (ok('tok')) return json({ canal: u.searchParams.get('canal'), t: await tokOf(u.searchParams.get('canal') ?? '') });
     if (u.searchParams.has('hub')) { // público: só o necessário para a divisão (sem chat, dono ou links)
       const ks = (await canais()).filter(k => k.cfg.on !== false && k.cfg.modo !== 'espelho'), d = etDate();
       const pick = (c: any) => ({ max: c.max, oddMin: c.oddMin, oddMax: c.oddMax, evMin: c.evMin, mercados: c.mercados, lado: c.lado, multis: c.multis });

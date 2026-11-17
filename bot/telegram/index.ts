@@ -1388,7 +1388,19 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
     const mk = Object.entries(byMk).map(([m, xs]) => [m, xs.reduce((a, x) => a + (+x.profit || 0), 0), xs.length] as [string, number, number]).filter(x => x[2] >= 3).sort((a, b) => b[1] - a[1]);
     return { text: `📈 <b>Desempenho</b> · ${esc(k.title)} <i>(em unidades, só o que já foi conferido)</i>
 <blockquote><b>7 dias</b>\nSimples: ${per(7, 'simples')}\nMúltiplas: ${per(7, 'multipla')}\n\n<b>30 dias</b>\nSimples: ${per(30, 'simples')}\nMúltiplas: ${per(30, 'multipla')}</blockquote>${mk.length ? `\n<b>Mercados (simples, 30 dias, 3+ entradas)</b>\n<blockquote>${mk.slice(0, 8).map(([m, u, n]) => `${MK_BTN[m] ?? m}: ${u >= 0 ? '+' : ''}${n2(u)}u em ${n}`).join('\n')}</blockquote>\n<i>Mercado que só perde? Desligue em 🏷️ Mercados.</i>` : ''}`,
-      kb: { inline_keyboard: [back] } };
+      kb: { inline_keyboard: [[BTN('📊 Painel e planilha', `/cn ${k.id} res`)], back] } };
+  }
+  if (scr === 'res') { // painel no app + fórmula da Google Sheet (atualiza sozinha); link com token só deste canal
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${(await cfg()).secret}:resultados:${k.id}`));
+    const t = [...new Uint8Array(d)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+    const painel = `${APP_URL}resultados.html?c=${k.id}&t=${t}`;
+    const csv = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/canal?resultados=${k.id}&t=${t}&fmt=csv&dias=400`;
+    return { text: `📊 <b>Painel e planilha</b> · ${esc(k.title)}
+<blockquote>Painel: resultado por dia, mercado e faixa de odd, e quantas entradas bateram o fechamento (odd ou linha da 99play no início do jogo).
+Planilha: numa Google Sheet nova, cole na célula A1:</blockquote>
+<code>=IMPORTDATA("${csv}"; ","; "en_US")</code>
+<i>A planilha e o painel se atualizam sozinhos. Os links são só deste canal: não divulgue se não quiser que vejam seus números.</i>`,
+      kb: { inline_keyboard: [[{ text: '📊 Abrir painel', url: painel }], [BTN('⬅️ Voltar', `/cn ${k.id} perf`)]] } };
   }
   if (scr === 'rm') return { text: `🗑️ <b>Remover ${esc(k.title)} do hub?</b>\nO bot para de postar nesse canal (os posts antigos ficam). Para voltar, é só tirar e colocar o bot de novo como administrador.`,
     kb: { inline_keyboard: [[BTN('🗑️ Sim, remover', `/cf ${k.id} remover`)], back] } };

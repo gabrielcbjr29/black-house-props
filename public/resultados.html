@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Resultados do Canal · Black House</title>
+<style>
+/* Painel de resultados de um canal do hub (17/11): lê a função canal?resultados com o token do canal.
+   Uma coluna: resumo → gráficos → planilha das entradas. Visual escuro do canal. */
+@font-face{font-family:MR;src:url(fonts/manrope.woff2) format('woff2');font-weight:200 800;font-display:swap}
+@font-face{font-family:BS;src:url(fonts/bigshoulders.woff2) format('woff2');font-weight:100 900;font-display:swap}
+:root{--bg:#0b0c0f;--surface:#14161b;--surface2:#1b1e25;--line:#272b34;--fg:#eceef2;--muted:#8c93a1;--gold:#d4af37;--green:#33c27a;--red:#ec5b5f;
+  --display:BS,"Arial Narrow",Impact,sans-serif;--body:MR,"Segoe UI",system-ui,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);
+  padding:max(24px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 56px max(16px,env(safe-area-inset-left,0px))}
+.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+.num,td,.kpi b{font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px}
+.brand{font:900 clamp(26px,5vw,38px)/1 var(--display);letter-spacing:.14em}.brand span{color:var(--gold)}
+h1{margin:6px 0 0;font:800 clamp(22px,4vw,30px)/1.1 var(--display);letter-spacing:.04em;text-transform:uppercase;text-wrap:balance}
+.sub{margin:4px 0 0;color:var(--muted);font-size:13px}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:700 13px var(--body);color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
+.chip[aria-pressed="true"]{color:var(--bg);background:var(--gold);border-color:var(--gold)}
+.chip:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.kpi span{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800}
+.kpi b{font:800 30px/1.05 var(--display);letter-spacing:.02em}.kpi small{color:var(--muted);font-size:12.5px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));gap:12px}
+.chart{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.chart h3{margin:0;font-size:14px;font-weight:800}.chart p{margin:0;color:var(--muted);font-size:12.5px}
+.chart svg{width:100%;height:auto;display:block}
+svg text{fill:var(--muted);font:600 11px var(--body)}svg .lbl{fill:var(--fg);font-weight:700}
+.sheet{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--surface2)}
+.bar h2{margin:0 auto 0 0;font-size:14px;font-weight:800}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:860px;font-size:13.5px}
+th{background:var(--surface2);text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:800;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:last-child td{border-bottom:0}
+td.r,th.r{text-align:right}
+.leg{display:block;white-space:nowrap}.leg+.leg{margin-top:3px}.leg small{color:var(--muted);font-weight:600}
+.ok{color:var(--green)}.ko{color:var(--red)}.mu{color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:800;letter-spacing:.06em;padding:3px 8px;border-radius:6px;text-transform:uppercase}
+.pill.green{background:rgba(51,194,122,.16);color:var(--green)}.pill.red{background:rgba(236,91,95,.16);color:var(--red)}
+.pill.void,.pill.postada{background:rgba(140,147,161,.16);color:var(--muted)}
+.clv{font-weight:800;white-space:nowrap}.clv.f{color:var(--green)}.clv.c{color:var(--red)}.clv.n,.clv.s{color:var(--muted)}
+.foot{padding:9px 12px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px}
+.msg{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;color:var(--muted)}
+.msg b{color:var(--fg)}
+.note{color:var(--muted);font-size:12.5px;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><div class="brand">BLACK <span>HOUSE</span></div><h1 id="title">Resultados do canal</h1><p class="sub" id="sub">Carregando…</p></div>
+    <div class="seg" role="group" aria-label="Período">
+      <button class="chip" data-d="1" aria-pressed="false">Hoje</button><button class="chip" data-d="7" aria-pressed="true">7 dias</button>
+      <button class="chip" data-d="30" aria-pressed="false">30 dias</button><button class="chip" data-d="0" aria-pressed="false">Tudo</button>
+    </div>
+  </header>
+  <div id="app"><div class="msg">Carregando as entradas do canal…</div></div>
+  <p class="note">Fechamento = odd e linha da 99play na última leitura antes do início do jogo. "Bateu o fechamento" = pegamos odd melhor (mesma linha) ou uma linha que depois andou a nosso favor. Unidades: lucro de cada entrada pela unidade postada.</p>
+</div>
+<script>
+const Q = new URLSearchParams(location.search), CID = Q.get('c'), TOK = Q.get('t');
+const API = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/canal?resultados=${encodeURIComponent(CID ?? '')}&t=${encodeURIComponent(TOK ?? '')}&dias=400`;
+const MK = {PTS:'Pontos',REB:'Rebotes',AST:'Assistências',PA:'Pts+Ast',PR:'Pts+Reb',RA:'Reb+Ast',PRA:'Pts+Reb+Ast','2PA':'Arrem. de 2 tentados','2PM':'Arrem. de 2 convertidos',FTM:'Lances livres convertidos',FTA:'Lances livres tentados',FGM:'Arremessos convertidos',FGA:'Arremessos tentados','3PA':'Bolas de 3 tentadas','3PM':'Bolas de 3 convertidas',TOV:'Erros',STL:'Roubos',BLK:'Tocos',SB:'Roubos+Tocos',PF:'Faltas'};
+const n2 = x => (+x).toFixed(2), n1 = x => String(x).replace('.', ','), sg = x => (x >= 0 ? '+' : '') + n2(x);
+const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '–';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dm = d => d.slice(8, 10) + '/' + d.slice(5, 7);
+let ALL = null, DIAS = 7, FILT = 'all';
+try { const v = localStorage.getItem('bh-res-dias'); if (v != null) DIAS = +v; } catch {}
+document.querySelectorAll('.chip[data-d]').forEach(b => { b.setAttribute('aria-pressed', +b.dataset.d === DIAS);
+  b.addEventListener('click', () => { DIAS = +b.dataset.d; try { localStorage.setItem('bh-res-dias', DIAS); } catch {} document.querySelectorAll('.chip[data-d]').forEach(x => x.setAttribute('aria-pressed', x === b)); draw(); }); });
+
+async function load() {
+  if (!CID || !TOK) { document.getElementById('app').innerHTML = '<div class="msg">Este link está incompleto. Abra o painel pelo bot: <b>/canais → seu canal → 📈 Desempenho → 📊 Painel e planilha</b>.</div>'; document.getElementById('sub').textContent = ''; return; }
+  try {
+    const r = await fetch(API, { cache: 'no-store' }); const j = await r.json();
+    if (!r.ok) throw new Error(j.erro || 'erro ' + r.status);
+    ALL = j; document.getElementById('title').textContent = j.canal || 'Resultados do canal'; draw();
+  } catch (e) { document.getElementById('app').innerHTML = `<div class="msg">Não consegui carregar os resultados (${esc(e.message)}). Se o link é antigo, pegue um novo no bot: <b>/canais → seu canal → 📈 Desempenho → 📊 Painel e planilha</b>.</div>`; document.getElementById('sub').textContent = ''; }
+}
+const NS = 'http://www.w3.org/2000/svg', css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const el = (svg, t, a, txt) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; svg.appendChild(e); return e; };
+
+function draw() {
+  if (!ALL) return;
+  const from = DIAS ? new Date(Date.parse(ALL.ate + 'T12:00:00Z') - (DIAS - 1) * 864e5).toISOString().slice(0, 10) : '0000';
+  const P = ALL.posts.filter(p => p.date >= from), done = P.filter(p => p.status === 'green' || p.status === 'red');
+  const S = done.filter(p => p.kind === 'simples'), M = done.filter(p => p.kind === 'multipla');
+  const U = xs => xs.reduce((a, p) => a + p.profit, 0), ST = xs => xs.reduce((a, p) => a + p.stake, 0), G = xs => xs.filter(p => p.status === 'green').length;
+  const lidas = S.filter(p => p.clv.bateu !== null), bat = lidas.filter(p => p.clv.bateu);
+  document.getElementById('sub').textContent = P.length ? `${dm(P[0].date)} a ${dm(P[P.length - 1].date)} · atualizado ${new Date(ALL.gen).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}` : 'sem entradas no período';
+  if (!P.length) { document.getElementById('app').innerHTML = '<div class="msg">Nenhuma entrada postada neste período.</div>'; return; }
+  const K = [
+    ['Entradas', P.length, `${done.length} conferidas · ${P.filter(p => p.status === 'postada').length} abertas`],
+    ['Acerto', pct(G(done), done.length), `${G(done)} green · ${done.length - G(done)} red`],
+    ['Unidades', sg(U(done)), `ROI ${ST(done) ? Math.round(U(done) / ST(done) * 100) : 0}%`, U(done)],
+    ['Simples', sg(U(S)) + ' un', `${G(S)} de ${S.length} · ${pct(G(S), S.length)}`, U(S)],
+    ['Múltiplas', sg(U(M)) + ' un', `${G(M)} de ${M.length} bateram`, U(M)],
+    ['Bateu o fechamento', pct(bat.length, lidas.length), `${bat.length} de ${lidas.length} simples com leitura`],
+  ];
+  document.getElementById('app').innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">
+    <div class="kpis">${K.map(([a, b, c, v]) => `<div class="kpi"><span>${a}</span><b class="${v == null ? '' : v >= 0 ? 'ok' : 'ko'}">${b}</b><small>${c}</small></div>`).join('')}</div>
+    <div class="charts">
+      <div class="chart"><h3>Unidades acumuladas</h3><p>${DIAS === 1 ? 'Na ordem das postagens' : 'Saldo ao fim de cada dia'}</p><svg id="c-line" viewBox="0 0 520 220" role="img" aria-label="Saldo acumulado"></svg></div>
+      <div class="chart"><h3>Simples por mercado</h3><p>Greens, reds e unidades de cada mercado</p><svg id="c-mk" viewBox="0 0 520 200" role="img" aria-label="Por mercado"></svg></div>
+      <div class="chart"><h3>Bateu o fechamento × acerto</h3><p>Simples que pegaram odd ou linha melhor que a de fechamento, contra as demais</p><svg id="c-clv" viewBox="0 0 520 150" role="img" aria-label="Fechamento e acerto"></svg></div>
+      <div class="chart"><h3>Simples por faixa de odd</h3><p>Acerto e unidades em cada faixa</p><svg id="c-odd" viewBox="0 0 520 150" role="img" aria-label="Por faixa de odd"></svg></div>
+    </div>
+    <div class="sheet"><div class="bar"><h2>Entradas</h2>
+      ${[['all','Todas'],['simples','Simples'],['multipla','Múltiplas'],['green','Green'],['red','Red'],['bateu','Bateu o fechamento']].map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${FILT === k}">${t}</button>`).join('')}</div>
+      <div class="scroll"><table><thead><tr><th>Data</th><th>Tipo</th><th>Entrada · resultado real</th><th class="r">Odd</th><th class="r">Fechamento</th><th class="r">CLV</th><th>Resultado</th><th class="r">Un.</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="foot" id="foot"></div></div></div>`;
+  document.querySelectorAll('.chip[data-f]').forEach(b => b.addEventListener('click', () => { FILT = b.dataset.f; document.querySelectorAll('.chip[data-f]').forEach(x => x.setAttribute('aria-pressed', x === b)); table(P); }));
+  table(P); line(P, done); byMk(S); clvChart(lidas, S.filter(p => p.clv.bateu !== true)); oddChart(S);
+}
+const legTxt = l => `<span class="leg">${esc(l.name)} <small>· ${MK[l.mk] ?? l.mk} ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)} · @${n2(l.odd)}</small> ${l.real == null ? '' : `<small class="${(l.side === 'o' ? l.real > l.line : l.real < l.line) ? 'ok' : 'ko'}">fez ${l.real}</small>`}</span>`;
+function fechCell(p) {
+  const c = p.clv, l = p.legs[0];
+  if (p.kind === 'simples') {
+    if (l.close == null) return ['<span class="mu">—</span>', '<span class="clv s">–</span>'];
+    if (l.cline !== l.line) { const d = Math.abs(l.cline - l.line); return [`linha ${n1(l.cline)}`, `<span class="clv ${c.bateu ? 'f' : 'c'}">${c.bateu ? '+' : '−'}${n1(d)} pt</span>`]; }
+    return [n2(l.close), `<span class="clv ${c.clv > .005 ? 'f' : c.clv < -.005 ? 'c' : 'n'}">${c.clv >= 0 ? '+' : '−'}${Math.abs(c.clv * 100).toFixed(1).replace('.', ',')}%</span>`];
+  }
+  return [c.closeOdd ? n2(c.closeOdd) : `${p.legs.length} pernas`, c.s === c.n ? '<span class="clv s">–</span>' : `<span class="clv ${c.bateu ? 'f' : c.bateu === false ? 'c' : 'n'}">${c.f}↑ ${c.c}↓</span>`];
+}
+function table(P) {
+  const rows = P.filter(p => FILT === 'all' || p.kind === FILT || p.status === FILT || (FILT === 'bateu' && p.clv.bateu)).slice().reverse();
+  document.getElementById('rows').innerHTML = rows.map(p => { const [a, b] = fechCell(p);
+    return `<tr><td class="num">${dm(p.date)}<br><small class="mu">${p.hora}</small></td><td>${p.kind === 'simples' ? 'Simples' : `Múltipla<br><small class="mu">${p.legs.length} pernas · ${esc(p.band ?? '')}</small>`}</td>
+    <td>${p.legs.map(legTxt).join('')}</td><td class="r">${n2(p.odd)}</td><td class="r">${a}</td><td class="r">${b}</td>
+    <td><span class="pill ${p.status}">${{green:'green',red:'red',void:'anulada',postada:'aberta'}[p.status] ?? p.status}</span></td>
+    <td class="r ${p.profit > 0 ? 'ok' : p.profit < 0 ? 'ko' : 'mu'}">${p.status === 'postada' ? '' : sg(p.profit)}</td></tr>`; }).join('') || '<tr><td colspan="8" class="mu">Nenhuma entrada com esse filtro.</td></tr>';
+  const d = rows.filter(p => p.status === 'green' || p.status === 'red'), u = d.reduce((a, p) => a + p.profit, 0);
+  document.getElementById('foot').innerHTML = `<span>${rows.length} entradas</span><span>${d.filter(p => p.status === 'green').length} green · ${d.filter(p => p.status === 'red').length} red</span><span class="${u >= 0 ? 'ok' : 'ko'}">${sg(u)} un</span><span>↑ pernas que bateram o fechamento · ↓ que não bateram</span>`;
+}
+function line(P, done) {
+  const svg = document.getElementById('c-line'), W = 520, H = 220, L = 44, R = 14, T = 22, B = 28;
+  let pts = [], acc = 0;
+  if (DIAS === 1) done.forEach(p => { acc += p.profit; pts.push({ x: p.hora, v: acc, c: p.status }); });
+  else { const by = {}; done.forEach(p => by[p.date] = (by[p.date] ?? 0) + p.profit); Object.keys(by).sort().forEach(d => { acc += by[d]; pts.push({ x: dm(d), v: acc, c: by[d] >= 0 ? 'green' : 'red' }); }); }
+  if (!pts.length) { el(svg, 'text', { x: 260, y: 110, 'text-anchor': 'middle' }, 'Sem entradas conferidas ainda'); return; }
+  if (pts.length === 1) pts = [{ x: '', v: 0 }, ...pts];
+  const vs = pts.map(p => p.v), lo = Math.min(0, Math.floor(Math.min(...vs))), hi = Math.max(1, Math.ceil(Math.max(...vs))), step = Math.max(1, Math.ceil((hi - lo) / 5));
+  const x = i => L + i * (W - L - R) / (pts.length - 1), y = v => T + (hi - v) * (H - T - B) / (hi - lo);
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) { el(svg, 'line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: css('--line'), 'stroke-width': v === 0 ? 1.5 : 1 }); el(svg, 'text', { x: L - 8, y: y(v) + 4, 'text-anchor': 'end' }, (v > 0 ? '+' : '') + v); }
+  const d = pts.map((q, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(q.v).toFixed(1)}`).join('');
+  el(svg, 'path', { d: d + `L${x(pts.length - 1)},${y(0)}L${x(0)},${y(0)}Z`, fill: css('--gold'), 'fill-opacity': .1 });
+  el(svg, 'path', { d, fill: 'none', stroke: css('--gold'), 'stroke-width': 2.2, 'stroke-linejoin': 'round' });
+  pts.forEach((q, i) => q.c && el(svg, 'circle', { cx: x(i), cy: y(q.v), r: 3, fill: q.c === 'green' ? css('--green') : css('--red'), stroke: css('--surface'), 'stroke-width': 1 }));
+  const lab = [...new Set([0, Math.floor((pts.length - 1) / 2), pts.length - 1])];
+  lab.forEach(i => el(svg, 'text', { x: x(i), y: H - 8, 'text-anchor': i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle' }, pts[i].x));
+  el(svg, 'text', { x: W - R, y: 12, 'text-anchor': 'end', class: 'lbl' }, `saldo ${sg(pts[pts.length - 1].v)} un`);
+}
+function byMk(S) {
+  const svg = document.getElementById('c-mk'), W = 520, L = 160, R = 74, row = 22;
+  const by = {}; S.forEach(p => { const m = p.legs[0].mk, o = (by[m] ??= { g: 0, r: 0, u: 0 }); o[p.status === 'green' ? 'g' : 'r']++; o.u += p.profit; });
+  const arr = Object.entries(by).sort((a, b) => b[1].u - a[1].u).slice(0, 12);
+  if (!arr.length) { el(svg, 'text', { x: 260, y: 100, 'text-anchor': 'middle' }, 'Sem simples conferidas'); return; }
+  svg.setAttribute('viewBox', `0 0 ${W} ${arr.length * row + 10}`);
+  const mx = Math.max(...arr.map(([, v]) => v.g + v.r)), sx = v => v * (W - L - R) / mx;
+  arr.forEach(([m, v], i) => { const yy = 4 + i * row;
+    el(svg, 'text', { x: L - 10, y: yy + 14, 'text-anchor': 'end', class: 'lbl' }, MK[m] ?? m);
+    el(svg, 'rect', { x: L, y: yy + 3, width: Math.max(0, sx(v.g) - 1), height: 14, rx: 3, fill: css('--green') });
+    el(svg, 'rect', { x: L + sx(v.g), y: yy + 3, width: Math.max(0, sx(v.r) - 1), height: 14, rx: 3, fill: css('--red') });
+    el(svg, 'text', { x: L + sx(v.g + v.r) + 6, y: yy + 14 }, `${v.g}–${v.r}`);
+    el(svg, 'text', { x: W, y: yy + 14, 'text-anchor': 'end', style: `fill:${v.u >= 0 ? css('--green') : css('--red')};font-weight:800` }, sg(v.u)); });
+}
+function bars(svg, rows, H, cols = []) {
+  const W = 520, L = 170, R = 64;
+  rows.forEach(([lb, xs], i) => { const yy = 10 + i * 46, g = xs.filter(p => p.status === 'green').length, u = xs.reduce((a, p) => a + p.profit, 0), w = W - L - R;
+    el(svg, 'text', { x: 0, y: yy + 12, class: 'lbl' }, lb); el(svg, 'text', { x: 0, y: yy + 28 }, `${xs.length} simples · ${sg(u)} un`);
+    el(svg, 'rect', { x: L, y: yy, width: w, height: 22, rx: 4, fill: css('--surface2') });
+    el(svg, 'rect', { x: L, y: yy, width: xs.length ? w * g / xs.length : 0, height: 22, rx: 4, fill: cols[i] ?? css('--gold') });
+    el(svg, 'text', { x: W - R + 8, y: yy + 16, class: 'lbl' }, pct(g, xs.length)); });
+  svg.setAttribute('viewBox', `0 0 520 ${H ?? rows.length * 46 + 8}`);
+}
+function clvChart(lidas, resto) {
+  const svg = document.getElementById('c-clv'), bat = lidas.filter(p => p.clv.bateu);
+  if (!lidas.length) { el(svg, 'text', { x: 260, y: 70, 'text-anchor': 'middle' }, 'Ainda sem leitura de fechamento no período'); return; }
+  bars(svg, [['Bateu o fechamento', bat], ['Não bateu / igual / sem leitura', resto]], 110, [css('--green'), css('--muted')]);
+}
+function oddChart(S) {
+  const svg = document.getElementById('c-odd');
+  const F = [['até 1,70', p => p.odd < 1.7], ['1,70 a 1,89', p => p.odd >= 1.7 && p.odd < 1.9], ['1,90 a 2,19', p => p.odd >= 1.9 && p.odd < 2.2], ['2,20 ou mais', p => p.odd >= 2.2]];
+  const rows = F.map(([lb, f]) => [lb, S.filter(f)]).filter(([, xs]) => xs.length);
+  if (!rows.length) { el(svg, 'text', { x: 260, y: 70, 'text-anchor': 'middle' }, 'Sem simples conferidas'); return; }
+  bars(svg, rows);
+}
+load();
+</script>
+</body>
+</html>
