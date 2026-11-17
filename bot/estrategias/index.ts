@@ -96,7 +96,7 @@ function fullAlert(x: any, r: any) {
 }
 async function alert(fresh: any[], evMin: number, bot: any) {
   const token = await cfg('TELEGRAM_BOT_TOKEN'); if (!token || !fresh.length) return 0;
-  const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
+  const subs: any[] = await sb('bot_subs?select=chat_id,odd_min&est=eq.true') ?? [];
   if (!subs.length) return 0;
   const rowOf = new Map<string, any>((bot?.rows ?? []).map((r: any) => [`${r.id}-${r.m}-${r.s}`, r]));
   // ordem: jogo mais cedo primeiro, e dentro do jogo o maior EV
@@ -110,6 +110,7 @@ async function alert(fresh: any[], evMin: number, bot: any) {
     const { text, kb } = fullAlert(x, r);
     const img = r?.cd ? `${APP}cards/${r.id}-${r.m}-${r.s}.jpg?v=${encodeURIComponent(bot.gen)}` : null;
     for (const s of subs) {
+      if (+s.odd_min && !(+x.odd >= +s.odd_min - 1e-9)) continue; // odd mínima do usuário (17/11)
       const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', reply_markup: kb, disable_notification: quiet,
           link_preview_options: img ? { url: img, prefer_large_media: true, show_above_text: true } : { is_disabled: true } }) }).then(r => r.json()).catch(() => null);
@@ -268,13 +269,17 @@ async function risco(bot: any) {
   }
   let alertas = 0;
   if (items.length) {
-    const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id&est=eq.true') ?? [];
+    const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id,odd_min&est=eq.true') ?? [];
     const names = Object.fromEntries(((await sb('strategies?select=id,name')) ?? []).map((s: any) => [s.id, s.name]));
-    let text = `⚠️ <b>ALERTA DE RISCO · ENTRADA${items.length > 1 ? 'S' : ''} JÁ ENVIADA${items.length > 1 ? 'S' : ''}</b>\n<i>O cenário mudou depois do alerta.</i>\n\n` + items.map(({ x, why }) =>
+    const mkText = (items: { x: any; why: string[] }[]) => { let text = `⚠️ <b>ALERTA DE RISCO · ENTRADA${items.length > 1 ? 'S' : ''} JÁ ENVIADA${items.length > 1 ? 'S' : ''}</b>\n<i>O cenário mudou depois do alerta.</i>\n\n` + items.map(({ x, why }) =>
       `🏀 <b>${esc(x.team)} x ${esc(x.opp)}</b>${x.tip_utc ? ' · ' + hourBR(x.tip_utc) : ''}\n<blockquote><b>${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+(x.open_line ?? x.line))}</b> · @${n2(+(x.open_odd ?? x.odd))}\n${why.map(w => '• ' + w).join('\n')}</blockquote>`).join('\n\n')
       + `\n\n<i>Se ainda não entrou, reavalie antes. Se já entrou, veja se vale proteger. O placar segue contando a entrada como foi enviada.</i>`;
     if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '…';
+    return text; };
     for (const s of token ? subs : []) {
+      // odd mínima do usuário (17/11): só avisa das entradas que ele recebeu
+      const mine = items.filter(({ x }) => !+s.odd_min || +(x.open_odd ?? x.odd) >= +s.odd_min - 1e-9); if (!mine.length) continue;
+      const text = mkText(mine);
       const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: s.chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: '🧪 Placar', callback_data: '/estrategias' }, { text: '💼 Banca', callback_data: '/banca' }]] } }) }).then(r => r.json()).catch(() => null);
       if (r?.ok) alertas++;

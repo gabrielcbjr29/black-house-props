@@ -31,7 +31,7 @@ export const STRATEGIES = MKT.map(([mk, name, lb]) => ({
 // cenário separado (pedido do usuário em 13/11): under de jogador de reserva (12 a 24 min), que fica fora dos
 // mercados acima. Sem colega importante fora hoje: com um titular fora, o reserva ganha minutos e o under perde o sentido.
 STRATEGIES.push({
-  id: 'reserva-under', name: 'Under de reserva', markets: MK_EST, max: 8,
+  id: 'reserva-under', name: 'Under de reserva', markets: MK_EST, max: 8, off: true,
   descr: 'Menos de nos 8 mercados para jogadores de reserva (12 a 24 min por jogo), com linha e odd da 99play: chance do modelo entre 55% e 85%, sem colega importante fora hoje, ordem pela Nota BH.',
   test: r => c99(r) && r.s === 'u' && (r.mn ?? 0) >= 12 && (r.mn ?? 0) < 24 && r.st !== 'questionable' && r.p >= .55 && r.p <= .85 && !r.wo?.x,
 });
@@ -39,7 +39,7 @@ STRATEGIES.push({
 // Modelo BH vê muito valor. Também entra no papel, para medir se esse corte dá lucro.
 const GOOD = r => r.gr === 'A+' || r.gr === 'A';
 STRATEGIES.push({
-  id: 'oport-forte', name: 'Oportunidade forte', markets: ['PTS', 'REB', 'AST', 'PRA', 'PR', 'PA', 'STL', 'BLK', 'SB', 'TOV', 'PF'], max: 6,
+  id: 'oport-forte', name: 'Oportunidade forte', markets: ['PTS', 'REB', 'AST', 'PRA', 'PR', 'PA', 'STL', 'BLK', 'SB', 'TOV', 'PF'], max: 6, off: true,
   descr: 'Fora dos 8 mercados monitorados: entradas com linha e odd da 99play, EV de 10% ou mais, nota A ou A+, jogador de rotação (24+ min), chance do modelo entre 55% e 85%, sem trava de desfalque, ordem pela Nota BH.',
   test: r => !!(r.c9 && r.d) && !OFF_MK.has(r.m) && !MK_EST.includes(r.m) && GOOD(r) && edgeOf(r) >= .10 && rot(r) && r.p >= .55 && r.p <= .85 && !woLock(r),
 });
@@ -58,7 +58,7 @@ export function strategyCtx(rows) {
   return { top };
 }
 STRATEGIES.push({
-  id: 'top10-forte', name: 'Top 10 forte', markets: TOP_GROUPS.flat(), max: 6,
+  id: 'top10-forte', name: 'Top 10 forte', markets: TOP_GROUPS.flat(), max: 6, off: true,
   descr: 'Entradas do Top 10 tentativas ou do Top 10 reb+ast do bot com linha e odd da 99play, EV de 8% ou mais e nota A ou A+ (as boas que surgem depois que o teto do mercado encheu), ordem pela Nota BH.',
   test: (r, ctx) => !!(r.c9 && r.d) && !!ctx?.top?.has(`${r.id}|${r.m}|${r.s}`) && GOOD(r) && edgeOf(r) >= .08,
 });
@@ -72,11 +72,13 @@ STRATEGIES.push({
   sort: (a, b) => (rt(b.l10) - rt(a.l10)) || (rt(b.l5) - rt(a.l5)) || (rt(b.l20) - rt(a.l20)) || ((b.d ?? 0) - (a.d ?? 0)),
 });
 
+// 17/11: o usuário parou de acompanhar Under de reserva, Oportunidade forte e Top 10 forte (off: true). A regra fica
+// aqui (e o histórico no banco, com status 'arquivada') para poder voltar; não geram mais entradas nem alertas.
 /* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */
 export function pickStrategies(bot, games = []) {
   const tip = Object.fromEntries((games || []).map(g => [g.id, g.timeUTC || g.utc || null]));
   const out = [], ctx = strategyCtx(bot.rows);
-  for (const S of STRATEGIES) {
+  for (const S of STRATEGIES.filter(S => !S.off)) {
     const rows = (S.id === 'tendencia' ? [...bot.rows, ...(bot.trend || [])] : bot.rows).filter(r => { try { return S.test(r, ctx); } catch { return false; } })
       .sort(S.sort || ((a, b) => ((b.sc ?? b.nt ?? 0) - (a.sc ?? a.nt ?? 0)) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1))));
     const seen = new Set(); let k = 0;
@@ -88,5 +90,5 @@ export function pickStrategies(bot, games = []) {
       if (++k >= S.max) break;
     }
   }
-  return { date: bot.date, gen: bot.gen, strategies: STRATEGIES.map(({ test, ...s }) => s), picks: out };
+  return { date: bot.date, gen: bot.gen, strategies: STRATEGIES.filter(S => !S.off).map(({ test, ...s }) => s), picks: out };
 }

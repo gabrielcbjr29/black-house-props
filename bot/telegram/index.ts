@@ -83,8 +83,20 @@ const PAGE = 5;
 // faixa de odd das listas (odd da casa ou, sem casa, a odd justa): mesmo critério do PropFinder (-250 a +250)
 const ODD_MIN = 1.4, ODD_MAX = 3.5;
 const oddOf = (r: Row) => r.d ?? (r.p > 0 ? 1 / r.p : 99);
-const inRange = (r: Row) => { const o = oddOf(r); return o >= ODD_MIN - 1e-9 && o <= ODD_MAX + 1e-9; };
+const inRangeBase = (r: Row) => { const o = oddOf(r); return o >= ODD_MIN - 1e-9 && o <= ODD_MAX + 1e-9; };
+const inRange = inRangeBase;
 const RANGE_TXT = ' · odds 1,40–3,50';
+// odd mínima do usuário (pedido de 17/11): vale para todas as listas, os Top 10, o envio diário, os alertas e a pauta.
+// Guardada em bot_subs.odd_min; sem escolha = 1,40 (a faixa padrão das listas). 0 = sem corte extra.
+const OM_OPTS = [1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0];
+const OM_CACHE = new Map<number, { at: number; v: number }>();
+async function userMin(chatId: number): Promise<number> {
+  const c = OM_CACHE.get(chatId); if (c && Date.now() - c.at < 60_000) return c.v;
+  const v = +((await sb(`bot_subs?chat_id=eq.${chatId}&select=odd_min`).catch(() => null))?.[0]?.odd_min ?? 0) || 0;
+  OM_CACHE.set(chatId, { at: Date.now(), v }); return v;
+}
+const rangeTxt = (om: number) => ` · odds ${n2(Math.max(om, ODD_MIN))}–3,50`;
+const okOdd = (o: number | null | undefined, om: number) => !om || (o != null && +o >= om - 1e-9);
 // cards em imagem (gerados no publicar do GitHub Pages)
 const keyOf = (r: Row) => `${r.id}-${r.m}-${r.s}`;
 // PDF do dia (scripts/relatorio.mjs, gerado em toda coleta)
@@ -265,19 +277,19 @@ const MT: Record<string, { mk: string[]; title: string; cmd: string; ic: string 
   ra: { mk: ['RA'], title: 'REBOTES + ASSISTÊNCIAS', cmd: '/topra', ic: '🙌' },
 };
 // ranking: Nota BH (chance do modelo, L10/L20/temporada, confronto, defesa x posição), desempate pelo L10; um por jogador
-function modelTop(d: Data, mk: string[], n = 10) {
+function modelTop(d: Data, mk: string[], n = 10, om = 0) {
   // só jogador de rotação (24+ min) e linhas que as casas costumam abrir (mesmo critério dos cards)
   const MIN_LINE: Record<string, number> = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
   // nos jogos em que a 99play já abriu linhas de jogador, só entra linha da 99play (é onde o usuário aposta)
   const cov = new Set(d.rows.filter(r => r.c9).map(r => r.g));
-  const rows = d.rows.filter(r => r.mb && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0) && (r.c9 || !cov.has(r.g))).sort((a, b) => b.sc - a.sc);
+  const rows = d.rows.filter(r => r.mb && okOdd(oddOf(r), om) && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0) && (r.c9 || !cov.has(r.g))).sort((a, b) => b.sc - a.sc);
   const seen = new Set<string>(), out: Row[] = [];
   for (const r of rows) { if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
   return out;
 }
 // os dois tops (cada lista independente: o mesmo jogador pode estar em tentativas e em reb+ast; dentro de uma lista, uma vez só)
-function tops(d: Data, n = 10): Record<string, Row[]> {
-  return Object.fromEntries(Object.entries(MT).map(([k, T]) => [k, modelTop(d, T.mk, n)]));
+function tops(d: Data, n = 10, om = 0): Record<string, Row[]> {
+  return Object.fromEntries(Object.entries(MT).map(([k, T]) => [k, modelTop(d, T.mk, n, om)]));
 }
 const MT_NOTE = (d: Data) => d.rows.some(r => r.c9)
   ? '\n<i>🏠 Linha e odd da 99play. 📏 Ref. = linha de referência (mediana dos últimos 15 jogos), só para comparar. Jogo sem linhas da 99play ainda usa a referência. Só jogadores de rotação (24+ min).</i>'
@@ -298,8 +310,8 @@ function shareText(r: Row, i?: number) {
   return [head, `${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de ${n1(r.l)} ${MK[r.m] ?? r.m}`, q.n ? `📊 Últimos ${q.n}: ${q.dots} ${q.hit}/${q.n}` : `📊 Últimos 10: ${r.l10 ? `${r.l10[0]}/${r.l10[1]}` : '–'}`, ...(seq(r) ? [`🔢 Sequência: ${seq(r)}`] : [])].join('\n');
 }
 // lista inteira para copiar (um bloco: tocar no bloco copia tudo)
-function shareList(d: Data, key: string) {
-  const T = MT[key], top = tops(d)[key];
+function shareList(d: Data, key: string, om = 0) {
+  const T = MT[key], top = tops(d, 10, om)[key];
   if (!top.length) return 'Nenhuma entrada no top agora.';
   const body = top.map((r, i) => shareText(r, i + 1)).join('\n\n');
   return `📋 <b>Texto para os inscritos</b> <i>(toque no bloco para copiar)</i>\n<pre>${esc(`${T.ic} TOP 10 MODELO BH · ${T.title}\n${dateBR(d.date)}\n\n${body}\n\n🟩 bateu · 🟥 não bateu · 🔢 sequência dos últimos 10 jogos, do mais recente para o mais antigo.\n🔞 18+ · Aposte com responsabilidade.`)}</pre>`;
@@ -315,27 +327,44 @@ ${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss
 }
 // colega importante em dúvida: como ele foi nos jogos sem esse colega (se o colega cair, o cenário muda)
 const duvida = (r: Row) => r.wo && !r.wo.x ? `\n🟡 ${esc(r.wo.q)} em dúvida · sem ele: ${r.wo.h[0]}/${r.wo.h[1]} ${r.s === 'o' ? 'acima' : 'abaixo'}, média ${n1(r.wo.a)}` : '';
-function topText(d: Data, key: string) {
-  const T = MT[key], top = tops(d)[key];
+function topText(d: Data, key: string, om = 0) {
+  const T = MT[key], top = tops(d, 10, om)[key];
   if (!top.length) return null;
-  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE(d) + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd. 🔢 = sequência dos últimos 10 (mais recente primeiro).</i>' + FOOT;
+  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE(d) + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd. 🔢 = sequência dos últimos 10 (mais recente primeiro).</i>' + (om ? `\n<i>🎯 Só odd ${n2(om)} ou mais (sua odd mínima).</i>` : '') + FOOT;
 }
 type Sub = { tent: boolean; ra: boolean; est: boolean };
-const subKb = (s: Sub | null) => ({ inline_keyboard: [
+const subKb = (s: Sub | null, om = 0) => ({ inline_keyboard: [
   [BTN(`${s?.tent ? '✅' : '⬜'} Top 10 Tentativas`, '/receber tent'), BTN(`${s?.ra ? '✅' : '⬜'} Top 10 Reb+Ast`, '/receber ra')],
   [BTN(`${s?.est ? '✅' : '⬜'} Modelo por mercado`, '/receber est')],
+  [BTN(`🎯 Odd mínima: ${om ? n2(om) : 'padrão (1,40)'}`, '/receber odd')],
   [BTN('🔕 Parar de receber', '/receber parar'), BTN('🏠 Menu', '/menu')]] });
 async function receberCmd(chatId: number, rest: string[]): Promise<Out> {
   const a = norm(rest[0] ?? '');
-  let s: Sub | null = null;
-  try { s = (await sb(`bot_subs?chat_id=eq.${chatId}&select=tent,ra,est`))?.[0] ?? null; } catch { return { text: 'Não consegui acessar as inscrições agora.', kb: { inline_keyboard: [HOME] } }; }
+  let s: Sub | null = null, om = 0;
+  try { const row = (await sb(`bot_subs?chat_id=eq.${chatId}&select=tent,ra,est,odd_min`))?.[0] ?? null; if (row) { om = +(row.odd_min ?? 0) || 0; s = { tent: row.tent, ra: row.ra, est: row.est }; } } catch { return { text: 'Não consegui acessar as inscrições agora.', kb: { inline_keyboard: [HOME] } }; }
+  if (a === 'odd') { // odd mínima de tudo que o bot manda para este chat
+    const v = (rest[1] ?? '').replace(',', '.');
+    if (v) {
+      const x = v === 'padrao' ? 0 : +v;
+      if (isFinite(x) && x >= 0 && x <= 5) {
+        await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...(s ?? { tent: false, ra: false, est: false }), odd_min: x || null, updated_at: new Date().toISOString() }) });
+        om = x; OM_CACHE.delete(chatId);
+      }
+    }
+    return { text: `🎯 <b>ODD MÍNIMA</b>
+
+Agora: <b>${om ? n2(om) + ' ou mais' : 'padrão (1,40 ou mais)'}</b>
+<blockquote>Vale para tudo que o bot te mostra e manda: listas de todos os mercados (Top do dia, Valor, Seguras, Pontos, Tentativas...), Top 10 Tentativas e Reb+Ast, cards, múltipla, envio diário, alertas do Modelo por mercado e as simples da Pauta do Tipster.</blockquote>
+<i>Usa a odd da 99play (ou da casa); sem odd de casa, a odd justa do modelo. Os canais têm a odd mínima própria em /canais. O placar e os testes seguem contando tudo.</i>`,
+      kb: { inline_keyboard: [...chunk(OM_OPTS.map(o => BTN(`${Math.abs(om - o) < 1e-9 || (!om && o === 1.4) ? '✅ ' : ''}${n2(o)}`, `/receber odd ${o === 1.4 ? 'padrao' : o}`)), 4), [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } };
+  }
   let next = s;
   if (!a) next = s ?? { tent: true, ra: true, est: true };
   else if (a === 'parar') next = { tent: false, ra: false, est: false };
   else if (a === 'tent' || a === 'ra' || a === 'est') next = { ...(s ?? { tent: false, ra: false, est: false }), [a]: !(s?.[a as keyof Sub]) };
   if (JSON.stringify(next) !== JSON.stringify(s)) await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: chatId, ...next, updated_at: new Date().toISOString() }) });
   const on = [next?.tent && '🏹 Top 10 Tentativas e convertidos', next?.ra && '🙌 Top 10 Rebotes + assistências', next?.est && '🧪 Modelo por mercado (entradas do dia)'].filter(Boolean);
-  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, cerca de 2h30 antes do primeiro jogo (em dia de jogo cedo, mais cedo):\n${on.map(x => '• ' + x).join('\n')}${next?.est ? '\n\n🚨 No modelo por mercado, cada entrada nova também chega na hora, em alerta, desde a abertura das linhas (de madrugada, sem som). O PDF do dia vai junto do resumo.' : ''}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:`, kb: subKb(next) };
+  return { text: `<b>📬 ENVIO DIÁRIO DO MODELO BH</b>\n\n${on.length ? `Você recebe todo dia, cerca de 2h30 antes do primeiro jogo (em dia de jogo cedo, mais cedo):\n${on.map(x => '• ' + x).join('\n')}${next?.est ? '\n\n🚨 No modelo por mercado, cada entrada nova também chega na hora, em alerta, desde a abertura das linhas (de madrugada, sem som). O PDF do dia vai junto do resumo.' : ''}` : 'Você não está recebendo nada no momento.'}\n\nToque para ligar ou desligar cada lista:${om ? `\n<i>🎯 Só entradas com odd ${n2(om)} ou mais.</i>` : ''}`, kb: subKb(next, om) };
 }
 // envio do dia para os inscritos (chamado pelo GitHub depois de publicar os dados)
 // minHour: só envia se os dados foram gerados depois dessa hora (Brasília) — espera a rodada das 18h30
@@ -357,14 +386,15 @@ async function pushDaily(force = false, minHour = 0, lead = 0) {
     const done = await sb(`bot_config?key=eq.${flag}&select=key`).catch(() => []); if (done?.length) return { ok: true, skip: 'já enviado hoje' };
   }
   const gravados = await recordTops(d).catch(e => { console.error('top_picks', e); return 0; });
-  const subs: ({ chat_id: number } & Sub)[] = await sb('bot_subs?select=chat_id,tent,ra,est&or=(tent.eq.true,ra.eq.true,est.eq.true)') ?? [];
-  const txt = { tent: topText(d, 'tent'), ra: topText(d, 'ra') };
-  const et = estText(d, await estEntries(d.date));
+  const subs: ({ chat_id: number; odd_min?: number | null } & Sub)[] = await sb('bot_subs?select=chat_id,tent,ra,est,odd_min&or=(tent.eq.true,ra.eq.true,est.eq.true)') ?? [];
+  const est = await estEntries(d.date), et0 = estText(d, est);
   let sent = 0;
   for (const s of subs) {
+    const om = +(s.odd_min ?? 0) || 0, T10 = tops(d, 10, om);
+    const txt = { tent: topText(d, 'tent', om), ra: topText(d, 'ra', om) }, et = estText(d, est, om);
     for (const k of ['tent', 'ra'] as const) {
       if (!s[k] || !txt[k]) continue;
-      const regs = tops(d)[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
+      const regs = T10[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
       const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
         reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('📤 Texto p/ inscritos', 'cp:' + k)], [BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
       if (r.ok) sent++;
@@ -379,9 +409,11 @@ async function pushDaily(force = false, minHour = 0, lead = 0) {
     }
   }
   await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: flag, value: String(sent), updated_at: new Date().toISOString() }) }).catch(() => null);
-  return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et?.regs.length ?? 0 };
+  return { ok: true, date: d.date, inscritos: subs.length, mensagens: sent, top_gravado: gravados, estrategias: et0?.regs.length ?? 0 };
 }
 // ---------- Entradas das estratégias (strategies.json gerado na coleta) ----------
+// métodos que o usuário parou de acompanhar em 17/11 (histórico no banco, fora das telas)
+const ARQ = new Set(['oport-forte', 'top10-forte', 'reserva-under']);
 const ESTN: Record<string, string> = { 'm-2pa': 'Tentativas de 2', 'm-2pm': 'De 2 convertidos', 'm-3pa': 'Tentativas de 3', 'm-3pm': 'De 3 convertidos', 'm-fgm': 'Arr. convertidos', 'm-fta': 'LL tentados', 'm-ftm': 'LL convertidos', 'm-ra': 'Reb+Ast', 'reserva-under': 'Under de reserva', 'oport-forte': 'Oportunidade forte', 'top10-forte': 'Top 10 forte', 'tendencia': 'Tendência' };
 const evS = (x: any) => x == null ? '–' : (x >= 0 ? '+' : '') + (+x * 100).toFixed(1).replace('.', ',') + '%';
 const estKey = (x: any) => `${x.pid}-${x.mk}-${x.side}`;
@@ -391,7 +423,7 @@ async function estEntries(date: string) {
     sb(`strategy_picks?date=eq.${date}&status=eq.aberta&alerted=eq.true&select=strategy_id,pid,name,team,opp,mk,side,line,odd,open_line,open_odd,p,edge,tip_utc,sq&order=edge.desc.nullslast`).catch(() => []),
     sb('strategies?select=id,name&order=id').catch(() => [])]);
   if (!picks?.length) return null;
-  return { date, strategies, picks: picks.map((x: any) => ({ ...x, line: x.open_line ?? x.line, odd: x.open_odd ?? x.odd })) };
+  return { date, strategies, picks: picks.filter((x: any) => !ARQ.has(x.strategy_id)).map((x: any) => ({ ...x, line: x.open_line ?? x.line, odd: x.open_odd ?? x.odd })) };
 }
 async function estToday(date: string) {
   const st = await fetch(APP_URL + 'data/strategies.json?t=' + Math.floor(Date.now() / 120_000)).then(r => r.ok ? r.json() : null).catch(() => null);
@@ -401,9 +433,9 @@ async function estToday(date: string) {
 // nomes completos dos mercados para as mensagens do modelo por mercado
 const MKN: Record<string, string> = { '2PA': 'Tentativas de 2', '2PM': 'De 2 convertidos', '3PA': 'Tentativas de 3', '3PM': 'De 3 convertidos', FGM: 'Arremessos convertidos', FTA: 'Lances livres tentados', FTM: 'Lances livres convertidos', RA: 'Reb + Ast' };
 // resumo do dia: as entradas ALERTADAS ainda em aberto, agrupadas por jogo (como se navega na 99play)
-function estText(d: Data, st: any): { text: string; regs: { text: string; callback_data: string }[] } | null {
+function estText(d: Data, st: any, om = 0): { text: string; regs: { text: string; callback_data: string }[] } | null {
   const now = Date.now();
-  const picks = (st?.picks ?? []).filter((p: any) => !p.tip_utc || Date.parse(p.tip_utc) > now);
+  const picks = (st?.picks ?? []).filter((p: any) => (!p.tip_utc || Date.parse(p.tip_utc) > now) && okOdd(p.odd, om));
   if (!picks.length) return null;
   const games = new Map<string, any[]>();
   for (const x of picks) { const k = [x.team, x.opp].sort().join(' x '); (games.get(k) ?? games.set(k, []).get(k)!).push(x); }
@@ -543,8 +575,8 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   const id = rest.join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
   let stats: any[] = [], picks: any[] = [];
   try {
-    stats = await sb('strategy_stats?select=*&order=lucro.desc.nullslast') ?? [];
-    picks = await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,pid,name,mk,side,line,odd,open_line,open_odd,odd_src,p,edge,status&order=first_at.asc`) ?? [];
+    stats = (await sb('strategy_stats?select=*&order=lucro.desc.nullslast') ?? []).filter((x: any) => !ARQ.has(x.id));
+    picks = (await sb(`strategy_picks?date=eq.${etDate()}&select=strategy_id,pid,name,mk,side,line,odd,open_line,open_odd,odd_src,p,edge,status&order=first_at.asc`) ?? []).filter((x: any) => !ARQ.has(x.strategy_id));
   } catch { return { text: 'Não consegui ler as estratégias agora.', kb: { inline_keyboard: [HOME] } }; }
   if (!stats.length) return { text: 'Nenhuma estratégia cadastrada ainda.', kb: { inline_keyboard: [HOME] } };
   // antes da primeira gravação do dia, mostra a lista de hoje direto da coleta
@@ -841,11 +873,11 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
 }
 const clampN = (s: string | undefined, def = 10) => { const x = parseInt(s ?? '', 10); return Number.isFinite(x) ? Math.max(1, Math.min(20, x)) : def; };
 
-function multipla(d: Data, arg: string | undefined): Out {
+function multipla(d: Data, arg: string | undefined, om = 0): Out {
   const v = arg ? parseFloat(arg.replace(',', '.')) : NaN;
   const target = Number.isFinite(v) && v >= 1.3 && !(Number.isInteger(v) && v <= 8) ? v : null;
   const legs = target ? 8 : Math.max(2, Math.min(6, Number.isFinite(v) ? v : 3));
-  const cand = d.rows.filter(r => (r.gr === 'A+' || r.gr === 'A') && r.d && r.d >= ODD_MIN && r.d <= ODD_MAX && (r.e ?? 0) >= 0 && (r.e ?? 0) <= .15 && r.st === 'ok')
+  const cand = d.rows.filter(r => (r.gr === 'A+' || r.gr === 'A') && r.d && r.d >= Math.max(ODD_MIN, om) && r.d <= ODD_MAX && (r.e ?? 0) >= 0 && (r.e ?? 0) <= .15 && r.st === 'ok')
     .sort((a, b) => (a.k - b.k) || (b.sc - a.sc));
   const pick: Row[] = [], games = new Set<string>(); let odd = 1, p = 1;
   for (const r of cand) { if (target ? odd >= target : pick.length >= legs) break; if (pick.length >= 8) break; if (games.has(r.g)) continue; games.add(r.g); pick.push(r); odd *= r.d!; p *= r.p; }
@@ -915,7 +947,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Tentativas', '/tentativas'), BTN('🧱 Defesa', '/defesa'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('🗓️ Jogos', '/jogos'), BTN('🚑 Desfalques', '/desfalques'), BTN('📋 Resumo', '/resumo')],
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
-  [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
+  [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')], [BTN('🎯 Odd mínima', '/odd')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
   [BTN('🎯 Pauta do Tipster', '/pauta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
@@ -953,6 +985,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'ajuda' || cmd === 'help' || cmd === 'comandos') return { text: HELP, kb: MENU };
   if (cmd === 'testes') return testesCmd(chatId, rest);
   if (cmd === 'receber' || cmd === 'envio') return receberCmd(chatId, rest);
+  if (cmd === 'odd' || cmd === 'oddminima') return receberCmd(chatId, ['odd', ...rest]);
   if (cmd === 'banca' || cmd === 'roi') return bancaCmd(chatId, rest);
   if (cmd === 'apagar') return apagarCmd(chatId, rest);
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
@@ -965,8 +998,10 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'cb') return cbCmd(chatId, rest);
   if (cmd === 'app') return { text: `📱 <b>App completo</b>\n${APP_URL}`, kb: { inline_keyboard: [[{ text: 'Abrir o app', url: APP_URL }], HOME] } };
   const d = await data();
+  // odd mínima do usuário: as listas daqui para baixo usam este inRange/RANGE_TXT (mesmo nome, por chat)
+  const om = await userMin(chatId), inRange = (r: Row) => inRangeBase(r) && okOdd(oddOf(r), om), RANGE_TXT = rangeTxt(om);
   if (cmd === 'modelo') return modeloCmd(d, rest, chatId);
-  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', d.rows.some(r => r.c9) ? ' · linhas da 99play' : ' · linha de referência'); }
+  if (cmd === 'toptentativas' || cmd === 'topra') { const k = cmd === 'topra' ? 'ra' : 'tent'; const T = MT[k]; return list(d, tops(d, 10, om)[k], `${T.ic} TOP 10 MODELO BH · ${T.title}`, 10, raw, page, true, 'O Modelo BH ainda não rodou para os jogos de hoje.', (d.rows.some(r => r.c9) ? ' · linhas da 99play' : ' · linha de referência') + (om ? ` · odd ${n2(om)}+` : '')); }
   if (cmd === 'top') { const n = clampN(rest[0]); return list(d, d.rows.filter(inRange), `🔥 TOP ${n} DO DIA`, n, raw, page, true, '', RANGE_TXT); }
   if (cmd === 'valor') return list(d, d.rows.filter(r => r.d && !r.k && r.e != null && r.e >= .03 && r.e <= .15 && inRange(r)).sort((a, b) => (b.e! - a.e!)), '💰 VALOR COM ODD DE CASA', clampN(rest[0]), raw, page, true, '⏳ As odds das casas entram perto de cada jogo (até 2h30 antes). Tente mais perto do primeiro jogo ou veja o Top do dia.', RANGE_TXT);
   if (cmd === 'seguras') return list(d, d.rows.filter(r => r.p >= .65 && r.p <= .92 && r.st === 'ok' && inRange(r) && (r.gr === 'A+' || r.gr === 'A') && r.m !== 'PF').sort((a, b) => (+!!b.d - +!!a.d) || b.p - a.p), '🛡️ MAIS SEGURAS (CHANCE ≥ 65%)', clampN(rest[0]), raw, page, true, '', RANGE_TXT);
@@ -999,7 +1034,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     const rows = d.rows.filter(r => norm(r.n).includes(q)); if (!rows.length) return { text: `Nenhuma linha boa hoje para <b>${esc(arg)}</b>.`, kb: { inline_keyboard: [HOME] } };
     return list(d, rows, '👤 ' + rows[0].n.toUpperCase(), 12, raw, page, false);
   }
-  if (cmd === 'multipla') return multipla(d, rest[0]);
+  if (cmd === 'multipla') return multipla(d, rest[0], om);
   if (cmd === 'jogos') {
     const w = (s: string, n: number) => (s + ' '.repeat(n)).slice(0, n);
     const rowsTxt = d.games.map(g => `${g.t}  ${w(`${g.a} @ ${g.h}`, 11)} ${w(g.sp != null ? `${g.sp < 0 ? g.h : g.a} -${n1(Math.abs(g.sp))}` : '', 10)} ${g.to ? n1(g.to) : ''}`).join('\n');
@@ -1039,11 +1074,11 @@ async function sendCard(chatId: number, key: string) {
 async function sendCards(chatId: number, arg?: string) {
   const d = await data().catch(() => null);
   if (!d) { await TG('sendMessage', { chat_id: chatId, text: 'Não consegui ler os dados agora. Tente de novo em instantes.' }); return; }
-  const n = Math.max(1, Math.min(10, parseInt(arg ?? '', 10) || 5));
+  const n = Math.max(1, Math.min(10, parseInt(arg ?? '', 10) || 5)), om = await userMin(chatId);
   const seen = new Set<string>(), pick: Row[] = [];
-  for (const r of d.rows) { if (!r.cd || !inRange(r) || seen.has(r.id)) continue; seen.add(r.id); pick.push(r); if (pick.length >= n) break; }
+  for (const r of d.rows) { if (!r.cd || !inRange(r) || !okOdd(oddOf(r), om) || seen.has(r.id)) continue; seen.add(r.id); pick.push(r); if (pick.length >= n) break; }
   if (!pick.length) { await TG('sendMessage', { chat_id: chatId, text: 'Os cards do dia ainda estão sendo gerados. Tente em alguns minutos ou veja o /top.', reply_markup: MENU }); return; }
-  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `<b>🖼️ AS ${pick.length} MELHORES DO DIA</b>\n<i>${dateBR(d.date)} · pela Nota BH · odds 1,40–3,50 · atualizado ${hourBR(d.gen)}</i>` });
+  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `<b>🖼️ AS ${pick.length} MELHORES DO DIA</b>\n<i>${dateBR(d.date)} · pela Nota BH${rangeTxt(om)} · atualizado ${hourBR(d.gen)}</i>` });
   const media = pick.map(r => ({ type: 'photo', media: cardUrl(d, r), caption: caption(r), parse_mode: 'HTML' }));
   const res = pick.length === 1 ? await TG('sendPhoto', { chat_id: chatId, photo: media[0].media, caption: media[0].caption, parse_mode: 'HTML' }) : await TG('sendMediaGroup', { chat_id: chatId, media });
   if (!res.ok) { await TG('sendMessage', { chat_id: chatId, text: pick.map((r, i) => card(r, i + 1)).join('\n') + '\n' + FOOT, parse_mode: 'HTML', disable_web_page_preview: true }); }
@@ -1057,11 +1092,11 @@ async function sendCards(chatId: number, arg?: string) {
 // 3 melhores escadas do dia.
 const rate = (h?: [number, number] | null, min = 1) => h && h[1] >= min ? h[0] / h[1] : null;
 const matchup = (r: Row) => r.dv?.r && r.dv.of ? (r.s === 'o' ? (r.dv.r - 1) : (r.dv.of - r.dv.r)) / Math.max(1, r.dv.of - 1) : .5;
-export function pautaPick(d: Data, now = Date.now()) {
+export function pautaPick(d: Data, now = Date.now(), om = 0) {
   const utc = Object.fromEntries(d.games.map(g => [g.id, g.utc ? Date.parse(g.utc) : NaN]));
   const cand = d.rows.filter(r => {
     const t9 = (r as any).t9;
-    return r.c9 && r.d && r.d >= 1.4 && r.d <= 3.2 && r.p >= .55 && r.st === 'ok' && (r.mn ?? 0) >= 24
+    return r.c9 && r.d && r.d >= Math.max(1.4, om) && r.d <= 3.2 && r.p >= .55 && r.st === 'ok' && (r.mn ?? 0) >= 24
       && (rate(r.l10, 8) ?? 0) >= .7 && !(utc[r.g] <= now + 10 * 6e4) && !(t9 && now - Date.parse(t9) >= 2 * 36e5);
   }).map(r => {
     const h10 = rate(r.l10, 8)!, h5 = rate(r.l5, 4) ?? h10, hs = rate(r.ss, 8) ?? h10, hh = rate(r.hh, 2);
@@ -1101,7 +1136,7 @@ async function sendPauta(chatId: number, demo = false) {
   const d = await data();
   // exemplo: monta como se fosse 2h antes do primeiro jogo do dia (para ver a pauta depois que os jogos começaram)
   const first = Math.min(...d.games.map(g => g.utc ? Date.parse(g.utc) : Infinity));
-  const now = demo && isFinite(first) ? first - 2 * 36e5 : Date.now(), P = pautaPick(d, now);
+  const now = demo && isFinite(first) ? first - 2 * 36e5 : Date.now(), P = pautaPick(d, now, await userMin(chatId));
   const E = await fetch(APP_URL + 'data/escadas.json?t=' + Math.floor(now / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
   const esc3 = (E?.date === d.date ? E.list : []).filter((x: any) => Date.parse(x.tip) > now + 10 * 6e4).slice(0, 3);
   const next = d.games.map(g => g.utc ? Date.parse(g.utc) : NaN).filter(t => t > now).sort((a, b) => a - b)[0];
@@ -1633,7 +1668,7 @@ async function handle(update: any) {
   if (cpm) {
     if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
     const d = await data().catch(() => null);
-    await TG('sendMessage', { chat_id: chatId, text: d ? shareList(d, cpm[1]).slice(0, 4090) : 'Não consegui ler os dados agora.', parse_mode: 'HTML', disable_web_page_preview: true });
+    await TG('sendMessage', { chat_id: chatId, text: d ? shareList(d, cpm[1], await userMin(chatId)).slice(0, 4090) : 'Não consegui ler os dados agora.', parse_mode: 'HTML', disable_web_page_preview: true });
     return;
   }
   // card em imagem de uma entrada (botão 🖼️ das listas)
