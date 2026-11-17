@@ -34,3 +34,9 @@ test('lesões oficiais: também lê o formato antigo (uma linha da tabela por li
   assert.equal(r['tristan da silva'].status, 'probable', 'sobrenome de duas palavras entra como apelido');
   assert.ok(r['tristan da silva'].alias);
 });
+
+test('lesões oficiais: a nota não leva o horário/confronto do jogo seguinte nem a quebra "Two- Way"', () => {
+  const r = parseInjuryText('11/17/2026 07:30 (ET) NYK@TOR Toronto Raptors Smith, Malachi Out G League - Two-\nWay\n08:00 (ET) DET@SAS Detroit Pistons Joe, Isaiah Doubtful Injury/Illness - Right Hip Contusion POR@MIN Portland Trail Blazers NOT YET SUBMITTED');
+  assert.equal(r['malachi smith'].note, 'G League - Two-Way');
+  assert.equal(r['isaiah joe'].note, 'Right Hip Contusion');
+});

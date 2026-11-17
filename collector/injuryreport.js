@@ -46,7 +46,8 @@ export function parseInjuryText(text, { date = null } = {}) {
     const code = ST[m[3].toLowerCase()]; if (code === undefined) return;
     // motivo: do fim do status até a próxima linha/time/data
     const from = m.index + m[0].length, nxt = Math.min(rows[i + 1]?.start ?? t.length, ...marks.filter(k => k.at > from).map(k => k.at).slice(0, 1));
-    const note = t.slice(from, nxt).replace(/NOT YET SUBMITTED.*$/i, '').replace(/^\s*Injury\/Illness\s*-\s*/i, '').trim().slice(0, 80);
+    const note = t.slice(from, nxt).replace(/NOT YET SUBMITTED.*$/i, '').replace(/\s*(?:\d{1,2}:\d{2}\s*\(ET\)|[A-Z]{2,3}@[A-Z]{2,3}).*$/, '')
+      .replace(/(\w)- (\w)/g, '$1-$2').replace(/^\s*Injury\/Illness\s*-\s*/i, '').trim().slice(0, 80);
     // a forma de uma palavra (+ sufixo) é a principal; a de duas palavras vira apelido
     const { words, one } = m, first = m[2];
     const main = `${first} ${one.join(' ')}`;
