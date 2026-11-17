@@ -96,7 +96,7 @@ function draw() {
   const P = ALL.posts.filter(p => p.date >= from), done = P.filter(p => p.status === 'green' || p.status === 'red');
   const S = done.filter(p => p.kind === 'simples'), M = done.filter(p => p.kind === 'multipla');
   const U = xs => xs.reduce((a, p) => a + p.profit, 0), ST = xs => xs.reduce((a, p) => a + p.stake, 0), G = xs => xs.filter(p => p.status === 'green').length;
-  const lidas = S.filter(p => p.clv.bateu !== null), bat = lidas.filter(p => p.clv.bateu);
+  const lidas = S.filter(p => p.clv.s < p.clv.n), bat = lidas.filter(p => p.clv.bateu);
   document.getElementById('sub').textContent = P.length ? `${dm(P[0].date)} a ${dm(P[P.length - 1].date)} · atualizado ${new Date(ALL.gen).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}` : 'sem entradas no período';
   if (!P.length) { document.getElementById('app').innerHTML = '<div class="msg">Nenhuma entrada postada neste período.</div>'; return; }
   const K = [
@@ -105,7 +105,7 @@ function draw() {
     ['Unidades', sg(U(done)), `ROI ${ST(done) ? Math.round(U(done) / ST(done) * 100) : 0}%`, U(done)],
     ['Simples', sg(U(S)) + ' un', `${G(S)} de ${S.length} · ${pct(G(S), S.length)}`, U(S)],
     ['Múltiplas', sg(U(M)) + ' un', `${G(M)} de ${M.length} bateram`, U(M)],
-    ['Bateu o fechamento', pct(bat.length, lidas.length), `${bat.length} de ${lidas.length} simples com leitura`],
+    ['Bateu o fechamento', pct(bat.length, lidas.length), `${bat.length} de ${lidas.length} simples com fechamento lido`],
   ];
   document.getElementById('app').innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">
     <div class="kpis">${K.map(([a, b, c, v]) => `<div class="kpi"><span>${a}</span><b class="${v == null ? '' : v >= 0 ? 'ok' : 'ko'}">${b}</b><small>${c}</small></div>`).join('')}</div>

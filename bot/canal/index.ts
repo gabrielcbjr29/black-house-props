@@ -408,8 +408,8 @@ async function settle() {
 }
 // linha do fechamento no resumo do dono: quantas simples pegaram odd/linha melhor que a de fechamento e como foram
 function fech(all: any[]) {
-  const S = all.filter(p => p.kind === 'simples' && p.status !== 'void').map(p => ({ p, b: postClv({ odd: +p.odd, legs: p.legs }).bateu }));
-  const lidas = S.filter(x => x.b !== null); if (!lidas.length) return '';
+  const S = all.filter(p => p.kind === 'simples' && p.status !== 'void').map(p => ({ p, c: postClv({ odd: +p.odd, legs: p.legs }) })).map(x => ({ ...x, b: x.c.bateu }));
+  const lidas = S.filter(x => x.c.s < x.c.n); if (!lidas.length) return '';
   const fav = lidas.filter(x => x.b), g = fav.filter(x => x.p.status === 'green').length;
   return `\nFechamento: ${fav.length} de ${lidas.length} simples bateram o fechamento${fav.length ? ` (${g} green)` : ''}`;
 }
