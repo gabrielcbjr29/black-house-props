@@ -1114,10 +1114,13 @@ async function sendPauta(chatId: number, demo = false) {
     P.singles.map(({ r }, i) => `<b>${i + 1}. ${esc(r.n)}</b> <i>${r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`} · ${r.h}</i>
 ${pickLine(r)} · <b>${pc(r.p)}</b>
 📊 L10 ${hitTxt(r.l10)} · L5 ${hitTxt(r.l5)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${dvTxt(r) ? `\n${dvTxt(r)} · ⏱️ ${r.mn ?? '–'} min` : ` · ⏱️ ${r.mn ?? '–'} min`}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>` : ''}`).join('\n\n'));
-  // 2) múltiplas
-  if (P.multis.length) await send(`<b>🧩 MÚLTIPLAS DA PAUTA</b>\n<i>Com as entradas de melhor sequência/matchup · uma por jogo</i>\n\n` +
-    P.multis.map(m => `<b>ODD ${m.band}</b> · <b>@${n2(m.odd)}</b> · ${m.legs.length} pernas\n` + m.legs.map(({ r }) =>
-      `▫️ <b>${esc(r.n)}</b> <i>${r.t} · ${r.h}</i>\n   ${pickLine(r)} · L10 ${hitTxt(r.l10)}${r.sq?.length ? `\n   🔢 <code>${seq(r)}</code>` : ''}`).join('\n')).join('\n\n'));
+  // 2) múltiplas: um bloco por múltipla, pernas numeradas, odd total em destaque
+  const NUM = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+  if (P.multis.length) await send(`<b>🧩 MÚLTIPLAS DA PAUTA</b>\n<i>Montadas com as entradas de melhor sequência e matchup · uma por jogo</i>\n\n` +
+    P.multis.map((m, k) => `<b>🎟️ MÚLTIPLA ${k + 1} · ODD ${m.band}</b>
+<blockquote>${m.legs.map(({ r }, i) => `${NUM[i] ?? `${i + 1}.`} <b>${esc(r.n)}</b> · ${r.t} · ${r.h}
+${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · @<b>${r.d ? n2(r.d) : '–'}</b> · L10 ${hitTxt(r.l10)}${r.sq?.length ? `\n🔢 <code>${seq(r)}</code>` : ''}`).join('\n\n')}</blockquote>
+💰 <b>Odd total @${n2(m.odd)}</b> · ${m.legs.length} pernas · chance estimada <b>${pc(m.prob)}</b>`).join('\n\n━━━━━━━━━━━━━━\n\n'));
   // 3) escadas
   await send((esc3.length ? `<b>🪜 ESCADAS DA PAUTA</b>\n<i>Pontos + rebotes + assistências do mesmo jogador (Criar Aposta)</i>\n\n` + esc3.map((x: any, i: number) => escItem(x, i + 1)).join('\n\n') +
     `\n\n<i>Odd justa = 1 ÷ chance das 3: se o Criar Aposta pagar acima, tem valor.</i>` : '<b>🪜 ESCADAS</b>\nSem escada para os jogos que faltam.') + FOOT, kb);
