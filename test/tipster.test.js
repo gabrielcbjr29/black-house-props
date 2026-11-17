@@ -73,7 +73,7 @@ test('relatório oficial de lesões: uma linha por linha e uma célula por linha
   assert.equal(r['jayson tatum'].status, 'out'); assert.equal(r['jayson tatum'].team, 'BOS');
   assert.equal(r['jaylen brown'].status, 'questionable');
   assert.equal(r['mitchell robinson'].team, 'NYK');
-  assert.equal(r['jaren jackson'], undefined);
+  assert.equal(r['jaren jackson'].status, 'probable', 'Available = liberado (derruba o dúvida da ESPN)');
   const b = parseInjuryText('10/28/2026\n07:30 (ET)\nNYK@BOS\nBoston Celtics\nTatum, Jayson\nOut\nInjury/Illness - Right Achilles; Repair\nGilgeous-Alexander, Shai\nProbable\nRest');
   assert.equal(b['jayson tatum'].status, 'out'); assert.equal(b['shai gilgeousalexander'].status, 'probable');
 });
