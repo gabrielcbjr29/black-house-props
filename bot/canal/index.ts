@@ -394,7 +394,8 @@ async function settle() {
     });
     const live = legs.filter((_: any, i: number) => st[i] !== 'void');
     const status = st.includes('red') ? 'red' : !live.length ? 'void' : 'green';
-    const odd = live.reduce((o: number, l: any) => o * +l.odd, 1);
+    // todas as pernas valendo: a odd do post (no Criar Aposta é a odd estimada da casa, não o produto das pernas)
+    const odd = live.length === legs.length && +p.odd > 1 ? +p.odd : live.reduce((o: number, l: any) => o * +l.odd, 1);
     const stk = +p.stake || 1, profit = status === 'green' ? Math.round(stk * (odd - 1) * 100) / 100 : status === 'red' ? -stk : 0;
     await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ status, profit, settled_at: new Date().toISOString() }) });
     const k = await canalById(p.canal_id), chat = k?.chat_id;
@@ -422,10 +423,11 @@ async function dayReport(date: string, cid: string) {
   const k = await canalById(cid), own = await owner(k); if (!own) return;
   const part = (k: string) => { const xs = all.filter(p => p.kind === k), g = xs.filter(p => p.status === 'green').length, r = xs.filter(p => p.status === 'red').length;
     const u = xs.reduce((s, p) => s + (+p.profit || 0), 0); return { n: xs.length, g, r, u }; };
-  const S = part('simples'), M = part('multipla'), U = S.u + M.u;
+  const S = part('simples'), M = part('multipla'), CA = (() => { const xs = all.filter(p => /^ca-/.test(p.band ?? '')); // Método Criar Aposta (dentro das múltiplas)
+    return { n: xs.length, g: xs.filter(p => p.status === 'green').length, r: xs.filter(p => p.status === 'red').length, u: xs.reduce((s, p) => s + (+p.profit || 0), 0) }; })(), U = S.u + M.u;
   const u = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2).replace('.', ',') + 'u';
   const [, mm, dd] = date.split('-');
-  await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📊 <b>${esc(k.title ?? 'Canal')} · ${dd}/${mm}</b>\n<blockquote>Simples: ${S.g} ✅ · ${S.r} ❌ de ${S.n} · <b>${u(S.u)}</b>\nMúltiplas: ${M.g} ✅ · ${M.r} ❌ de ${M.n} · <b>${u(M.u)}</b>\nDia: <b>${u(U)}</b> (em unidades)${fech(all)}</blockquote>` });
+  await TG('sendMessage', { chat_id: own, parse_mode: 'HTML', text: `📊 <b>${esc(k.title ?? 'Canal')} · ${dd}/${mm}</b>\n<blockquote>Simples: ${S.g} ✅ · ${S.r} ❌ de ${S.n} · <b>${u(S.u)}</b>\nMúltiplas: ${M.g} ✅ · ${M.r} ❌ de ${M.n} · <b>${u(M.u)}</b>\n${CA.n ? `  ↳ Criar Aposta: ${CA.g} ✅ · ${CA.r} ❌ de ${CA.n} · <b>${u(CA.u)}</b>\n` : ''}Dia: <b>${u(U)}</b> (em unidades)${fech(all)}</blockquote>` });
   await setCfg(key, '1');
 }
 

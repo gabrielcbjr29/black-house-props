@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { lines99 } from '../public/clv.js';
 import { alavancaPlan } from './alavanca.mjs';
+import { criarPlan } from './criar.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JER } from '../public/engine.js';
@@ -136,6 +137,10 @@ export function cardHTML(x) {
 <div class="teams col">${tm(x.home)}${tm(x.away)}</div><p class="mk">${MKF[x.mk] ?? x.mk} Mais de/Menos de (incluindo Prorrogação)</p>
 <p class="pl blue">${esc(x.name)} (${x.team}) ${x.side === 'o' ? 'mais' : 'menos'} ${n1(x.line)}</p></section></div>`;
   }
+  if (x.ca) { // Método Criar Aposta: um jogador, odd estimada da casa (o leitor não lê o Criar Aposta), justa e mínima para entrar
+    return `<div class="c"><header><h1>Criar Aposta</h1><span class="pill">🏀 NBA</span></header>${groupHTML(x.legs, x.odd)}
+<footer class="ca"><span>Odd estimada <b>${n2(x.odd)}</b></span><span>Justa <b>${n2(x.fair)}</b></span><span>Entre a partir de <b>${n2(x.min)}</b></span></footer></div>`;
+  }
   const games = new Map(); for (const l of x.legs) (games.get(l.game) ?? games.set(l.game, []).get(l.game)).push(l);
   return `<div class="c"><header><h1>Múltipla <i>${games.size}</i></h1><span class="pill">🏀 NBA</span></header>
 ${[...games.values()].map(ls => groupHTML(ls, ls.reduce((o, l) => o * l.odd, 1))).join('')}<footer><span>Odd total</span><b>${n2(x.odd)}</b></footer></div>`;
@@ -161,6 +166,7 @@ h1{margin:0;font-size:28px;font-weight:800;display:flex;align-items:center;gap:1
 .mk{margin:0 0 4px;color:#66748a;font-size:16px;line-height:1.3}.g.s .mk{font-size:17px;margin-bottom:6px}
 .pl{margin:0;font-weight:800;font-size:19px}.pl.blue{color:#1f5fbf;font-size:22px}.dt{margin:6px 0 0;color:#66748a;font-size:15px}
 footer{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;background:#f2f4f7}footer span{font-size:18px;color:#3a4558}footer b{font-size:26px}
+footer.ca{gap:10px;padding:16px 20px}footer.ca span{font-size:14px;display:flex;flex-direction:column;gap:2px}footer.ca b{font-size:22px;color:#121826}
 .sub{text-align:center;color:#8a909c;font-size:14px;margin-top:16px;letter-spacing:1px}`;
 // ---------- card no estilo do bilhete da BR365 (pedido de 16/11): só a linha da seleção, sem moldura nem marca ----------
 const odd365 = x => (+x).toFixed(2);
@@ -219,12 +225,16 @@ export const packM = id => x => ({ ...x, img: `canal/m-${id}-${x.band}.jpg`, img
 export function applyAlavanca(P, { hub, slate, kalshi, events = {}, now = Date.now() }) {
   if (P?.v !== 2) return P;
   for (const c of hub?.canais ?? []) {
-    if (c.cfg?.metodo !== 'alavanca') continue;
+    const alv = c.cfg?.metodo === 'alavanca', cri = c.cfg?.criar ?? alv; // Método Criar Aposta: junto com o Alavanca (ou cfg.criar)
+    if (!alv && !cri) continue;
     const done = (hub.postados ?? []).filter(p => p.canal_id === c.id);
     const posted = { keys: new Set(done.map(p => p.pkey)), bands: new Set(done.filter(p => p.kind === 'multipla').map(p => p.band)),
       pids: new Set(done.filter(p => p.kind === 'simples').flatMap(p => (p.legs ?? []).map(l => String(l.pid)))) };
-    const A = alavancaPlan({ slate, kalshi, events, now, posted });
-    P.canais[c.id] = { singles: A.singles.map(packS), multis: A.multis.map(packM(c.id)), metodo: 'alavanca', pernas: A.pool };
+    const cur = P.canais[c.id] ?? { singles: [], multis: [] };
+    const A = alv ? alavancaPlan({ slate, kalshi, events, now, posted }) : null;
+    const CA = cri ? criarPlan({ slate, kalshi, events, now, posted }) : [];
+    P.canais[c.id] = { singles: A ? A.singles.map(packS) : cur.singles, multis: [...(A ? A.multis : cur.multis.map(({ img, img365, cap, ...x }) => x)), ...CA].map(packM(c.id)),
+      ...(alv ? { metodo: 'alavanca', pernas: A.pool } : {}), criar: CA.length };
   }
   return P;
 }
@@ -358,7 +368,7 @@ async function main() {
   }
   await b.close();
   writeFileSync(join(ROOT, 'data', 'canal.json'), JSON.stringify(P));
-  if (P.v === 2) for (const [id, c] of Object.entries(P.canais)) console.log(`canal ${id}${c.metodo ? ` (Método ${c.metodo}: ${c.pernas} pernas com valor contra a Kalshi${kalshi?.gen ? `, Kalshi das ${kalshi.gen.slice(11, 16)} UTC` : ', sem kalshi.json'})` : ''}: ${c.singles.length} simples, ${c.multis.length} múltiplas (${c.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
+  if (P.v === 2) for (const [id, c] of Object.entries(P.canais)) console.log(`canal ${id}${c.metodo ? ` (Método ${c.metodo}: ${c.pernas} pernas com valor contra a Kalshi${kalshi?.gen ? `, Kalshi das ${kalshi.gen.slice(11, 16)} UTC` : ', sem kalshi.json'})` : ''}${c.criar != null ? ` · Criar Aposta: ${c.criar}` : ''}: ${c.singles.length} simples, ${c.multis.length} múltiplas (${c.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
   else console.log(`canal: ${P.singles.length} simples, ${P.multis.length} múltiplas (${P.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
   console.log(`canal: ${n} cards`);
 }

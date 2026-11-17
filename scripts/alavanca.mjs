@@ -25,7 +25,7 @@ export const ALV = {
   gap: { PTS: 5.5, REB: 2.5, AST: 2.5, '3PM': 2.5 }, spread: .05, minExp: 20, staleH: 2, maxS: 8,
   dupla: { n: 2, lo: 2.8, hi: 5, ev: .06, un: .5, max: 2 }, tripla: { n: 3, lo: 4.5, hi: 12, ev: .10, un: .5, max: 1 },
 };
-const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\b(jr|sr|ii|iii|iv)\b\.?/g, '').replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+export const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\b(jr|sr|ii|iii|iv)\b\.?/g, '').replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
 const lg = p => Math.log(p / (1 - p)), ex = z => 1 / (1 + Math.exp(-z));
 const r3 = x => Math.round(x * 1000) / 1000;
 
