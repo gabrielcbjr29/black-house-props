@@ -1,0 +1,15 @@
+# temporário: baixa o relatório oficial de lesões para ajustar o leitor (será removido)
+name: debug lesoes
+on: workflow_dispatch
+jobs:
+  pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install --quiet pypdf
+      - run: |
+          curl -sSf -A "Mozilla/5.0" -o r.pdf "https://ak-static.cms.nba.com/referee/injury/Injury-Report_2026-11-17_06_00AM.pdf"
+          python3 collector/pdftext.py r.pdf > r.txt
+          head -c 3000 r.txt | cat -A | head -60
+      - uses: actions/upload-artifact@v4
+        with: { name: lesoes, path: "r.*" }
