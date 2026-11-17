@@ -6,3 +6,5 @@ model/out/
 __pycache__/
 public/data/relatorio.pdf
 public/data/relatorio.html
+notas/
+.claude/settings.local.json
