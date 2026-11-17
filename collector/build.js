@@ -244,6 +244,8 @@ async function main() {
   }
   if (today.length && env.KALSHI !== '0') {
     try { kalshi = await fetchKalshi({ series: env.KALSHI_SERIES || DEFAULT_SERIES, log }); } catch (e) { warnings.push('Kalshi falhou: ' + e.message); }
+    // escada completa da Kalshi (o merge abaixo guarda só um degrau): referência sharp do Método Alavanca do canal teste
+    if (kalshi.length) try { await writeFile(join(dirname(OUT), 'kalshi.json'), JSON.stringify({ date, gen: new Date().toISOString(), list: kalshi })); } catch (e) { warnings.push('kalshi.json falhou: ' + e.message); }
   }
   const oddsLines = mergeLines(lists, kalshi);
   const srcs = [env.ODDS_API_KEY && 'The Odds API', env.SGO_API_KEY && 'SportsGameOdds', kalshi.length && 'Kalshi'].filter(Boolean);

@@ -9,6 +9,7 @@
 //              faixas do mesmo lado (só se faltar perna).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { lines99 } from '../public/clv.js';
+import { alavancaPlan } from './alavanca.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JER } from '../public/engine.js';
@@ -211,6 +212,22 @@ export function specsOf(cfg) {
   });
 }
 const ident = x => `${x.pid}-${x.mk}`; // "repetida" = mesmo jogador no mesmo mercado
+export const packS = x => ({ ...x, img: `canal/s-${x.key}.jpg`, img365: `canal/365/s-${x.key}.jpg`, cap: caption(x) });
+export const packM = id => x => ({ ...x, img: `canal/m-${id}-${x.band}.jpg`, img365: `canal/365/m-${id}-${x.band}.jpg`, cap: caption(x) });
+/* canais com cfg.metodo = 'alavanca' (só o Canal teste, 17/11): a pauta deles vem do Método Alavanca (scripts/alavanca.mjs),
+   não da divisão do hub. hub.postados evita repetir o que o canal já postou hoje. */
+export function applyAlavanca(P, { hub, slate, kalshi, events = {}, now = Date.now() }) {
+  if (P?.v !== 2) return P;
+  for (const c of hub?.canais ?? []) {
+    if (c.cfg?.metodo !== 'alavanca') continue;
+    const done = (hub.postados ?? []).filter(p => p.canal_id === c.id);
+    const posted = { keys: new Set(done.map(p => p.pkey)), bands: new Set(done.filter(p => p.kind === 'multipla').map(p => p.band)),
+      pids: new Set(done.filter(p => p.kind === 'simples').flatMap(p => (p.legs ?? []).map(l => String(l.pid)))) };
+    const A = alavancaPlan({ slate, kalshi, events, now, posted });
+    P.canais[c.id] = { singles: A.singles.map(packS), multis: A.multis.map(packM(c.id)), metodo: 'alavanca', pernas: A.pool };
+  }
+  return P;
+}
 /* todas as simples possíveis do dia (linhas da 99play do bot), com qualidade mínima; cada canal ainda aplica o seu filtro */
 export function singlesPool({ bot, slate, events = {}, now = Date.now() }) {
   const gameOf = {};
@@ -308,8 +325,6 @@ export function planHub({ bot, slate, events = {}, hub, now = Date.now() }) {
     sigs.add(legs.map(ident).sort().join('|'));
     M[c.id].push({ key: `m${sp.band}-` + legs.map(keyOf).join('.'), band: sp.band, lado: sp.lado, slot: sp.slot, odd: Math.round(best.odd * 100) / 100, prob: Math.round(best.prob * 1000) / 1000, legs });
   }
-  const packS = x => ({ ...x, img: `canal/s-${x.key}.jpg`, img365: `canal/365/s-${x.key}.jpg`, cap: caption(x) });
-  const packM = id => x => ({ ...x, img: `canal/m-${id}-${x.band}.jpg`, img365: `canal/365/m-${id}-${x.band}.jpg`, cap: caption(x) });
   return { v: 2, date, canais: Object.fromEntries(chans.map(c => [c.id, { singles: S[c.id].map(packS), multis: M[c.id].map(packM(c.id)) }])) };
 }
 
@@ -325,7 +340,9 @@ async function main() {
   // linhas da 99play em arquivo leve: a função canal grava o fechamento de cada entrada postada (CLV) até o jogo começar
   writeFileSync(join(ROOT, 'data', 'linhas99.json'), JSON.stringify(lines99(slate)));
   const botOk = bot?.date === slate.meta?.date ? bot : null;
-  const P = hub?.canais?.length && botOk ? { ...planHub({ bot: botOk, slate, events, hub }), gen: strat?.gen ?? null } : plan({ strat, slate, events, bot: botOk });
+  const kalshi = existsSync(join(ROOT, 'data', 'kalshi.json')) ? J('kalshi.json') : null;
+  const P = hub?.canais?.length && botOk ? applyAlavanca({ ...planHub({ bot: botOk, slate, events, hub }), gen: strat?.gen ?? null }, { hub, slate, kalshi, events })
+    : plan({ strat, slate, events, bot: botOk });
   const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(join(dir, '365'), { recursive: true });
   const font = f => readFileSync(join(ROOT, 'fonts', f)).toString('base64');
   const css = CSS(font); const css365 = CSS365(font);
@@ -341,7 +358,7 @@ async function main() {
   }
   await b.close();
   writeFileSync(join(ROOT, 'data', 'canal.json'), JSON.stringify(P));
-  if (P.v === 2) for (const [id, c] of Object.entries(P.canais)) console.log(`canal ${id}: ${c.singles.length} simples, ${c.multis.length} múltiplas (${c.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
+  if (P.v === 2) for (const [id, c] of Object.entries(P.canais)) console.log(`canal ${id}${c.metodo ? ` (Método ${c.metodo}: ${c.pernas} pernas com valor contra a Kalshi${kalshi?.gen ? `, Kalshi das ${kalshi.gen.slice(11, 16)} UTC` : ', sem kalshi.json'})` : ''}: ${c.singles.length} simples, ${c.multis.length} múltiplas (${c.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
   else console.log(`canal: ${P.singles.length} simples, ${P.multis.length} múltiplas (${P.multis.map(m => m.band + '@' + m.odd).join(', ')})`);
   console.log(`canal: ${n} cards`);
 }

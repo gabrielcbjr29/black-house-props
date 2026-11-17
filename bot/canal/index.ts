@@ -100,6 +100,7 @@ async function linkHTML(x: any, code?: string | null, c = '99', k?: Canal) {
 const varUn = (k: Canal) => !!k.cfg.unVar || (+k.cfg.unBase || 1) !== 1;
 function stakeOf(x: any, kind: string, k: Canal) {
   const base = +k.cfg.unBase || 1;
+  if (+x.un > 0) return base * +x.un; // Método Alavanca: a pauta já diz a unidade (1, 1,5 ou 0,5 nas combinadas)
   if (kind !== 'simples' || !k.cfg.unVar) return base;
   const e = +x.edge || 0, p = +x.p || 0;
   return base * (e >= .10 && p >= .60 ? 2 : e >= .06 ? 1.5 : 1);
@@ -160,7 +161,8 @@ async function tgCaption(method: string, body: any, capKey: 'caption' | 'media' 
   return r;
 }
 const minLegs = (x: any) => legsOf(x).map((l: any) => ({ pid: l.pid, name: l.name, team: l.team, opp: l.opp, home: l.home, away: l.away, game: l.game, ev: l.ev,
-  mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip, sq: l.sq ?? null }));
+  mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip, sq: l.sq ?? null,
+  ...(l.met ? { met: l.met, pk: l.pk, evk: l.evk, pm: l.p, evm: l.edge } : {}) })); // Método Alavanca: chance da Kalshi e do modelo na hora do post
 const img365 = (img: string) => img.replace(/^canal\//, 'canal/365/');
 // botões embaixo do post no canal (controles no canal, não no privado do bot). Só o dono do canal consegue usar;
 // botoes=false na configuração do canal tira (ex.: num canal público).
@@ -485,7 +487,7 @@ Deno.serve(async (req: Request) => {
     if (ok('tok')) return json({ canal: u.searchParams.get('canal'), t: await tokOf(u.searchParams.get('canal') ?? '') });
     if (u.searchParams.has('hub')) { // público: só o necessário para a divisão (sem chat, dono ou links)
       const ks = (await canais()).filter(k => k.cfg.on !== false && k.cfg.modo !== 'espelho'), d = etDate();
-      const pick = (c: any) => ({ max: c.max, oddMin: c.oddMin, oddMax: c.oddMax, evMin: c.evMin, mercados: c.mercados, lado: c.lado, multis: c.multis });
+      const pick = (c: any) => ({ max: c.max, oddMin: c.oddMin, oddMax: c.oddMax, evMin: c.evMin, mercados: c.mercados, lado: c.lado, multis: c.multis, metodo: c.metodo ?? null });
       const postados = (await sb(`channel_posts?date=eq.${d}&select=canal_id,kind,pkey,band,legs`) ?? []).map((p: any) => ({ ...p, legs: (p.legs ?? []).map((l: any) => ({ pid: l.pid, mk: l.mk, side: l.side })) }));
       return json({ date: d, canais: ks.map(k => ({ id: k.id, cfg: pick(k.cfg) })), postados });
     }

@@ -1385,6 +1385,17 @@ async function cnCmd(chatId: number, rest: string[]): Promise<Out> {
   const c = k.cfg, back = [BTN('⬅️ Voltar', `/cn ${k.id}`)];
   const opts = (field: string, vals: (string | number)[], fmt: (v: any) => string, cur: any) =>
     chunk(vals.map(v => BTN(`${String(cur) === String(v) ? '✅ ' : ''}${fmt(v)}`, `/cf ${k.id} ${field} ${v}`)), 4);
+  if (scr === 'met') { // Método Alavanca (17/11): experimental, só o administrador liga (pedido: só no Canal teste)
+    if (!(await isAdmin(chatId))) return { text: 'Só o administrador do hub liga o Método Alavanca.', kb: { inline_keyboard: [back] } };
+    const on = c.metodo === 'alavanca';
+    return { text: `⚡ <b>Método Alavanca</b> · ${esc(k.title)} · ${on ? '🟢 ligado' : '⚪ desligado'}
+<blockquote>Entra só quando a odd da 99play paga mais que o preço justo da <b>Kalshi</b> (bolsa dos EUA, sem margem de casa) na mesma linha: pontos, rebotes, assistências e bolas de 3.
+• Simples: valor de 4%+ contra a Kalshi, odd 1,50–3,50, até 8 por dia. 1u (1,5u com 8%+ e o modelo concordando).
+• Alavanca: 2 duplas (odd ~3–5, valor 6%+) e 1 tripla (odd ~5–12, valor 10%+), só com pernas que têm valor, jogos diferentes. 0,5u cada.
+• O Modelo BH é trava: se discordar forte, a entrada fica de fora.</blockquote>
+<i>Ligado, a pauta deste canal vem só do método (odd mínima, EV, mercados e múltiplas do painel não valem aqui). Cada post guarda a chance da Kalshi para medir o método no fim da semana.</i>`,
+      kb: { inline_keyboard: [[on ? BTN('⚪ Desligar (volta ao padrão)', `/cf ${k.id} metodo padrao`) : BTN('🟢 Ligar o Método Alavanca', `/cf ${k.id} metodo alavanca`)], back] } };
+  }
   if (scr === 'omin') return { text: `🎯 <b>Odd mínima das simples</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('oddMin', [1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0], v => n2(+v), c.oddMin), back] } };
   if (scr === 'omax') return { text: `📈 <b>Odd máxima das simples</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('oddMax', [2.0, 2.2, 2.5, 3.0, 3.5, 4.0, 5.0], v => n2(+v), c.oddMax), back] } };
   if (scr === 'max') return { text: `🔢 <b>Simples por dia</b> · ${esc(k.title)}`, kb: { inline_keyboard: [...opts('max', [5, 8, 10, 12, 15, 20, 25, 30], v => String(v), c.max), back] } };
@@ -1483,7 +1494,7 @@ Mercados: ${esc(mk)}
 Múltiplas: ${specBands(k).length}${c.multis?.length ? '' : ' (padrão 10/15/25 over e under)'}
 Casa: <b>${c.casa === '365' ? 'BR365' : '99play'}</b> · começa às ${c.inicio}h · mensagem: ${c.tpl?.text ? 'padrão do canal' : 'padrão do bot'}
 Unidade: ${String(+c.unBase || 1).replace('.', ',')}u ${c.unVar ? 'variável' : 'fixa'}${c.espelho ? ' · 🪞 com canal oficial' : ''}${c.semanal ? ' · resumo semanal' : ''}
-Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(r => r.kind === 'multipla').length} múltiplas · ${rows.filter(r => r.status === 'green').length} ✅ ${rows.filter(r => r.status === 'red').length} ❌</blockquote>`;
+Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(r => r.kind === 'multipla').length} múltiplas · ${rows.filter(r => r.status === 'green').length} ✅ ${rows.filter(r => r.status === 'red').length} ❌</blockquote>${c.metodo === 'alavanca' ? '\n⚡ <b>Método Alavanca ligado</b>: a pauta vem da comparação com a Kalshi (os filtros acima não valem).' : ''}`;
   return { text, kb: { inline_keyboard: [
     [BTN('🎯 Odd mínima', `/cn ${k.id} omin`), BTN('📈 Odd máxima', `/cn ${k.id} omax`)],
     [BTN('🔢 Simples/dia', `/cn ${k.id} max`), BTN('📊 EV mínimo', `/cn ${k.id} ev`)],
@@ -1493,6 +1504,7 @@ Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(
     [BTN('📝 Padrão de mensagem', `/cn ${k.id} tpl`), BTN('⚙️ Mais opções', `/cn ${k.id} mais`)],
     [BTN('💰 Unidade', `/cn ${k.id} un`), BTN('🪞 Canal oficial', `/cn ${k.id} esp`)],
     [BTN('📈 Desempenho', `/cn ${k.id} perf`), BTN('🔐 Permissões', `/cn ${k.id} perm`)],
+    ...(await isAdmin(chatId) ? [[BTN(`⚡ Método: ${c.metodo === 'alavanca' ? 'Alavanca' : 'padrão'}`, `/cn ${k.id} met`)]] : []),
     [c.on ? BTN('⏸️ Pausar', `/cf ${k.id} on 0`) : BTN('▶️ Retomar', `/cf ${k.id} on 1`), BTN('🗑️ Remover', `/cn ${k.id} rm`)],
     [BTN('⬅️ Canais', '/canais')]] } };
 }
@@ -1528,6 +1540,7 @@ async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
   if (field === 'unVar') { await saveCfg(k, { unVar: v === '1' }); return cnCmd(chatId, [id, 'un']); }
   if (field === 'unBase') { const x = +v; if ([0.5, 1, 2].includes(x)) await saveCfg(k, { unBase: x }); return cnCmd(chatId, [id, 'un']); }
   if (field === 'semanal') { await saveCfg(k, { semanal: v === '1' }); return cnCmd(chatId, [id, 'mais']); }
+  if (field === 'metodo') { if (!(await isAdmin(chatId))) return { text: 'Só o administrador do hub muda o método.' }; await saveCfg(k, { metodo: v === 'alavanca' ? 'alavanca' : null }); return cnCmd(chatId, [id, 'met']); }
   if (field === 'espModo' && ['bilhete', 'na_hora'].includes(v)) { await saveCfg(k, { espelhoModo: v }); return cnCmd(chatId, [id, 'esp']); }
   if (field === 'esp') {
     const old = k.cfg.espelho ? await canalById(k.cfg.espelho) : undefined;

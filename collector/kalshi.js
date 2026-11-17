@@ -9,7 +9,7 @@ const BASE = 'https://external-api.kalshi.com/trade-api/v2';
 export const DEFAULT_SERIES = 'KXNBAPTS:PTS,KXNBAREB:REB,KXNBAAST:AST,KXNBA3PT:3PM';
 const price = (m, side) => { const d = m[side + '_dollars']; if (d != null && d !== '') return parseFloat(d); const c = m[side]; return c == null ? null : c > 1 ? c / 100 : c; };
 
-/* mercados → [{name, mk, lines: {linha: chance}}]; degrau "25+" vira linha 24,5 */
+/* mercados → [{name, mk, lines: {linha: chance}, q: {linha: {s: spread, v: volume}}}]; degrau "25+" vira linha 24,5 */
 export function parseKalshiMarkets(markets, mk, { maxSpread = .08 } = {}) {
   const acc = {};
   for (const m of markets || []) {
@@ -19,8 +19,10 @@ export function parseKalshiMarkets(markets, mk, { maxSpread = .08 } = {}) {
     const name = r[1].trim(), thr = +r[2];
     const bid = price(m, 'yes_bid'), ask = price(m, 'yes_ask');
     if (bid == null || ask == null || bid <= 0 || ask >= 1 || ask - bid > maxSpread) continue;
-    const p = (bid + ask) / 2;
-    (acc[name + '|' + mk] ||= { name, mk, lines: {} }).lines[thr - .5] = +p.toFixed(4);
+    const p = (bid + ask) / 2, a = (acc[name + '|' + mk] ||= { name, mk, lines: {}, q: {} });
+    a.lines[thr - .5] = +p.toFixed(4);
+    // qualidade do preço (Método Alavanca, 17/11): spread e volume negociado de cada degrau
+    a.q[thr - .5] = { s: +(ask - bid).toFixed(4), v: +(m.volume_fp ?? m.volume ?? 0) || 0 };
   }
   return Object.values(acc);
 }
