@@ -917,7 +917,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('🎯 Pauta do Tipster', '/pauta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -1048,6 +1048,79 @@ async function sendCards(chatId: number, arg?: string) {
   const res = pick.length === 1 ? await TG('sendPhoto', { chat_id: chatId, photo: media[0].media, caption: media[0].caption, parse_mode: 'HTML' }) : await TG('sendMediaGroup', { chat_id: chatId, media });
   if (!res.ok) { await TG('sendMessage', { chat_id: chatId, text: pick.map((r, i) => card(r, i + 1)).join('\n') + '\n' + FOOT, parse_mode: 'HTML', disable_web_page_preview: true }); }
   await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '<i>🔞 18+ · Confira lesões, quinteto e a odd da sua casa. O Ministério da Fazenda adverte: apostas podem causar dependência.</i>', reply_markup: { inline_keyboard: [[BTN('🔥 Top do dia em texto', '/top'), BTN('🎟️ Múltipla', '/multipla 3')], [BTN('🏠 Menu', '/menu')]] } });
+}
+
+// ---------- 🎯 Pauta do Tipster (pedido de 16/11): um botão, antes dos jogos, com tudo pronto ----------
+// Simples escolhidas por SEQUÊNCIA e MATCHUP (não por EV): L10/L5/temporada, defesa do adversário na estatística e
+// confronto direto, com o modelo concordando (chance 55%+). Linhas da 99play, uma por jogador, no máximo 3 por mercado.
+// Múltiplas nas faixas 5–10, 10–15 e 15–25 com essas mesmas entradas (uma por jogo, a combinação mais provável) e as
+// 3 melhores escadas do dia.
+const rate = (h?: [number, number] | null, min = 1) => h && h[1] >= min ? h[0] / h[1] : null;
+const matchup = (r: Row) => r.dv?.r && r.dv.of ? (r.s === 'o' ? (r.dv.r - 1) : (r.dv.of - r.dv.r)) / Math.max(1, r.dv.of - 1) : .5;
+export function pautaPick(d: Data, now = Date.now()) {
+  const utc = Object.fromEntries(d.games.map(g => [g.id, g.utc ? Date.parse(g.utc) : NaN]));
+  const cand = d.rows.filter(r => {
+    const t9 = (r as any).t9;
+    return r.c9 && r.d && r.d >= 1.4 && r.d <= 3.2 && r.p >= .55 && r.st === 'ok' && (r.mn ?? 0) >= 24
+      && (rate(r.l10, 8) ?? 0) >= .7 && !(utc[r.g] <= now + 10 * 6e4) && !(t9 && now - Date.parse(t9) >= 2 * 36e5);
+  }).map(r => {
+    const h10 = rate(r.l10, 8)!, h5 = rate(r.l5, 4) ?? h10, hs = rate(r.ss, 8) ?? h10, hh = rate(r.hh, 2);
+    const sq = .5 * h10 + .25 * h5 + .25 * hs + .01 * Math.min(r.sk ?? 0, 5);
+    const sc = .55 * sq + .3 * matchup(r) + .15 * (hh ?? .5);
+    return { r, sc, pe: (r.p + h10) / 2 };
+  }).sort((a, b) => b.sc - a.sc);
+  const seen = new Set<string>(), perMk: Record<string, number> = {}, singles: typeof cand = [];
+  for (const c of cand) {
+    if (seen.has(c.r.id) || (perMk[c.r.m] ?? 0) >= 3) continue;
+    seen.add(c.r.id); perMk[c.r.m] = (perMk[c.r.m] ?? 0) + 1; singles.push(c);
+    if (singles.length >= 10) break;
+  }
+  // múltiplas: pernas = as 20 melhores por sequência/matchup (uma por jogador); maior chance (modelo + L10) na faixa
+  const pool: typeof cand = []; const sp = new Set<string>();
+  for (const c of cand) { if (sp.has(c.r.id)) continue; sp.add(c.r.id); pool.push(c); if (pool.length >= 20) break; }
+  const used = new Set<string>(), multis: { band: string; odd: number; prob: number; legs: typeof cand }[] = [];
+  for (const [band, lo, hi] of [['5–10', 5, 10], ['10–15', 10, 15], ['15–25', 15, 25]] as [string, number, number][]) {
+    let best: { legs: typeof cand; odd: number; prob: number } | null = null;
+    const run = (P: typeof cand) => {
+      const rec = (i: number, legs: typeof cand, odd: number, prob: number, games: Set<string>) => {
+        if (odd > hi) return;
+        if (odd >= lo && legs.length >= 2 && (!best || prob > best.prob)) best = { legs: [...legs], odd, prob };
+        if (legs.length >= 6) return;
+        for (let j = i; j < P.length; j++) { const c = P[j]; if (games.has(c.r.g)) continue; games.add(c.r.g); legs.push(c); rec(j + 1, legs, odd * c.r.d!, prob * c.pe, games); legs.pop(); games.delete(c.r.g); }
+      };
+      rec(0, [], 1, 1, new Set());
+    };
+    run(pool.filter(c => !used.has(c.r.id))); if (!best) run(pool);
+    if (best) { (best as any).legs.forEach((c: any) => used.add(c.r.id)); multis.push({ band, ...(best as any) }); }
+  }
+  return { singles, multis, n: cand.length };
+}
+const pickLine = (r: Row) => `${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} @<b>${r.d ? n2(r.d) : '–'}</b>`;
+const dvTxt = (r: Row) => r.dv?.r ? `🛡️ ${r.dv.r}ª/${r.dv.of}${(r.s === 'o' ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) ? ' favorável' : (r.s === 'o' ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) ? ' difícil' : ''}` : '';
+async function sendPauta(chatId: number, demo = false) {
+  const d = await data();
+  // exemplo: monta como se fosse 2h antes do primeiro jogo do dia (para ver a pauta depois que os jogos começaram)
+  const first = Math.min(...d.games.map(g => g.utc ? Date.parse(g.utc) : Infinity));
+  const now = demo && isFinite(first) ? first - 2 * 36e5 : Date.now(), P = pautaPick(d, now);
+  const E = await fetch(APP_URL + 'data/escadas.json?t=' + Math.floor(now / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
+  const esc3 = (E?.date === d.date ? E.list : []).filter((x: any) => Date.parse(x.tip) > now + 10 * 6e4).slice(0, 3);
+  const next = d.games.map(g => g.utc ? Date.parse(g.utc) : NaN).filter(t => t > now).sort((a, b) => a - b)[0];
+  const head = `<b>🎯 PAUTA DO TIPSTER${demo ? ' · EXEMPLO' : ''}</b>${demo ? '\n<i>(montada como se fosse 2h antes do primeiro jogo de hoje)</i>' : ''}\n<i>${dateBR(d.date)} · ${next ? `próximo jogo às ${hourBR(new Date(next).toISOString())}` : 'sem jogo por começar'} · atualizado ${hourBR(d.gen)}</i>`;
+  const kb = { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta'), BTN('🪜 Escadas', '/escadas')], HOME] };
+  const send = (text: string, k?: any) => TG('sendMessage', { chat_id: chatId, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, ...(k ? { reply_markup: k } : {}) });
+  if (!P.singles.length && !esc3.length) { await send(head + '\n\nSem entradas para a pauta agora: os jogos já começaram ou a 99play ainda não tem as linhas (o leitor precisa estar lendo).', kb); return; }
+  // 1) simples
+  await send(head + `\n<i>Escolhidas por sequência e matchup (não por EV), com o Modelo BH concordando. Linhas e odds da 99play.</i>\n\n<b>🔥 ${P.singles.length} SIMPLES</b>\n\n` +
+    P.singles.map(({ r }, i) => `<b>${i + 1}. ${esc(r.n)}</b> <i>${r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`} · ${r.h}</i>
+${pickLine(r)} · <b>${pc(r.p)}</b>
+📊 L10 ${hitTxt(r.l10)} · L5 ${hitTxt(r.l5)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${dvTxt(r) ? `\n${dvTxt(r)} · ⏱️ ${r.mn ?? '–'} min` : ` · ⏱️ ${r.mn ?? '–'} min`}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>` : ''}`).join('\n\n'));
+  // 2) múltiplas
+  if (P.multis.length) await send(`<b>🧩 MÚLTIPLAS DA PAUTA</b>\n<i>Com as entradas de melhor sequência/matchup · uma por jogo</i>\n\n` +
+    P.multis.map(m => `<b>ODD ${m.band}</b> · <b>@${n2(m.odd)}</b> · ${m.legs.length} pernas\n` + m.legs.map(({ r }) =>
+      `▫️ <b>${esc(r.n)}</b> <i>${r.t} · ${r.h}</i>\n   ${pickLine(r)} · L10 ${hitTxt(r.l10)}${r.sq?.length ? `\n   🔢 <code>${seq(r)}</code>` : ''}`).join('\n')).join('\n\n'));
+  // 3) escadas
+  await send((esc3.length ? `<b>🪜 ESCADAS DA PAUTA</b>\n<i>Pontos + rebotes + assistências do mesmo jogador (Criar Aposta)</i>\n\n` + esc3.map((x: any, i: number) => escItem(x, i + 1)).join('\n\n') +
+    `\n\n<i>Odd justa = 1 ÷ chance das 3: se o Criar Aposta pagar acima, tem valor.</i>` : '<b>🪜 ESCADAS</b>\nSem escada para os jogos que faltam.') + FOOT, kb);
 }
 
 // ---------- 🪜 escadas (pontos + rebotes + assistências "mais de" do mesmo jogador, como no Criar Aposta) ----------
@@ -1553,6 +1626,7 @@ async function handle(update: any) {
   if (im) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCard(chatId, im[1]); return; }
   // /cards: as melhores do dia em imagem (sempre mensagens novas)
   if (/^\/(pdf|relatorio)(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Enviando o PDF…' }); await sendPdf(chatId); return; }
+  if (/^\/(pauta|tipster)(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Montando a pauta…' }); await sendPauta(chatId, /exemplo|teste/i.test(text)); return; }
   if (/^\/cards(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCards(chatId, text.split(/\s+/)[1]); return; }
   // página (p:2:/top 20) e atualizar (repete o comando que gerou a mensagem)
   let page = 1;
@@ -1610,7 +1684,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
