@@ -72,6 +72,9 @@ const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'
 const n1 = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1)).replace('.', ',');
 const n2 = (x: number) => x.toFixed(2).replace('.', ',');
 const pc = (x: number | null) => x == null ? '–' : Math.round(x * 100) + '%';
+// "precisa X%" (ideia do Upside, 17/11): acerto mínimo para empatar com essa odd (1 ÷ odd). Ao lado da chance do modelo,
+// mostra de cara quanto a entrada sobra (ou falta). Só com odd de casa.
+const need = (o?: number | null) => o && +o > 1 ? ` · precisa <b>${pc(1 / +o)}</b>` : '';
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '').trim();
 const dateBR = (d: string) => { const [, m, dd] = d.split('-'); const wd = new Date(d + 'T12:00:00Z').toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', ''); return `${wd} ${dd}/${m}`; };
 const hourBR = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
@@ -322,7 +325,7 @@ function compact(r: Row, i: number) {
   const over = r.s === 'o', vs = r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`;
   const good = r.dv?.r ? (over ? r.dv.r >= r.dv.of - 5 : r.dv.r <= 6) : false, bad = r.dv?.r ? (over ? r.dv.r <= 6 : r.dv.r >= r.dv.of - 5) : false;
   return `<b>${i}. ${esc(r.n)}</b> <i>${vs} · ${r.h}</i>
-${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b> · Nota <b>${r.nt ?? '–'}</b>
+${over ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · <b>${pc(r.p)}</b>${need(r.d)} · Nota <b>${r.nt ?? '–'}</b>
 ${r.c9 ? lineSrc(r) + '\n' : ''}📊 L10 ${hitTxt(r.l10)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)} · 🧠 ${n1(Math.round(r.pj * 10) / 10)} · ⏱️ ${r.mn ?? '–'} min${r.dv?.r ? ` · 🛡️ ${r.dv.r}ª/${r.dv.of}${good ? ' favorável' : bad ? ' difícil' : ''}` : ''}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>` : ''}${duvida(r)}`;
 }
 // colega importante em dúvida: como ele foi nos jogos sem esse colega (se o colega cair, o cenário muda)
@@ -330,7 +333,7 @@ const duvida = (r: Row) => r.wo && !r.wo.x ? `\n🟡 ${esc(r.wo.q)} em dúvida �
 function topText(d: Data, key: string, om = 0) {
   const T = MT[key], top = tops(d, 10, om)[key];
   if (!top.length) return null;
-  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE(d) + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd. 🔢 = sequência dos últimos 10 (mais recente primeiro).</i>' + (om ? `\n<i>🎯 Só odd ${n2(om)} ou mais (sua odd mínima).</i>` : '') + FOOT;
+  return `<b>${T.ic} TOP 10 MODELO BH · ${T.title}</b>\n<i>${dateBR(d.date)} · ${d.games.length} jogos · atualizado ${hourBR(d.gen)}</i>\n\n` + top.map((r, i) => compact(r, i + 1)).join('\n\n') + '\n' + MT_NOTE(d) + '\n<i>📝 Toque no número para registrar a entrada (1u) com a sua odd. 🔢 = sequência dos últimos 10 (mais recente primeiro). "Precisa" = acerto mínimo para não perder com aquela odd.</i>' + (om ? `\n<i>🎯 Só odd ${n2(om)} ou mais (sua odd mínima).</i>` : '') + FOOT;
 }
 type Sub = { tent: boolean; ra: boolean; est: boolean };
 const subKb = (s: Sub | null, om = 0) => ({ inline_keyboard: [
@@ -443,7 +446,7 @@ function estText(d: Data, st: any, om = 0): { text: string; regs: { text: string
   const regs: { text: string; callback_data: string }[] = []; let i = 0;
   const blocks = order.map(([k, xs]) => `🏀 <b>${esc(k)}</b>${xs[0].tip_utc ? ' · ' + hourBR(xs[0].tip_utc) : ''}\n<blockquote>` + xs.map((x: any) => {
     i++; regs.push(BTN(`📝 ${i}`, `bet:${estKey(x)}:e.${x.strategy_id}`));
-    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? MK[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}${x.sq?.length ? '\n' + sqLine(x.sq, +x.line, x.side) : ''}`;
+    return `<b>${i}. ${esc(x.name)}</b> · ${MKN[x.mk] ?? MK[x.mk] ?? x.mk}${x.strategy_id === 'reserva-under' ? ' <i>(reserva)</i>' : ''}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+x.line)}</b> · @${n2(+x.odd)} · ${pc(+x.p)}${need(+x.odd)}${x.edge != null ? ` · EV <b>${evS(+x.edge)}</b>${+x.edge >= .1 ? ' 🔥' : ''}` : ''}${x.sq?.length ? '\n' + sqLine(x.sq, +x.line, x.side) : ''}`;
   }).join('\n') + '</blockquote>');
   let text = `🧪 <b>RESUMO DO DIA · MODELO BH</b>\n<i>${dateBR(d.date)} · ${i} entrada${i > 1 ? 's' : ''} em aberto · linha e odd do alerta</i>\n\n${blocks.join('\n\n')}\n\n📝 <i>Toque no número e mande a odd que você pegou (ex.: <code>1,85</code> ou <code>1,85 0,5u</code>).</i>` + FOOT;
   if (text.length > 4090) text = text.slice(0, 3990).replace(/<[^>]*$/, '') + '</blockquote>…';
@@ -509,7 +512,7 @@ async function betFinish(chatId: number, id: number | null, text: string): Promi
   const ev = p ? p * v.odd - 1 : null;
   return { text: `✅ <b>Entrada #${b.id} registrada</b>
 <blockquote><b>${esc(b.name)}</b> · ${b.side === 'o' ? 'mais' : 'menos'} de ${n1(line)} ${MK[b.mk] ?? b.mk}
-Odd <b>${n2(v.odd)}</b> · ${n1(st)}u${p ? ` · modelo ${pc(p)}` : ''}${ev != null ? ` · EV pelo modelo ${pctS(ev)}` : ''}${line !== +b.ref_line ? `\n<i>linha da casa ${n1(line)} (referência era ${n1(+b.ref_line)})</i>` : ''}</blockquote>
+Odd <b>${n2(v.odd)}</b> · ${n1(st)}u${p ? ` · modelo ${pc(p)}${need(v.odd)}` : ''}${ev != null ? ` · EV pelo modelo ${pctS(ev)}` : ''}${line !== +b.ref_line ? `\n<i>linha da casa ${n1(line)} (referência era ${n1(+b.ref_line)})</i>` : ''}</blockquote>
 Confiro sozinho depois do jogo e te conto de manhã. Acompanhe em /banca.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), ...(srcCmd(b.src) ? [BTN('◀ Voltar', srcCmd(b.src))] : []), BTN('🏠 Menu', '/menu')]] } };
 }
 // o jogo do time já tem box score final? (results.json só lista jogos encerrados; sem o time na lista, a entrada segue aberta)
@@ -582,7 +585,7 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   // antes da primeira gravação do dia, mostra a lista de hoje direto da coleta
   if (!picks.length) { const st = await estToday(etDate()); picks = (st?.picks ?? []).map((p: any) => ({ ...p, status: 'aberta', odd_src: p.odd ? p.odd_src : 'estimada' })); }
   const ev = (x: any) => evS(x);
-  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || 1.87)}${x.odd_src === 'estimada' ? '*' : ''}${x.open_line != null && +x.open_line !== +x.line ? ` <i>(agora ${n1(+x.line)})</i>` : ''} · ${pc(+x.p)} · EV ${ev(x.edge == null ? null : +x.edge)}`;
+  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || 1.87)}${x.odd_src === 'estimada' ? '*' : ''}${x.open_line != null && +x.open_line !== +x.line ? ` <i>(agora ${n1(+x.line)})</i>` : ''} · ${pc(+x.p)}${need(+(x.open_odd ?? x.odd))} · EV ${ev(x.edge == null ? null : +x.edge)}`;
   const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('✅ Gabarito de ontem', '/gabarito')], [BTN('🏠 Menu', '/menu')]] };
   const S = id ? stats.find(s => s.id === id) : null;
   if (S) {
@@ -811,7 +814,7 @@ ${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.s
   const why = [...wy, ...wn];
   return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
 ${side} ${MK[r.m] ?? r.m}
-${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
+${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${need(r.d)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
 ${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
 }
@@ -839,7 +842,7 @@ function listCard(r: Row, i: number) {
   const why = [...wy, ...wn];
   return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
 ${side} ${MK[r.m] ?? r.m}
-${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
+${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${need(r.d)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
 ${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${def}${duvida(r)}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
 }
@@ -888,7 +891,7 @@ function multipla(d: Data, arg: string | undefined, om = 0): Out {
   const evx = (p * odd - 1) * 100;
   return { text: header(d, `🎟️ MÚLTIPLA DE ${pick.length} PERNAS`, target ? ` · alvo ${n2(target)}` : '') + `\n<blockquote>${legsTxt}</blockquote>
 <b>Odd combinada  <code>${n2(odd)}</code></b>
-${bar(p)} chance ${pc(p)} · EV ${evx >= 0 ? '+' : ''}${evx.toFixed(1).replace('.', ',')}%
+${bar(p)} chance ${pc(p)}${need(odd)} · EV ${evx >= 0 ? '+' : ''}${evx.toFixed(1).replace('.', ',')}%
 <i>Uma perna por jogo, nota A ou A+. Pernas tratadas como independentes: use stake menor que a de uma simples.${kal ? ' Algumas odds são da bolsa (Kalshi): confira a da sua casa.' : ''}</i>
 ` + FOOT, kb };
 }
@@ -1145,9 +1148,9 @@ async function sendPauta(chatId: number, demo = false) {
   const send = (text: string, k?: any) => TG('sendMessage', { chat_id: chatId, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, ...(k ? { reply_markup: k } : {}) });
   if (!P.singles.length && !esc3.length) { await send(head + '\n\nSem entradas para a pauta agora: os jogos já começaram ou a 99play ainda não tem as linhas (o leitor precisa estar lendo).', kb); return; }
   // 1) simples
-  await send(head + `\n<i>Escolhidas por sequência e matchup (não por EV), com o Modelo BH concordando. Linhas e odds da 99play.</i>\n\n<b>🔥 ${P.singles.length} SIMPLES</b>\n\n` +
+  await send(head + `\n<i>Escolhidas por sequência e matchup (não por EV), com o Modelo BH concordando. Linhas e odds da 99play. "Precisa" = acerto mínimo para não perder com aquela odd.</i>\n\n<b>🔥 ${P.singles.length} SIMPLES</b>\n\n` +
     P.singles.map(({ r }, i) => `<b>${i + 1}. ${esc(r.n)}</b> <i>${r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`} · ${r.h}</i>
-${pickLine(r)} · <b>${pc(r.p)}</b>
+${pickLine(r)} · <b>${pc(r.p)}</b>${need(r.d)}
 📊 L10 ${hitTxt(r.l10)} · L5 ${hitTxt(r.l5)} · Temp. ${hitTxt(r.ss)} · vs ${r.o} ${hitTxt(r.hh)}${dvTxt(r) ? `\n${dvTxt(r)} · ⏱️ ${r.mn ?? '–'} min` : ` · ⏱️ ${r.mn ?? '–'} min`}${seq(r) ? `\n${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>` : ''}`).join('\n\n'));
   // 2) múltiplas: um bloco por múltipla, pernas numeradas, odd total em destaque
   const NUM = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
@@ -1155,7 +1158,7 @@ ${pickLine(r)} · <b>${pc(r.p)}</b>
     P.multis.map((m, k) => `<b>🎟️ MÚLTIPLA ${k + 1} · ODD ${m.band}</b>
 <blockquote>${m.legs.map(({ r }, i) => `${NUM[i] ?? `${i + 1}.`} <b>${esc(r.n)}</b> · ${r.t} · ${r.h}
 ${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · @<b>${r.d ? n2(r.d) : '–'}</b> · L10 ${hitTxt(r.l10)}${r.sq?.length ? `\n🔢 <code>${seq(r)}</code>` : ''}`).join('\n\n')}</blockquote>
-💰 <b>Odd total @${n2(m.odd)}</b> · ${m.legs.length} pernas · chance estimada <b>${pc(m.prob)}</b>`).join('\n\n━━━━━━━━━━━━━━\n\n'));
+💰 <b>Odd total @${n2(m.odd)}</b> · ${m.legs.length} pernas · chance estimada <b>${pc(m.prob)}</b>${need(m.odd)}`).join('\n\n━━━━━━━━━━━━━━\n\n'));
   // 3) escadas
   await send((esc3.length ? `<b>🪜 ESCADAS DA PAUTA</b>\n<i>Pontos + rebotes + assistências do mesmo jogador (Criar Aposta)</i>\n\n` + esc3.map((x: any, i: number) => escItem(x, i + 1)).join('\n\n') +
     `\n\n<i>Odd justa = 1 ÷ chance das 3: se o Criar Aposta pagar acima, tem valor.</i>` : '<b>🪜 ESCADAS</b>\nSem escada para os jogos que faltam.') + FOOT, kb);

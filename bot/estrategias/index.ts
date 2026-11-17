@@ -54,6 +54,7 @@ export function fmtEntries(list: any[]) {
 const MKF: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assistências', '3PM': 'bolas de 3', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'arremessos convertidos', FGA: 'arremessos tentados', '2PM': 'de 2 convertidos', '2PA': 'de 2 tentados', '3PA': 'bolas de 3 tentadas', FTM: 'lances livres convertidos', FTA: 'lances livres tentados', STL: 'roubos', BLK: 'tocos', SB: 'roubos+tocos', TOV: 'erros', PF: 'faltas' };
 const GRADE: Record<string, string> = { 'A+': '🔥 A+', A: '✅ A', B: '➖ B', C: '⚪ C' };
 const pc = (x: number | null | undefined) => x == null ? '–' : Math.round(x * 100) + '%';
+const need = (o?: number | null) => o && +o > 1 ? ` · precisa <b>${pc(1 / +o)}</b>` : ''; // acerto mínimo para empatar (1 ÷ odd)
 const bar = (p: number, n = 10) => { const k = Math.max(0, Math.min(n, Math.round(p * n))); return '▰'.repeat(k) + '▱'.repeat(n - k); };
 const hitTxt = (h?: number[] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 function fullAlert(x: any, r: any) {
@@ -67,9 +68,9 @@ function fullAlert(x: any, r: any) {
   const age9 = x.t9 ? (Date.now() - Date.parse(x.t9)) / 36e5 : 0;
   if (age9 >= 2) L.push(`⏱️ <b>Odd lida às ${hourBR(x.t9)}</b> (há ${Math.floor(age9)}h): leitor da 99play parado, <b>confira a linha e a odd antes</b>`);
   if (r) {
-    L.push(`${GRADE[r.gr] ?? r.gr ?? ''}${r.nt != null ? ` · Nota <b>${r.nt}</b>` : ''}  ${bar(+x.p)} <b>${pc(+x.p)}</b>${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}`);
+    L.push(`${GRADE[r.gr] ?? r.gr ?? ''}${r.nt != null ? ` · Nota <b>${r.nt}</b>` : ''}  ${bar(+x.p)} <b>${pc(+x.p)}</b>${need(odd)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}`);
     L.push('', `📊 L5 ${hitTxt(r.l5)} · L10 ${hitTxt(r.l10)} · L20 ${hitTxt(r.l20)}`, `📅 Temp. ${hitTxt(r.ss)} · Temp. passada ${hitTxt(r.tp)} · vs ${esc(r.o)} ${hitTxt(r.hh)}`);
-  } else L.push(`Chance do modelo <b>${pc(+x.p)}</b>`);
+  } else L.push(`Chance do modelo <b>${pc(+x.p)}</b>${need(odd)}`);
   const sq = x.sq?.length ? x.sq : r?.sq;
   if (sq?.length) L.push(sqLine(sq, line, x.side), `🔢 <code>${sq.slice(0, 10).join('-')}</code>`);
   if (r) {
