@@ -195,12 +195,12 @@ async function main() {
     // só procura relatórios MAIS NOVOS que o último lido; se não houver, reaproveita o guardado
     const IS = state.injury?.date === date ? state.injury : null;
     try {
-      const r = await fetchOfficialInjuries({ log, after: IS?.report || null });
+      const r = await fetchOfficialInjuries({ log, date, after: IS && Object.keys(IS.injuries || {}).length ? IS.report : null });
       if (r) state.injury = { date, report: r.report, injuries: r.injuries };
     } catch (e) { if (!IS) warnings.push('Relatório oficial de lesões indisponível (segue ESPN): ' + e.message); }
     const use = state.injury?.date === date ? state.injury : null;
     if (use) {
-      let n = 0; for (const [k, v] of Object.entries(use.injuries)) { injuries[k] = { ...injuries[k], ...v }; n++; }
+      let n = 0; for (const [k, v] of Object.entries(use.injuries)) { injuries[k] = { ...injuries[k], ...v }; if (!v.alias) n++; }
       sources.injuries = (sources.injuries ? sources.injuries + ' + ' : '') + `NBA oficial (${use.report.replace('_', ' ')}, ${n} jogadores)`;
     }
   }
