@@ -39,3 +39,17 @@ test('v12: "sem o colega" usa as duas temporadas (logs extras em px) e a tempora
   const e2 = evaluate(buildProps(slate).find(x => x.p.id === '1' && x.mk === 'PTS'), { line: 24.5 });
   assert.equal(e2.over.hits.PS, undefined);
 });
+
+test('reequilíbrio 18/11: com Modelo BH, a projeção mistura a projeção por minutos (40%, ou 70% quando os minutos mudam 3+)', async () => {
+  const { buildProps } = await import('../public/engine.js');
+  const { readFileSync } = await import('node:fs');
+  const slate = JSON.parse(readFileSync(new URL('./fixtures/slate-nop-gsw.json', import.meta.url), 'utf8'));
+  const P = buildProps(slate).filter(p => p.model);
+  assert.ok(P.length > 10);
+  for (const pr of P) {
+    const w = pr.model.hw;
+    assert.ok(w >= .4 && w <= .7);
+    if (Math.abs(pr.ctx.exp - pr.ctx.m10) >= 3) assert.ok(w >= .7);
+    assert.ok(Math.abs(pr.proj - ((1 - w) * pr.model.mOnly + w * pr.model.base)) < 1e-9);
+  }
+});

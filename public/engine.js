@@ -294,7 +294,13 @@ export function buildProps(slate, opts = {}) {
         // desfalque: o modelo dá o mesmo aumento a todo o elenco; a projeção heurística usa o histórico real
         // SEM o colega (minutos e ritmo por minuto). Com o colega fora e 3+ jogos sem ele, mistura as duas
         // (peso n/(n+10), no máximo 50%), para o substituto direto não ficar subestimado (e o under, otimista).
-        if (ctx.wo?.active && ctx.wo.n >= 3) { const w = Math.min(.5, ctx.wo.n / (ctx.wo.n + 10)); model.wo = Math.round(w * 100) / 100; model.mOnly = model.proj; model.proj = (1 - w) * model.proj + w * proj; }
+        // 18/11 (reequilíbrio): o Modelo BH não enxerga os minutos de hoje e, no backtest de 13–17/11, ficou com a média
+        // ~5% baixa nos mercados de soma (era daí o vício em under). A projeção final mistura o modelo com a projeção por
+        // minutos (minutos previstos × ritmo): 40% dela no normal e 70% quando os minutos previstos mudam 3+ da média
+        // dos últimos 10 (desfalque, dúvida, volta de lesão). Viés do over: −0,62 → −0,11 ponto; lados mais equilibrados.
+        let w = Math.abs(ctx.exp - ctx.m10) >= 3 ? .7 : .4;
+        if (ctx.wo?.active && ctx.wo.n >= 3) { const ww = Math.min(.5, ctx.wo.n / (ctx.wo.n + 10)); model.wo = Math.round(ww * 100) / 100; w = Math.max(w, ww); }
+        model.mOnly = model.proj; model.hw = w; model.proj = (1 - w) * model.proj + w * proj;
         proj = model.proj;
         if (M.k.length === 1) d = 1 + MP[M.k[0]][0] / MP[M.k[0]][1];
       }

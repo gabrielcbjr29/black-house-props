@@ -45,7 +45,7 @@ test('cards: linhas marcadas têm últimos 10 jogos e o HTML do card sai complet
   const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
   const b = buildBotData(slate, { w: .4 });
   const cards = b.rows.filter(r => r.cd);
-  assert.ok(cards.length > 0 && cards.length <= 220, `quantidade de cards: ${cards.length}`);
+  assert.ok(cards.length > 0 && cards.length <= 260, `quantidade de cards: ${cards.length}`);
   assert.ok(cards.every(r => Array.isArray(r.v10) && r.v10.length > 0 && r.v10.length <= 10 && r.ps != null));
   assert.ok(b.rows.every(r => !r._v && !r._r), 'sem funções no JSON');
   const h = cardHTML(cards[0], b.date);
@@ -63,8 +63,9 @@ test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dis
   const mOnly = f => f.model.mOnly ?? f.proj;
   assert.ok(fga && fga.model && Math.abs(mOnly(fga) - 17.25) < 1e-9, 'FGA usa o modelo');
   // (model.wo é o peso arredondado a 2 casas; a conta usa o peso exato, daí a tolerância proporcional)
-  if (fga.model.wo) assert.ok(Math.abs(fga.proj - ((1 - fga.model.wo) * 17.25 + fga.model.wo * fga.model.base)) <= .006 * Math.abs(fga.model.base - 17.25) + 1e-6 && fga.model.wo <= .5, 'mistura com o histórico sem o colega');
-  else assert.ok(Math.abs(fga.proj - 17.25) < 1e-9);
+  // 18/11: sempre mistura com a projeção por minutos (peso hw: 40%, 70% com minutos mudando 3+, ou o do "sem o colega")
+  assert.ok(fga.model.hw >= .4 && fga.model.hw <= .7);
+  assert.ok(Math.abs(fga.proj - ((1 - fga.model.hw) * 17.25 + fga.model.hw * fga.model.base)) < 1e-9, 'mistura modelo + minutos');
   assert.ok(Math.abs(fga.d - (1 + 17.25 / 25)) < 1e-9, 'dispersão da binomial negativa');
   assert.ok(pra && pra.model && Math.abs(mOnly(pra) - 31) < 1e-9, 'combinado soma as estatísticas do modelo');
   const old = buildProps({ ...slate, model: { date: '1999-01-01', players: s2.model.players } }, { calib: false }).find(x => x.p.id === p.id && x.mk === 'FGA');

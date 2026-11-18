@@ -5,7 +5,7 @@ import { STRATEGIES, MK_EST, pickStrategies, strategyCtx } from '../collector/st
 const base = { id: 'p1', n: 'A', t: 'DET', o: 'WAS', g: 'g1', mn: 30, st: 'ok', nt: 60, sc: 60, l10: [8, 10], k: 0, b: '99play', c9: 1, d: 1.85 };
 test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(MK_EST, ['2PA', '2PM', '3PA', '3PM', 'FGM', 'FTA', 'FTM', 'RA']);
-  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 12);
+  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 13); // + Método Minutos (18/11)
   assert.deepEqual(STRATEGIES.filter(s => s.off).map(s => s.id).sort(), ['oport-forte', 'reserva-under', 'top10-forte']); // arquivadas em 17/11
   const rows = [
     { ...base, m: 'RA', s: 'o', l: 8.5, p: .6, sc: 61 },                              // reb+ast
@@ -57,4 +57,12 @@ test('tendência: sequência + matchup + defesa + odd da 99play, os dois lados, 
     { ...t, id: 'e', m: 'PTS', s: 'o', d: 1.8, dv: { r: 5, of: 30 } }];       // over contra defesa forte: fora
   const r = pickStrategies({ date: '2026-11-14', gen: 'x', rows: [], trend: rows }, []);
   assert.deepEqual(r.picks.filter(p => p.strategy_id === 'tendencia').map(p => p.pid + p.mk), ['aPTS', 'bAST']);
+});
+
+test('Método Minutos: uma por jogador (PRA primeiro), só com o sinal de minutos e odd da 99play 1,50–3,50', () => {
+  const r = (id, m, s, mi, d = 1.85, x = {}) => ({ ...base, id, m, s, l: 20.5, p: .5, mi, d, ...x });
+  const bot = { date: '2026-11-19', rows: [r('a', 'PTS', 'o', 5), r('z', 'PTS', 'o', null)], trend: [],
+    mins: [r('a', 'PRA', 'o', 5), r('b', 'PTS', 'o', 6.5), r('c', 'PRA', 'u', -5), r('d', 'PRA', 'o', 4, 1.4), r('e', 'PRA', 'o', 4, 1.9, { c9: 0 }), r('f', '3PM', 'o', 7)] };
+  const P = pickStrategies(bot).picks.filter(x => x.strategy_id === 'minutos');
+  assert.deepEqual(P.map(x => `${x.pid}-${x.mk}-${x.side}`).sort(), ['a-PRA-o', 'b-PTS-o', 'c-PRA-u']);
 });

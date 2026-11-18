@@ -1,7 +1,7 @@
 // Dados prontos para o bot do Telegram (public/data/bot.json).
 // O modelo roda aqui, na coleta; o bot só filtra e formata, então responde rápido.
 import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB, OFF_MK } from '../public/engine.js';
-import { STRATEGIES, strategyCtx } from './strategies.js';
+import { STRATEGIES, strategyCtx, MIN_MK } from './strategies.js';
 import { kalshiAt, norm as kNorm, ALV } from '../scripts/alavanca.mjs';
 
 const POS_PT = { G: 'armadores', F: 'alas', C: 'pivôs' };
@@ -30,6 +30,17 @@ const r3 = x => x == null ? null : Math.round(x * 1000) / 1000;
 export const trendOK = r => !!(r.c9 && r.d >= 1.6 && r.d <= 2.3) && (r.mn ?? 0) >= 24 && r.st !== 'questionable'
   && r.l10?.[1] >= 10 && r.l10[0] >= 7 && r.l5?.[0] >= 4 && (!r.hh?.[1] || r.hh[0] / r.hh[1] >= .5)
   && !!r.dv?.r && (r.s === 'o' ? r.dv.r >= r.dv.of - 11 : r.dv.r <= 12);
+// Método Minutos (pedido do usuário em 18/11): minutos previstos hoje × média dos últimos 10 jogos. Subiu 4+ (quase
+// sempre um titular fora) → over; caiu 4+ (ele mesmo em dúvida ou voltando de lesão) → under. Só nos mercados de soma,
+// com linha e odd da 99play. Backtest 13–17/11 (uma por jogador, PRA primeiro): 94 entradas, 64,9%, ROI +17,7%.
+export function minSig(pr) {
+  const b = pr.book?.books?.['99play'];
+  if (!b?.o || !b?.u || !MIN_MK.includes(pr.mk)) return null;
+  const exp = pr.ctx?.exp ?? 0, m10 = pr.ctx?.m10 ?? 0, dx = exp - m10;
+  if (dx >= 4 && exp >= 20 && pr.p.status !== 'questionable') return { side: 'over', dx };
+  if (dx <= -4 && m10 >= 20) return { side: 'under', dx };
+  return null;
+}
 // full: todas as linhas (sem cortar nota baixa nem B fraco), para o PDF do dia; o bot.json usa o corte
 // kalshi = public/data/kalshi.json do dia (escada da bolsa). Vira kp: chance da Kalshi para o lado da linha (só informação).
 export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}) {
@@ -38,18 +49,19 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
   const KAL = kFresh ? new Map(kalshi.list.map(k => [kNorm(k.name) + '|' + k.mk, k])) : null;
   const games = slate.games.map(g => ({ id: g.id, a: g.away, h: g.home, t: brTime(g.timeUTC), utc: g.timeUTC, sp: g.spread ?? null, to: g.total ?? null }));
   const gById = Object.fromEntries(slate.games.map(g => [g.id, g]));
-  const rows = [], trend = [];
+  const rows = [], trend = [], mins = [];
   for (const pr of buildProps(slate, { calib: true })) {
     if (pr.p.status === 'out' || pr.p.status === 'doubtful' || OFF_MK.has(pr.mk)) continue;
     const e = evaluate(pr, null, { w });
+    const mi = minSig(pr);
     for (const side of [e.best, e.best === 'over' ? 'under' : 'over']) {
-    const s = e[side], isBest = side === e.best;
+    const s = e[side], isBest = side === e.best, miHere = !!mi && mi.side === side;
     // regra de tendência (sequência + matchup + defesa + odd): pode puxar o outro lado ou um lado de nota baixa.
     // pré-checagem barata da sequência antes de montar a linha
     const seqOk = s.hits?.L10?.[1] >= 10 && s.hits.L10[0] >= 7 && s.hits?.L5?.[0] >= 4;
-    if (!isBest && (full || !seqOk)) continue;
+    if (!isBest && (full || !seqOk) && !miHere) continue;
     const gradeOk = full || GRADE_ORDER[s.grade] >= 2;
-    if (!gradeOk && !seqOk) continue;
+    if (!gradeOk && !seqOk && !miHere) continue;
     // odd: casa de verdade primeiro; Kalshi só se não houver casa
     let odd = null, book = null, kal = false;
     if (pr.book?.books) {
@@ -80,9 +92,10 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
     const kk = KAL && ALV.mk.includes(pr.mk) ? KAL.get(kNorm(pr.p.name) + '|' + pr.mk) : null, ka = kk ? kalshiAt(kk, e.line, pr.mk) : null;
     if (ka) row.kp = r3(row.s === 'o' ? ka.p : 1 - ka.p);
     const tr = trendOK(row); if (tr) row.tr = 1;
+    if (miHere) row.mi = Math.round(mi.dx * 10) / 10; // Método Minutos: diferença de minutos (previstos − média L10)
     // o lado que o modelo não escolheu (ou de nota baixa) fica numa lista à parte (só a estratégia Tendência usa; listas e alertas não mudam)
     if (isBest && gradeOk) rows.push(row);
-    else if (tr) { delete row._v; const R = row._r(); delete row._r; row.wy = R.pro; row.wn = R.con; row.sc = Math.round(row.sc * 1000) / 1000; trend.push(row); }
+    else if (tr || row.mi) { delete row._v; const R = row._r(); delete row._r; row.wy = R.pro; row.wn = R.con; row.sc = Math.round(row.sc * 1000) / 1000; (tr ? trend : mins).push(row); }
     }
   }
   // ordem: Nota BH, desempate pelo acerto nos últimos 10
@@ -112,7 +125,7 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   // todas as entradas das estratégias (o alerta do bot manda o card de cada uma)
   const sctx = strategyCtx(rows);
-  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort(S.sort || ((a, b) => (b.sc ?? 0) - (a.sc ?? 0))), S.max + 4, false);
+  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort(S.sort || ((a, b) => (b.sc ?? 0) - (a.sc ?? 0))), Math.min(S.max, 10) + 4, false);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
   // Modelo BH por jogador (para o /modelo do bot): média e dispersão de cada estatística + últimos 10 jogos e média na temporada
@@ -129,5 +142,5 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
         h2h: logs.filter(x => x[L.opp] === (g.home === p.team ? g.away : g.home)).slice(0, 10).map(x => Object.fromEntries(Object.keys(ST).map(k => [k, ST[k](x)]))) };
     }
   }
-  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, trend, mdl };
+  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, trend, mins, mdl };
 }

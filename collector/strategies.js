@@ -18,6 +18,8 @@ const MKT = [
   ['RA', 'Reb+Ast', 'rebotes + assistências'],
 ];
 export const MK_EST = MKT.map(x => x[0]);
+// mercados do Método Minutos, na ordem de preferência (uma entrada por jogador)
+export const MIN_MK = ['PRA', 'PTS', 'PR', 'PA', 'REB', 'RA', 'AST'];
 const edgeOf = r => r.d ? r.p * r.d - 1 : null; // valor esperado na odd real
 const rot = r => (r.mn ?? 0) >= 24 && r.st !== 'questionable';
 // só entra com linha e odd da 99play (a casa onde o usuário aposta; o resultado vale nessa odd)
@@ -72,6 +74,16 @@ STRATEGIES.push({
   sort: (a, b) => (rt(b.l10) - rt(a.l10)) || (rt(b.l5) - rt(a.l5)) || (rt(b.l20) - rt(a.l20)) || ((b.d ?? 0) - (a.d ?? 0)),
 });
 
+// Método Minutos (pedido do usuário em 18/11, para acompanhar de perto): minutos previstos hoje 4+ acima da média dos
+// últimos 10 (titular fora) → over; 4+ abaixo → under. Uma por jogador (PRA, senão PTS, PR, PA, REB, RA, AST), odd da
+// 99play entre 1,50 e 3,50, sem teto por dia. Não usa a chance do modelo (o sinal é a notícia de minutos).
+STRATEGIES.push({
+  id: 'minutos', name: 'Método Minutos', markets: MIN_MK, max: 40, one: true,
+  descr: 'Minutos previstos hoje 4+ acima da média dos últimos 10 jogos (titular do time fora) → mais de; 4+ abaixo (ele mesmo em dúvida ou voltando) → menos de. Uma por jogador em pts+reb+ast (ou pontos, pts+reb, pts+ast, rebotes, reb+ast, assistências), linha e odd da 99play entre 1,50 e 3,50, sem limite por dia.',
+  test: r => !!(r.mi && r.c9 && r.d >= 1.5 && r.d <= 3.5 && MIN_MK.includes(r.m)),
+  sort: (a, b) => (MIN_MK.indexOf(a.m) - MIN_MK.indexOf(b.m)) || (Math.abs(b.mi) - Math.abs(a.mi)),
+});
+
 // 17/11: o usuário parou de acompanhar Under de reserva, Oportunidade forte e Top 10 forte (off: true). A regra fica
 // aqui (e o histórico no banco, com status 'arquivada') para poder voltar; não geram mais entradas nem alertas.
 /* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */
@@ -79,7 +91,7 @@ export function pickStrategies(bot, games = []) {
   const tip = Object.fromEntries((games || []).map(g => [g.id, g.timeUTC || g.utc || null]));
   const out = [], ctx = strategyCtx(bot.rows);
   for (const S of STRATEGIES.filter(S => !S.off)) {
-    const rows = (S.id === 'tendencia' ? [...bot.rows, ...(bot.trend || [])] : bot.rows).filter(r => { try { return S.test(r, ctx); } catch { return false; } })
+    const rows = (S.id === 'tendencia' ? [...bot.rows, ...(bot.trend || [])] : S.id === 'minutos' ? [...bot.rows, ...(bot.trend || []), ...(bot.mins || [])] : bot.rows).filter(r => { try { return S.test(r, ctx); } catch { return false; } })
       .sort(S.sort || ((a, b) => ((b.sc ?? b.nt ?? 0) - (a.sc ?? a.nt ?? 0)) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1))));
     const seen = new Set(); let k = 0;
     for (const r of rows) {

@@ -1007,6 +1007,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /apagar 12 · apaga uma entrada registrada errada
 /ontem · resultado de ontem (chega sozinho de manhã)
 /estrategias · modelo por mercado: placar e entradas do dia
+/minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
 /placar · placar da verdade: modelo × 99play × Kalshi no fechamento · /placar 7
 /status · saúde do sistema: coleta, leitor da 99play, papel de hoje
@@ -1031,7 +1032,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')], [BTN('🎯 Odd mínima', '/odd')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('🎯 Pauta do Tipster', '/pauta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('🎯 Pauta do Tipster', '/pauta'), BTN('⏱️ Método Minutos', '/minutos')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -1071,6 +1072,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'banca' || cmd === 'roi') return bancaCmd(chatId, rest);
   if (cmd === 'apagar') return apagarCmd(chatId, rest);
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
+  // Método Minutos (18/11): atalho para o placar e as entradas do dia da estratégia 'minutos'
+  if (cmd === 'minutos' || cmd === 'metodominutos') return estrategiasCmd(['minutos']);
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
   if (cmd === 'placar' || cmd === 'verdade') return placarCmd(rest[0]);
@@ -1830,7 +1833,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
