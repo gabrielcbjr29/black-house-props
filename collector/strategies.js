@@ -84,6 +84,22 @@ STRATEGIES.push({
   sort: (a, b) => (MIN_MK.indexOf(a.m) - MIN_MK.indexOf(b.m)) || (Math.abs(b.mi) - Math.abs(a.mi)),
 });
 
+// Modelo v2, todos os mercados (pedido do usuário em 18/11): monitorar no papel TODOS os mercados do bot com a regra
+// nova, ao lado das 8 do Modelo por mercado (que ficam como estão, para comparar). Regra: EV de 3%+ na odd da 99play,
+// SEM piso de chance (o piso de 55% escolhia o lado de odd baixa: backtest 13–17/11, ROI −13,7% contra −9,1%),
+// odd 1,50–3,50, jogador de rotação (24+ min, sem dúvida), 5 por mercado por dia, ordem pelo EV. Só papel, sem alerta
+// (quiet) e sem card. Uma semana (~35 por mercado) mostra tendência, não decide: mercado só vira aposta com 150+
+// entradas, ROI > 0 e CLV > 0.
+const V2 = [['PTS', 'Pontos'], ['REB', 'Rebotes'], ['AST', 'Assistências'], ['3PM', 'Bolas de 3'], ['PRA', 'Pts+Reb+Ast'], ['PR', 'Pts+Reb'],
+  ['PA', 'Pts+Ast'], ['RA', 'Reb+Ast'], ['FGM', 'Arr. convertidos'], ['2PM', 'De 2 convertidos'], ['2PA', 'Tentativas de 2'], ['3PA', 'Tentativas de 3'],
+  ['FTM', 'LL convertidos'], ['FTA', 'LL tentados'], ['STL', 'Roubos'], ['BLK', 'Tocos'], ['SB', 'Roubos+Tocos'], ['TOV', 'Erros'], ['PF', 'Faltas']];
+for (const [mk, nm] of V2) STRATEGIES.push({
+  id: 'v2-' + mk.toLowerCase(), name: 'v2 · ' + nm, markets: [mk], max: 5, quiet: true,
+  descr: `Modelo v2 em ${nm.toLowerCase()}: as 5 entradas de maior valor do dia (EV de 3% ou mais na odd da 99play, sem piso de chance), odd entre 1,50 e 3,50, jogador de rotação (24+ min, sem dúvida). Só papel, sem alerta.`,
+  test: r => !!(r.c9 && r.d >= 1.5 && r.d <= 3.5) && r.m === mk && !OFF_MK.has(r.m) && rot(r) && edgeOf(r) >= .03,
+  sort: (a, b) => (edgeOf(b) ?? -1) - (edgeOf(a) ?? -1),
+});
+
 // 17/11: o usuário parou de acompanhar Under de reserva, Oportunidade forte e Top 10 forte (off: true). A regra fica
 // aqui (e o histórico no banco, com status 'arquivada') para poder voltar; não geram mais entradas nem alertas.
 /* entradas do dia por estratégia (uma por jogador e mercado; ordem: Nota BH, depois valor esperado) */

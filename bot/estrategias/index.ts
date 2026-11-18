@@ -152,6 +152,7 @@ async function record(silent = false) {
   const alertedPid = new Set(have.filter(h => h.alerted).map(h => h.pid)), best = new Map<string, any>();
   // NO_ALERT em bot_config pode tirar estratégias do alerta (ficam só no papel)
   const noAlert = new Set(String(await cfg('NO_ALERT') ?? '').split(',').map(t => t.trim()).filter(Boolean));
+  for (const s of st.strategies) if (s.quiet) noAlert.add(s.id); // estratégias só de papel (Modelo v2, 18/11)
   // Tendência e Método Minutos alertam sem o corte de EV do modelo (a própria regra é a seleção); ver abaixo
   const NOEV = ['tendencia', 'minutos'];
   for (const x of fresh) if (!NOEV.includes(x.strategy_id) && !noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);

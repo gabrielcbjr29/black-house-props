@@ -125,7 +125,7 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
   for (const g of games) take(R.filter(r => r.g === g.id), 8);
   // todas as entradas das estratégias (o alerta do bot manda o card de cada uma)
   const sctx = strategyCtx(rows);
-  for (const S of STRATEGIES) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort(S.sort || ((a, b) => (b.sc ?? 0) - (a.sc ?? 0))), Math.min(S.max, 10) + 4, false);
+  for (const S of STRATEGIES.filter(S => !S.quiet)) take(rows.filter(r => { try { return S.test(r, sctx); } catch { return false; } }).sort(S.sort || ((a, b) => (b.sc ?? 0) - (a.sc ?? 0))), Math.min(S.max, 10) + 4, false);
   for (const r of rows) { if (sel.has(key(r))) Object.assign(r, { cd: 1 }, r._v()); delete r._v; }
   const injuries = slate.players.filter(p => p.status !== 'ok').map(p => ({ n: p.name, t: p.team, st: p.status, no: p.note || '' }));
   // Modelo BH por jogador (para o /modelo do bot): média e dispersão de cada estatística + últimos 10 jogos e média na temporada

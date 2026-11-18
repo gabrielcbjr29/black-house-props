@@ -5,7 +5,7 @@ import { STRATEGIES, MK_EST, pickStrategies, strategyCtx } from '../collector/st
 const base = { id: 'p1', n: 'A', t: 'DET', o: 'WAS', g: 'g1', mn: 30, st: 'ok', nt: 60, sc: 60, l10: [8, 10], k: 0, b: '99play', c9: 1, d: 1.85 };
 test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(MK_EST, ['2PA', '2PM', '3PA', '3PM', 'FGM', 'FTA', 'FTM', 'RA']);
-  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 13); // + Método Minutos (18/11)
+  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 32); // + Método Minutos e 19 do Modelo v2 (18/11)
   assert.deepEqual(STRATEGIES.filter(s => s.off).map(s => s.id).sort(), ['oport-forte', 'reserva-under', 'top10-forte']); // arquivadas em 17/11
   const rows = [
     { ...base, m: 'RA', s: 'o', l: 8.5, p: .6, sc: 61 },                              // reb+ast
@@ -30,7 +30,7 @@ test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(by('m-3pa'), []);
   assert.deepEqual(by('reserva-under'), []); // arquivada em 17/11 (r1 entraria pela regra)
   assert.deepEqual(by('oport-forte'), []);   // arquivada em 17/11 (o1 entraria pela regra)
-  assert.equal(r.picks.length, 3);
+  assert.equal(r.picks.filter(p => !p.strategy_id.startsWith('v2-')).length, 3); // o Modelo v2 (18/11) tem teste próprio
   assert.ok(!r.strategies.some(s => s.off), 'arquivadas fora da lista gravada no banco');
   assert.equal(r.picks[0].tip_utc, '2026-11-14T00:00:00Z');
   assert.deepEqual(by('top10-forte'), []); // sem Modelo BH (mb) nenhuma entra no top 10
@@ -65,4 +65,13 @@ test('Método Minutos: uma por jogador (PRA primeiro), só com o sinal de minuto
     mins: [r('a', 'PRA', 'o', 5), r('b', 'PTS', 'o', 6.5), r('c', 'PRA', 'u', -5), r('d', 'PRA', 'o', 4, 1.4), r('e', 'PRA', 'o', 4, 1.9, { c9: 0 }), r('f', '3PM', 'o', 7)] };
   const P = pickStrategies(bot).picks.filter(x => x.strategy_id === 'minutos');
   assert.deepEqual(P.map(x => `${x.pid}-${x.mk}-${x.side}`).sort(), ['a-PRA-o', 'b-PTS-o', 'c-PRA-u']);
+});
+
+test('Modelo v2: todos os mercados, EV 3%+ sem piso de chance, odd 1,50–3,50, rotação, só papel', () => {
+  const v2 = STRATEGIES.filter(s => s.id.startsWith('v2-'));
+  assert.equal(v2.length, 19); assert.ok(v2.every(s => s.quiet && s.max === 5));
+  const r = (id, p, d, x = {}) => ({ ...base, id, m: 'PTS', s: 'o', l: 20.5, p, d, ...x });
+  const rows = [r('a', .5, 2.2), r('b', .58, 1.85), r('c', .5, 1.9), r('d', .6, 1.6), r('e', .4, 4), r('f', .6, 1.9, { mn: 20 }), r('g', .6, 1.9, { st: 'questionable' })];
+  const P = pickStrategies({ date: 'x', rows }).picks.filter(x => x.strategy_id === 'v2-pts');
+  assert.deepEqual(P.map(x => x.pid), ['a', 'b']); // a: EV 10%, b: EV 7,3%; c (−5%), d (−4%), e (odd 4), f (20 min) e g (dúvida) fora
 });
