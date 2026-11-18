@@ -58,6 +58,7 @@ jobs:
             slug="$f"; [ "$f" = telegram ] && slug=telegram-bot
             mkdir -p "supabase/functions/$slug"
             echo "import 'https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/bot/$f/index.ts';" > "supabase/functions/$slug/index.ts"
-            supabase functions deploy "$slug" --project-ref "$PROJECT_REF" --no-verify-jwt
+            # --yes: o CLI novo pede confirmação, e no Actions não há quem responda (a aprovação é a do ambiente producao)
+            supabase functions deploy "$slug" --project-ref "$PROJECT_REF" --no-verify-jwt --yes
             echo "- \`$slug\` ✅" >> "$GITHUB_STEP_SUMMARY"
           done
