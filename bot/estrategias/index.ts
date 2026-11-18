@@ -152,24 +152,30 @@ async function record(silent = false) {
   const alertedPid = new Set(have.filter(h => h.alerted).map(h => h.pid)), best = new Map<string, any>();
   // NO_ALERT em bot_config pode tirar estratégias do alerta (ficam só no papel)
   const noAlert = new Set(String(await cfg('NO_ALERT') ?? '').split(',').map(t => t.trim()).filter(Boolean));
-  for (const x of fresh) if (x.strategy_id !== 'tendencia' && !noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
+  // Tendência e Método Minutos alertam sem o corte de EV do modelo (a própria regra é a seleção); ver abaixo
+  const NOEV = ['tendencia', 'minutos'];
+  for (const x of fresh) if (!NOEV.includes(x.strategy_id) && !noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
   for (const x of fresh) x.alerted = best.get(x.pid) === x;
   // Tendência (pedido do usuário em 14/11): alerta toda entrada dela, sem corte de EV do modelo (a regra já é a seleção),
   // uma por jogador no dia: se o jogador já teve alerta (de qualquer estratégia), não manda de novo. Inclui as já gravadas
   // e ainda não alertadas (as de hoje cedo, gravadas antes de o alerta da Tendência existir).
+  // Método Minutos (18/11): mesma regra de alerta, com uma diferença: o alerta dele sai mesmo que o jogador já tenha
+  // tido alerta de outra estratégia (o usuário quer acompanhar o método de perto), uma vez por jogador no dia.
   const trendLate: any[] = [];
-  if (!noAlert.has('tendencia')) {
-    const sentPid = new Set([...alertedPid, ...[...best.values()].map(x => x.pid)]);
-    const wasAlerted = new Set(have.filter(h => h.alerted).map(h => `${h.strategy_id}|${h.pid}|${h.mk}`));
-    for (const x of [...fresh, ...rows].filter(x => x.strategy_id === 'tendencia')) {
-      if (sentPid.has(x.pid) || wasAlerted.has(`tendencia|${x.pid}|${x.mk}`)) continue;
+  const wasAlerted = new Set(have.filter(h => h.alerted).map(h => `${h.strategy_id}|${h.pid}|${h.mk}`));
+  for (const sid of NOEV) {
+    if (noAlert.has(sid)) continue;
+    const sentPid = sid === 'minutos' ? new Set(have.filter(h => h.alerted && h.strategy_id === 'minutos').map(h => h.pid))
+      : new Set([...alertedPid, ...[...best.values()].map(x => x.pid)]);
+    for (const x of [...fresh, ...rows].filter(x => x.strategy_id === sid)) {
+      if (sentPid.has(x.pid) || wasAlerted.has(`${sid}|${x.pid}|${x.mk}`)) continue;
       sentPid.add(x.pid);
       if (fresh.includes(x)) x.alerted = true; else trendLate.push(x);
     }
   }
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
-  for (const x of trendLate) await sb(`strategy_picks?date=eq.${x.date}&strategy_id=eq.tendencia&pid=eq.${x.pid}&mk=eq.${encodeURIComponent(x.mk)}`, { method: 'PATCH', body: JSON.stringify({ alerted: true }) }).catch(() => null);
+  for (const x of trendLate) await sb(`strategy_picks?date=eq.${x.date}&strategy_id=eq.${x.strategy_id}&pid=eq.${x.pid}&mk=eq.${encodeURIComponent(x.mk)}`, { method: 'PATCH', body: JSON.stringify({ alerted: true }) }).catch(() => null);
   const toAlert = [...fresh.filter(x => x.alerted), ...trendLate].map(x => ({ ...x, t9: t9Of.get(key(x)) })).sort((a, b) => (b.edge ?? -1) - (a.edge ?? -1));
   const bot = await getJ('bot.json').catch(() => null);
   const alertas = silent ? 0 : await alert(toAlert, evMin, bot?.date === st.date ? bot : null).catch(e => { console.error('alerta', e); return 0; });
