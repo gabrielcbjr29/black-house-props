@@ -80,6 +80,12 @@ jobs:
           python3 -m pip install --quiet pandas scikit-learn scipy || pip install --quiet pandas scikit-learn scipy
           python3 model/predict.py public/data/slate.json
           node collector/rebuild-bot.js
+      # Placar da verdade: guarda o fechamento de cada linha (99play, Kalshi e Modelo BH) e liquida com o boxscore.
+      # Só mede: não mexe em método nenhum. Estado em data/auditoria/, resumo em public/data/auditoria.json.
+      - name: Placar da verdade (auditoria)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: node scripts/auditoria.mjs public
       - name: Salvar histórico e slate no repositório
         run: |
           git config user.name "garrafao-bot"
