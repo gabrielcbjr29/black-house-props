@@ -282,7 +282,7 @@ async function main() {
   const prevSeason = buildPrevSeason(Object.values(prev.games), prevL);
   try { const txt = JSON.stringify(prevSeason); let old = ''; try { old = await readFile(PREV, 'utf8'); } catch { } if (old !== txt) await writeFile(PREV, txt); } catch (e) { warnings.push('prev.json falhou: ' + e.message); }
   // lista pronta para o bot do Telegram
-  try { const bd = buildBotData({ ...slate, prev: prevSeason }, { w: +(env.BOT_W || .4) }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
+  try { const bd = buildBotData({ ...slate, prev: prevSeason }, { w: +(env.BOT_W || .4), kalshi: kalshi.length ? { date, gen: new Date().toISOString(), list: kalshi } : null }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
   catch (e) { warnings.push('bot.json falhou: ' + e.message); }
   // 7. resultados dos últimos dias: o app usa para liquidar as tips registradas (green/red/devolvida)
   await writeFile(RESULTS, JSON.stringify(buildResults([...Object.values(cur.games), ...Object.values(prev.games)], { ...prev.names, ...cur.names }, date)));

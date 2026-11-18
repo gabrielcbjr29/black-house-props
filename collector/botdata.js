@@ -2,6 +2,7 @@
 // O modelo roda aqui, na coleta; o bot só filtra e formata, então responde rápido.
 import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB, OFF_MK } from '../public/engine.js';
 import { STRATEGIES, strategyCtx } from './strategies.js';
+import { kalshiAt, norm as kNorm, ALV } from '../scripts/alavanca.mjs';
 
 const POS_PT = { G: 'armadores', F: 'alas', C: 'pivôs' };
 const STAT_PT = { pts: 'pontos', reb: 'rebotes', ast: 'assistências', tpm: 'bolas de 3', stl: 'roubos', blk: 'tocos', tov: 'erros', fgm: 'arremessos convertidos', fga: 'arremessos tentados', fta: 'lances livres tentados', ftm: 'lances livres', tpa: 'bolas de 3 tentadas', twom: 'arremessos de 2', twoa: 'arremessos de 2 tentados', oreb: 'rebotes ofensivos', pf: 'faltas' };
@@ -30,7 +31,11 @@ export const trendOK = r => !!(r.c9 && r.d >= 1.6 && r.d <= 2.3) && (r.mn ?? 0) 
   && r.l10?.[1] >= 10 && r.l10[0] >= 7 && r.l5?.[0] >= 4 && (!r.hh?.[1] || r.hh[0] / r.hh[1] >= .5)
   && !!r.dv?.r && (r.s === 'o' ? r.dv.r >= r.dv.of - 11 : r.dv.r <= 12);
 // full: todas as linhas (sem cortar nota baixa nem B fraco), para o PDF do dia; o bot.json usa o corte
-export function buildBotData(slate, { w = .4, full = false } = {}) {
+// kalshi = public/data/kalshi.json do dia (escada da bolsa). Vira kp: chance da Kalshi para o lado da linha (só informação).
+export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}) {
+  const kFresh = kalshi?.list?.length && kalshi.date === slate.meta?.date
+    && !(kalshi.gen && slate.meta?.generatedAt && Math.abs(Date.parse(slate.meta.generatedAt) - Date.parse(kalshi.gen)) / 36e5 >= 3);
+  const KAL = kFresh ? new Map(kalshi.list.map(k => [kNorm(k.name) + '|' + k.mk, k])) : null;
   const games = slate.games.map(g => ({ id: g.id, a: g.away, h: g.home, t: brTime(g.timeUTC), utc: g.timeUTC, sp: g.spread ?? null, to: g.total ?? null }));
   const gById = Object.fromEntries(slate.games.map(g => [g.id, g]));
   const rows = [], trend = [];
@@ -72,6 +77,8 @@ export function buildBotData(slate, { w = .4, full = false } = {}) {
       l5: s.hits?.L5?.[1] ? s.hits.L5 : null, sk: s.streak || 0, ed: Math.round(s.gap * 10) / 10, tp: s.hits?.PS?.[1] ? s.hits.PS : null,
       wo: pr.ctx.wo && s.hits?.WO?.[1] >= 2 ? { q: pr.ctx.wo.q.name, h: s.hits.WO, a: Math.round(pr.woVals.reduce((a, x) => a + x, 0) / pr.woVals.length * 10) / 10, x: pr.ctx.wo.active ? 1 : 0 } : null, _r: () => reasons(pr, { ...e, [s.side]: sv }, s.side, { max: 3 }),
       _v: () => ({ ps: POSLB[pr.p.pos] || '', ...(pr.p.num ? { nu: pr.p.num } : {}), v10: pr.vals.slice(0, 10).map((v, i) => [v, pr.ctx.logs[i][L.opp]]) }) };
+    const kk = KAL && ALV.mk.includes(pr.mk) ? KAL.get(kNorm(pr.p.name) + '|' + pr.mk) : null, ka = kk ? kalshiAt(kk, e.line, pr.mk) : null;
+    if (ka) row.kp = r3(row.s === 'o' ? ka.p : 1 - ka.p);
     const tr = trendOK(row); if (tr) row.tr = 1;
     // o lado que o modelo não escolheu (ou de nota baixa) fica numa lista à parte (só a estratégia Tendência usa; listas e alertas não mudam)
     if (isBest && gradeOk) rows.push(row);

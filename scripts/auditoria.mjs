@@ -15,7 +15,7 @@
 //
 // Estado (fora do site): data/auditoria/abertas.json (linhas à espera do resultado) e data/auditoria/AAAA-MM-DD.json
 // (linhas liquidadas do dia, em colunas).
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, appendFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -204,6 +204,25 @@ export function resumo(R) {
   return out;
 }
 
+/* resumo em markdown para o GitHub Actions ($GITHUB_STEP_SUMMARY) */
+export function summaryMd(rep, state = {}, lidas = null) {
+  const T = rep.total ?? {}, pc = x => x == null ? '—' : (x * 100).toFixed(1).replace('.', ',') + '%', b4 = x => x == null ? '—' : x.toFixed(4).replace('.', ',');
+  const ab = Object.values(state), kab = ab.filter(r => r.k != null).length;
+  const L = ['## 🧾 Placar da verdade', '',
+    `Leitura de agora: **${lidas ?? '—'}** linhas da 99play antes do jogo · abertas: **${ab.length}** (${kab} com Kalshi) · liquidadas agora: **${rep.liquidadas}** · anuladas: ${rep.anuladas}`, ''];
+  if (T.n) {
+    const ch = T.chance, bh = Object.keys(ch).find(k => k.startsWith('BH')), c = T.canal['EV 5%+ (simples do canal)'];
+    L.push(`Amostra: **${T.n}** linhas de ${T.de} a ${T.ate}`, '', '| Brier (menor = melhor) | 99play sem margem | BH | Modelo puro | Kalshi |', '|---|---|---|---|---|',
+      `| Tudo | ${b4(ch['99play sem margem'].brier)} | ${b4(ch[bh].brier)} | ${b4(ch['Modelo BH puro'].brier)} | — |`,
+      ...(T.kalshi?.n ? [`| Onde a Kalshi tem preço (${T.kalshi.n}) | ${b4(T.kalshi.chance['99play sem margem'])} | ${b4(T.kalshi.chance.BH)} | — | ${b4(T.kalshi.chance.Kalshi)} |`] : []), '',
+      '| Entradas | n | Previu | Acertou | ROI |', '|---|---|---|---|---|',
+      `| EV 5%+ do BH | ${c.n ?? 0} | ${pc(c.prev)} | ${pc(c.real)} | ${pc(c.roi)} |`,
+      ...['EV_k 2–4%', 'EV_k 4%+'].filter(k => T.kalshi?.[k]?.n).map(k => `| Valor contra a Kalshi ${k} | ${T.kalshi[k].n} | ${pc(T.kalshi[k].prev)} | ${pc(T.kalshi[k].real)} | ${pc(T.kalshi[k].roi)} |`),
+      ...(T.clv?.kalshi?.n ? [`| CLV contra a Kalshi (EV 5%+ na abertura) | ${T.clv.kalshi.n} | — | — | CLV médio ${pc(T.clv.kalshi.clvMedio)} |`] : []));
+  }
+  return L.join('\n') + '\n';
+}
+
 /* ---------- arquivos ---------- */
 const readJ = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return d; } };
 function loadDays(dir) {
@@ -224,7 +243,7 @@ async function main() {
   const dir = join(ROOT, 'data', 'auditoria'); mkdirSync(dir, { recursive: true });
   const fOpen = join(dir, 'abertas.json');
   const results = readJ(join(pub, 'data', 'results.json'), null);
-  let state, days;
+  let state, days, lidas = null;
   const bi = args.indexOf('--backfill');
   if (bi >= 0) {
     const since = args[bi + 1] && /^\d{4}-\d{2}-\d{2}$/.test(args[bi + 1]) ? args[bi + 1] : '2026-11-12';
@@ -246,8 +265,8 @@ async function main() {
     console.log(`backfill: ${n} coletas desde ${since}`);
   } else {
     state = readJ(fOpen, {}); days = loadDays(dir);
-    const n = observe(state, readJ(join(pub, 'data', 'slate.json'), null), readJ(join(pub, 'data', 'kalshi.json'), null));
-    console.log(`leitura de agora: ${n} linhas da 99play antes do jogo`);
+    lidas = observe(state, readJ(join(pub, 'data', 'slate.json'), null), readJ(join(pub, 'data', 'kalshi.json'), null));
+    console.log(`leitura de agora: ${lidas} linhas da 99play antes do jogo`);
   }
   const st = settle(state, results);
   saveDays(dir, st.days, days);
@@ -264,6 +283,8 @@ async function main() {
     const c = T.canal['EV 5%+ (simples do canal)'];
     console.log(`  EV 5%+: ${c.n} · previu ${pc(c.prev)} · acertou ${pc(c.real)} · ROI ${pc(c.roi)} | Kalshi: ${T.kalshi.n} linhas`);
   }
+  // resumo da rodada na página do GitHub Actions (aparece também no app do GitHub)
+  if (process.env.GITHUB_STEP_SUMMARY) try { appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd(rep, state, lidas)); } catch { }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e); process.exit(1); });

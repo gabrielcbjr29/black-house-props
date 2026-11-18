@@ -53,3 +53,20 @@ test('Placar: linha sem resultado vence depois de alguns dias', () => {
   assert.equal(settle(st, { upTo: '2026-11-15', stats: {} }).voids, 1, 'desiste');
   assert.deepEqual(st, {});
 });
+
+test('Placar: resumo da rodada em markdown para o GitHub Actions', async () => {
+  const { summaryMd } = await import('../scripts/auditoria.mjs');
+  const md = summaryMd({ liquidadas: 3, anuladas: 1, total: { n: 0 } }, { a: { k: .5 }, b: { k: null } }, 10);
+  assert.match(md, /Placar da verdade/); assert.match(md, /abertas: \*\*2\*\* \(1 com Kalshi\)/);
+});
+
+test('bot.json: chance da Kalshi no lado da linha (kp), só com a escada do mesmo dia', async () => {
+  const { buildBotData } = await import('../collector/botdata.js');
+  const base = buildBotData(slate, { w: .4 });
+  const r = base.rows.find(x => x.m === 'PTS'); assert.ok(r, 'tem linha de pontos no fixture');
+  const kalshi = { date: slate.meta.date, gen: slate.meta.generatedAt, list: [{ name: r.n, mk: 'PTS', lines: { [r.l]: .6 } }] };
+  const k = buildBotData(slate, { w: .4, kalshi }).rows.find(x => x.id === r.id && x.m === 'PTS');
+  assert.equal(k.kp, r.s === 'o' ? .6 : .4);
+  const velha = buildBotData(slate, { w: .4, kalshi: { ...kalshi, date: '2026-01-01' } }).rows.find(x => x.id === r.id && x.m === 'PTS');
+  assert.equal(velha.kp, undefined);
+});

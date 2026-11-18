@@ -27,7 +27,8 @@ if (state) try {
 } catch (e) { console.log('odds dos tops: falhou (' + e.message + ')'); }
 if (state) await saveState(STATE, state).catch(() => null);
 if (n || n99) writeFileSync(new URL('slate.json', dir), JSON.stringify(slate));
-const bot = buildBotData({ ...slate, prev }, { w: +(process.env.BOT_W || .4) });
+let kalshi = null; try { kalshi = JSON.parse(readFileSync(new URL('kalshi.json', dir), 'utf8')); } catch { }
+const bot = buildBotData({ ...slate, prev }, { w: +(process.env.BOT_W || .4), kalshi });
 writeFileSync(new URL('bot.json', dir), JSON.stringify(bot));
 // fábrica de estratégias: entradas do dia de cada estratégia (registradas em papel pela função estrategias)
 try {

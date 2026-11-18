@@ -1,0 +1,14 @@
+# Dependabot só para as actions dos workflows (checkout, setup-node, pages...): abre PR quando sai versão nova.
+# O projeto não tem dependências npm fixas (o playwright é instalado na hora com versão travada no workflow).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: actions

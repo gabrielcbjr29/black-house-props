@@ -36,19 +36,40 @@ async function sb(path: string, init: RequestInit = {}) {
   if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 120));
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
-const TG = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
+const tgRaw = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
+// horário com <tg-time> (cada um vê no próprio fuso); se a API recusar a marcação, reenvia com o horário em texto
+const noTime = (s: unknown) => typeof s === 'string' ? s.replace(/<tg-time[^>]*>([\s\S]*?)<\/tg-time>/g, '$1') : s;
+const TG = async (m: string, body: any) => {
+  const r = await tgRaw(m, body);
+  if (!r?.ok && body && (String(body.text ?? '').includes('<tg-time') || String(body.caption ?? '').includes('<tg-time'))) {
+    console.error('tg-time recusado:', r?.description);
+    return tgRaw(m, { ...body, ...(body.text != null ? { text: noTime(body.text) } : {}), ...(body.caption != null ? { caption: noTime(body.caption) } : {}) });
+  }
+  return r;
+};
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number; sq?: number[] };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number; sq?: number[]; kp?: number };
 type MStat = [number, number, number[], number | null];
 type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
 type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
 
 let CACHE: { at: number; data: Data } | null = null;
+// placar da verdade (scripts/auditoria.mjs → public/data/auditoria.json): só medição, alimenta o selo dos cards e o /placar
+let AUD: any = null, AUD_AT = 0;
+const GUTC = new Map<string, string>();
+async function loadAud() {
+  if (AUD && Date.now() - AUD_AT < 600_000) return AUD;
+  const url = (await cfg()).dataUrl.replace(/bot\.json.*$/, 'auditoria.json');
+  const a = await fetch(url + '?t=' + Math.floor(Date.now() / 600_000)).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (a?.total) { AUD = a; AUD_AT = Date.now(); }
+  return AUD;
+}
 async function data(): Promise<Data> {
   if (CACHE && Date.now() - CACHE.at < 120_000) return CACHE.data;
-  const r = await fetch((await cfg()).dataUrl + '?t=' + Math.floor(Date.now() / 120_000), { headers: { 'Cache-Control': 'no-cache' } });
+  const [r] = await Promise.all([fetch((await cfg()).dataUrl + '?t=' + Math.floor(Date.now() / 120_000), { headers: { 'Cache-Control': 'no-cache' } }), loadAud()]);
   if (!r.ok) throw new Error('dados indisponíveis (' + r.status + ')');
   CACHE = { at: Date.now(), data: await r.json() };
+  for (const g of CACHE.data.games ?? []) if (g.utc) GUTC.set(g.id, g.utc);
   return CACHE.data;
 }
 
@@ -215,7 +236,7 @@ Sem a linha, mostra a projeção e as linhas mais comuns.
     reg = `📒 Teste <b>#${r?.[0]?.id ?? ''}</b> registrado: confiro amanhã com o resultado (/testes).`;
   } catch (e) { reg = '<i>(não consegui registrar o teste agora)</i>'; }
   const mkCode = Object.keys(MK2STAT).find(k => MK2STAT[k] === STAT_KEY(st.k));
-  if (mkCode) back.inline_keyboard.unshift([BTN(`📝 Registrar ${side === 'o' ? 'mais' : 'menos'} de ${n1(line)} (1u)`, `bm:${pid}:${mkCode}:${line}:${side}`)]);
+  if (mkCode) back.inline_keyboard.unshift([BTN(`📝 Registrar ${side === 'o' ? 'mais' : 'menos'} de ${n1(line)} (1u)`, `bm:${pid}:${mkCode}:${line}:${side}`, 'success')]);
   return { text: head + `
 <b>${st.lb} · linha ${n1(line)}</b>
 <blockquote>Projeção <b>${n1(Math.round(dist.mu * 10) / 10)}</b>${szn != null ? `  ·  temporada ${n1(Math.round(szn * 10) / 10)}` : ''}
@@ -468,7 +489,7 @@ function pAt(d: Data, pid: string, stat: string, line: number, side: string) {
 const ODD_KB = (id: number) => ({ inline_keyboard: [
   ['1.50', '1.60', '1.70', '1.80'].map(o => BTN(o.replace('.', ','), `bo:${id}:${o}`)),
   ['1.85', '1.90', '2.00', '2.20'].map(o => BTN(o.replace('.', ','), `bo:${id}:${o}`)),
-  [BTN('❌ Cancelar', `bx:${id}`)]] });
+  [BTN('❌ Cancelar', `bx:${id}`, 'danger')]] });
 async function betStart(chatId: number, d: Data, r: Row, src: string): Promise<Out> {
   const stat = MK2STAT[r.m]; if (!stat) return { text: 'Esse mercado ainda não pode ser registrado.', kb: { inline_keyboard: [HOME] } };
   // cancela outro registro que ficou esperando odd
@@ -665,6 +686,8 @@ async function morningText(chatId: number, y: string, picks: any[], res: any) {
     parts.push(`<b>📈 Top 10 do Modelo BH</b>\n${[L('tent'), L('ra')].filter(Boolean).join('\n')}` + await topsResumo());
   }
   if (!parts.length) return null;
+  const pl = placarCurto(await loadAud());
+  if (pl) parts.push(pl);
   return `☀️ <b>RESULTADO DE ONTEM · ${dateBR(y)}</b>\n\n` + parts.join('\n\n') + `\n\n<i>* odd estimada (1,87): mercado sem odd nas nossas fontes. Hoje o resumo sai cerca de 2h30 antes do primeiro jogo.</i>`;
 }
 // gabarito das estratégias de um dia: confere cada entrada (1u na odd da 99play gravada) e mostra o acumulado de cada estratégia
@@ -701,6 +724,40 @@ async function estGabarito(y: string, res: any) {
   return text.length <= 4090 ? text : build(false);
 }
 // saúde do sistema: coleta, leitor da 99play, papel de hoje, inscritos
+// placar da verdade: linhas de fechamento da 99play × resultado (scripts/auditoria.mjs). Só medição.
+const br4 = (x: number | null | undefined) => x == null ? '–' : x.toFixed(4).replace('.', ',');
+const betLn = (b: any) => b?.n ? `previu ${pc(b.prev)} · acertou <b>${pc(b.real)}</b> · ROI <b>${pctS(b.roi)}</b> <i>(${b.n})</i>` : '<i>sem amostra</i>';
+export function placarText(a: any, ult7 = false): string | null {
+  const T = ult7 ? a?.ult7 : a?.total; if (!T?.n) return null;
+  const ch = T.chance ?? {}, bh = Object.keys(ch).find(k => k.startsWith('BH')) ?? '';
+  const L = [`🧾 <b>PLACAR DA VERDADE</b>${ult7 ? ' · últimos dias' : ''}`,
+    `<i>Fechamento da 99play × resultado · ${dm(T.de)} a ${dm(T.ate)} · ${T.n.toLocaleString('pt-BR')} linhas · atualizado ${hourBR(a.gen)}</i>`, '',
+    '<b>Quem prevê melhor</b> <i>(Brier: menor é melhor; moeda = 0,2500)</i>',
+    `99play sem margem <b>${br4(ch['99play sem margem']?.brier)}</b> · BH <b>${br4(ch[bh]?.brier)}</b> · modelo puro ${br4(ch['Modelo BH puro']?.brier)}`,
+    T.kalshi?.n ? `Onde a Kalshi tem preço (${T.kalshi.n}): Kalshi <b>${br4(T.kalshi.chance?.Kalshi)}</b> · 99play ${br4(T.kalshi.chance?.['99play sem margem'])} · BH ${br4(T.kalshi.chance?.BH)}` : '<i>Kalshi: ainda sem linha liquidada</i>',
+    T.melhorPeso ? `<i>Melhor peso do modelo na mistura: ${String(T.melhorPeso.w).replace('.', ',')} (o bot usa ${String(a.w).replace('.', ',')})</i>` : '', '',
+    '<b>EV do BH × acerto real</b> <i>(lado de maior EV, odd de fechamento)</i>',
+    ...(T.porEV ?? []).map((x: any) => `EV ${esc(x.faixa)}: ${betLn(x)}`), '',
+    '<b>Nota × acerto</b>', ...(T.porNota ?? []).map((x: any) => `${GRADE[x.nota] ?? x.nota}: ${betLn(x)}`), '',
+    `<b>Às cegas</b>: over ${pctS(T.cegas?.over?.roi ?? 0)} · under ${pctS(T.cegas?.under?.roi ?? 0)} · margem média da 99play ${pc(T.cegas?.margem ?? null)}`,
+    T.clv?.n ? `<b>CLV</b> (EV 5%+ na abertura, ${T.clv.n}): 99play andou a favor ${pc(T.clv['99play a favor'])} · contra ${pc(T.clv['99play contra'])} · ROI na abertura <b>${pctS(T.clv.roiAbertura)}</b>` : '',
+    T.clv?.kalshi?.n ? `<b>CLV contra a Kalshi</b> (${T.clv.kalshi.n}): médio <b>${pctS(T.clv.kalshi.clvMedio)}</b> · positivo em ${pc(T.clv.kalshi.positivo)}` : '<i>CLV contra a Kalshi: amostra ainda sendo juntada</i>',
+    ...(T.kalshi?.n ? ['', '<b>Valor contra a Kalshi</b> <i>(base do Alavanca)</i>', ...['EV_k 2–4%', 'EV_k 4%+'].map(k => `${k}: ${betLn(T.kalshi[k])}`)] : []), '',
+    '<b>Hipóteses em teste</b>', ...Object.entries(T.hipoteses ?? {}).map(([k, v]) => `${esc(k)}: ${betLn(v)}`), '',
+    '<i>Só medição: os métodos ficam como estão até a revisão de 24/11. Amostra curta engana; o que vale é a tendência ao longo das semanas.</i>'];
+  return L.filter((x, i, A) => x !== '' || A[i - 1] !== '').join('\n');
+}
+// resumo curto do placar (envio da manhã)
+function placarCurto(a: any): string {
+  const T = a?.total; if (!T?.n) return '';
+  const ch = T.chance ?? {}, bh = Object.keys(ch).find(k => k.startsWith('BH')) ?? '', c = T.canal?.['EV 5%+ (simples do canal)'];
+  return `<b>🧾 Placar da verdade</b> <i>(${T.n.toLocaleString('pt-BR')} linhas, ${dm(T.de)}–${dm(T.ate)})</i>\nBrier 99play ${br4(ch['99play sem margem']?.brier)} · BH ${br4(ch[bh]?.brier)}${T.kalshi?.n ? ` · Kalshi ${br4(T.kalshi.chance?.Kalshi)}` : ''}${c?.n ? `\nEV 5%+: previu ${pc(c.prev)} · acertou <b>${pc(c.real)}</b> · ROI ${pctS(c.roi)}` : ''}`;
+}
+async function placarCmd(arg?: string): Promise<Out> {
+  const a = await loadAud(), ult7 = arg === '7';
+  const text = placarText(a, ult7) ?? '🧾 <b>Placar da verdade</b>\nAinda sem linhas liquidadas. O placar enche sozinho a cada coleta.';
+  return { text, kb: { inline_keyboard: [[ult7 ? BTN('📚 Tudo', '/placar') : BTN('📅 Últimos 7 dias', '/placar 7'), { text: '📈 No app', url: APP_URL + '#placar' }], HOME] } };
+}
 async function statusCmd(): Promise<Out> {
   const ago = (iso?: string | null) => { if (!iso) return null; const m = Math.round((Date.now() - Date.parse(iso)) / 6e4); return m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`; };
   const [d, snap, picks, subs] = await Promise.all([
@@ -728,7 +785,7 @@ async function gabaritoCmd(): Promise<Out> {
   if (!res?.dates?.includes(y)) return { text: `Os resultados de ${dateBR(y)} ainda não saíram (a coleta das 10h traz). Tente mais tarde.`, kb };
   return { text: (await estGabarito(y, res)) ?? `Nenhuma entrada de estratégia gravada em ${dateBR(y)}.`, kb };
 }
-const MORNING_KB = () => ({ inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🧪 Gabarito das estratégias', '/gabarito')], [BTN('🧠 Modelo BH', '/modelobh'), BTN('🏠 Menu', '/menu')]] });
+const MORNING_KB = () => ({ inline_keyboard: [[BTN('💼 Minha banca', '/banca'), BTN('🧪 Gabarito das estratégias', '/gabarito')], [BTN('🧾 Placar da verdade', '/placar'), BTN('🧠 Modelo BH', '/modelobh')], [BTN('🏠 Menu', '/menu')]] });
 async function ontemCmd(chatId: number): Promise<Out> {
   const y = etDate(Date.now() - 864e5), res = await getResults();
   if (!res?.dates?.includes(y)) return { text: `Os resultados de ${dateBR(y)} ainda não saíram (a coleta das 10h traz). Tente mais tarde.`, kb: MORNING_KB() };
@@ -780,7 +837,7 @@ async function morningPush(force = false) {
 const hitTxt = (h?: [number, number] | null) => h?.[1] ? `<b>${h[0]}/${h[1]}</b>` : '–';
 
 type Out = { text: string; kb?: unknown; force?: boolean };
-const BTN = (text: string, data: string) => ({ text, callback_data: data.slice(0, 64) });
+const BTN = (text: string, data: string, style?: 'success' | 'danger' | 'primary') => ({ text, callback_data: data.slice(0, 64), ...(style ? { style } : {}) });
 const HOME = [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', 'r:1:/menu')];
 const home = (cmd: string, pg = 1) => [BTN('🏠 Menu', '/menu'), BTN('🔄 Atualizar', `r:${pg}:${cmd}`)];
 
@@ -788,6 +845,27 @@ const sideW = (r: Row) => r.s === 'o' ? 'acima' : 'abaixo';
 // "sem o colega" em uma linha (só quando há 2+ jogos reais sem ele)
 const woTxt = (r: Row) => r.wo ? `🚑 ${r.wo.x ? 'Sem' : 'Se faltar,'} ${esc(r.wo.q)}${r.wo.x ? '' : ' (em dúvida)'}: <b>${r.wo.h[0]}/${r.wo.h[1]}</b> ${sideW(r)} · média ${n1(r.wo.a)}` : '';
 const edTxt = (r: Row) => r.ed == null ? '' : ` · vantagem <b>${r.ed >= 0 ? '+' : '−'}${n1(Math.abs(r.ed))}</b>`;
+// selo de evidência: a chance da Kalshi (preço afiado) e quanto a faixa de EV desta entrada acertou de verdade no placar
+const EVB: [number, number, string][] = [[-9, 0, '< 0'], [0, .03, '0–3%'], [.03, .05, '3–5%'], [.05, .08, '5–8%'], [.08, .12, '8–12%'], [.12, 9, '12%+']];
+const dm = (d: string) => d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '';
+export function selo(r: Row, aud: any = AUD, curto = false) {
+  const L: string[] = [];
+  if (curto) {
+    const nm = r.e == null ? null : (EVB.find(([lo, hi]) => r.e! >= lo && r.e! < hi) ?? EVB[0])[2];
+    const b = nm ? aud?.total?.porEV?.find((x: any) => x.faixa === nm) : null;
+    const t = [r.kp != null && r.kp > 0 ? `🏛️ Kalshi <b>${pc(r.kp)}</b>` : '', b?.n >= 30 ? `🧾 faixa acertou <b>${pc(b.real)}</b> (previu ${pc(b.prev)})` : ''].filter(Boolean);
+    return t.length ? '\n' + t.join(' · ') : '';
+  }
+  if (r.kp != null && r.kp > 0) L.push(`🏛️ Kalshi <b>${pc(r.kp)}</b> · odd justa @${n2(1 / r.kp)}${r.d ? ` · valor vs Kalshi <b>${pctS(r.kp * r.d - 1)}</b>` : ''}`);
+  if (aud?.total && r.e != null) {
+    const nm = (EVB.find(([lo, hi]) => r.e! >= lo && r.e! < hi) ?? EVB[0])[2];
+    const b7 = aud.ult7?.porEV?.find((x: any) => x.faixa === nm), bt = aud.total.porEV?.find((x: any) => x.faixa === nm);
+    const [b, j] = b7?.n >= 100 ? [b7, `${aud.ult7.dias} dias`] : bt?.n >= 30 ? [bt, `desde ${dm(aud.total.de)}`] : [null, ''];
+    if (b) L.push(`🧾 Placar EV ${esc(nm)}: previu ${pc(b.prev)} · acertou <b>${pc(b.real)}</b> · ROI ${pctS(b.roi)} <i>(${b.n} entradas, ${j})</i>${b.real < b.prev - .04 ? ' ⚠️ <i>otimista</i>' : ''}`);
+  }
+  return L.length ? '\n' + L.join('\n') : '';
+}
+const hora = (r: Row) => { const u = GUTC.get(r.g); return u ? `<tg-time unix="${Math.floor(Date.parse(u) / 1000)}" format="t">${r.h}</tg-time>` : r.h; };
 function card(r: Row, i: number) {
   const over = r.s === 'o';
   const side = over ? '⬆️ <b>Mais de ' + n1(r.l) + '</b>' : '⬇️ <b>Menos de ' + n1(r.l) + '</b>';
@@ -812,10 +890,10 @@ ${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.s
   if (!r.wn && r.e != null && r.e > .15) wn.push('⚠️ <i>Muito acima do mercado: confira notícias</i>');
   if (r.st === 'questionable' && !wn.some(t => t.includes('dúvida'))) wn.push('🟡 <i>Jogador em dúvida</i>');
   const why = [...wy, ...wn];
-  return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
+  return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${hora(r)}</i>
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${need(r.d)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
-${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
+${odd}${ev}${selo(r)}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
 }
 // cartão das listas (visual de antes)
@@ -840,10 +918,10 @@ function listCard(r: Row, i: number) {
   if (!r.wn && r.e != null && r.e > .15) wn.push('⚠️ <i>Muito acima do mercado: confira notícias</i>');
   if (r.st === 'questionable' && !wn.some(t => t.includes('dúvida'))) wn.push('🟡 <i>Jogador em dúvida</i>');
   const why = [...wy, ...wn];
-  return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${r.h}</i>
+  return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${hora(r)}</i>
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${need(r.d)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
-${odd}${ev}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
+${odd}${ev}${selo(r, AUD, true)}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${def}${duvida(r)}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
 }
 function header(d: Data, title: string, extra = '') {
@@ -860,7 +938,7 @@ function list(d: Data, rows: Row[], title: string, n: number, cmd: string, page 
     const k = Math.min(all.length, -page), r = all[k - 1], pg = Math.ceil(k / PAGE);
     const nav = [k > 1 ? BTN('‹ Anterior', `x:${k - 1}:${cmd}`) : null, BTN('☰ Lista', `p:${pg}:${cmd}`), k < all.length ? BTN('Próxima ›', `x:${k + 1}:${cmd}`) : null].filter(Boolean) as { text: string; callback_data: string }[];
     return { text: header(d, title, note) + '\n' + card(r, k) + '\n' + FOOT,
-      kb: { inline_keyboard: [[BTN('📝 Registrar (1u)', `be:${keyOf(r)}:${src}`), ...(r.cd ? [BTN('🖼️ Card', `i:${keyOf(r)}`)] : [])], [{ text: '📋 Copiar para inscritos', copy_text: { text: shareText(r).slice(0, 256) } }], nav, [BTN('🏠 Menu', '/menu')]] } };
+      kb: { inline_keyboard: [[BTN('📝 Registrar (1u)', `be:${keyOf(r)}:${src}`, 'success'), ...(r.cd ? [BTN('🖼️ Card', `i:${keyOf(r)}`)] : [])], [{ text: '📋 Copiar para inscritos', copy_text: { text: shareText(r).slice(0, 256) } }], nav, [BTN('🏠 Menu', '/menu')]] } };
   }
   const pages = Math.ceil(all.length / PAGE), pg = Math.max(1, Math.min(pages, page));
   const slice = all.slice((pg - 1) * PAGE, pg * PAGE);
@@ -930,6 +1008,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /ontem · resultado de ontem (chega sozinho de manhã)
 /estrategias · modelo por mercado: placar e entradas do dia
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
+/placar · placar da verdade: modelo × 99play × Kalshi no fechamento · /placar 7
 /status · saúde do sistema: coleta, leitor da 99play, papel de hoje
 /app · app completo
 
@@ -952,7 +1031,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')], [BTN('🎯 Odd mínima', '/odd')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('🎯 Pauta do Tipster', '/pauta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('🎯 Pauta do Tipster', '/pauta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -994,6 +1073,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
+  if (cmd === 'placar' || cmd === 'verdade') return placarCmd(rest[0]);
   if (cmd === 'canal' || cmd === 'canais') return canaisCmd(chatId, arg);
   if (cmd === 'escadas' || cmd === 'escada') return escadasCmd(arg);
   if (cmd === 'cn') return cnCmd(chatId, rest);
@@ -1750,7 +1830,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos e erros'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

@@ -1,0 +1,63 @@
+# Deploy das funções do Supabase (bot, canal, estratégias, c99-ingest) direto do GitHub.
+# Cada função deployada é o index.ts de uma linha que carrega o código do commit:
+#   import 'https://raw.githubusercontent.com/<repo>/<hash>/bot/<pasta>/index.ts';
+# Roda sozinho quando um push no main mexe em bot/** (só as funções que mudaram) ou na mão, em "Run workflow".
+# Precisa do secret SUPABASE_ACCESS_TOKEN (supabase.com → Account → Access Tokens). Sem ele, o job só avisa.
+# Para exigir aprovação de um clique antes de cada deploy: Settings → Environments → producao → Required reviewers.
+name: Deploy das funções (Supabase)
+
+on:
+  push:
+    branches: [main]
+    paths: ['bot/**']
+  workflow_dispatch:
+    inputs:
+      funcoes:
+        description: 'Pastas de bot/ (ex.: telegram canal). Vazio = as que mudaram no último commit'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-funcoes
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: producao
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: brtexfomhlvltdsuezsi
+      FN_IN: ${{ inputs.funcoes }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - name: Sem token, sem deploy
+        if: env.SUPABASE_ACCESS_TOKEN == ''
+        run: echo "::warning::Crie o secret SUPABASE_ACCESS_TOKEN para o deploy automático. Nada foi deployado."
+      - uses: supabase/setup-cli@v1
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        with:
+          version: latest
+      - name: Deploy das funções que mudaram
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          FN="$FN_IN"
+          [ -n "$FN" ] || FN=$(git diff --name-only HEAD~1 HEAD -- bot/ | cut -d/ -f2 | sort -u | tr '\n' ' ')
+          mkdir -p supabase && printf 'project_id = "black-house-props"\n' > supabase/config.toml
+          echo "## Deploy das funções · \`${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
+          for f in $FN; do
+            [[ "$f" =~ ^[a-z0-9-]+$ ]] && [ -f "bot/$f/index.ts" ] || { echo "pulei: $f"; continue; }
+            slug="$f"; [ "$f" = telegram ] && slug=telegram-bot
+            mkdir -p "supabase/functions/$slug"
+            echo "import 'https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/bot/$f/index.ts';" > "supabase/functions/$slug/index.ts"
+            supabase functions deploy "$slug" --project-ref "$PROJECT_REF" --no-verify-jwt
+            echo "- \`$slug\` ✅" >> "$GITHUB_STEP_SUMMARY"
+          done
