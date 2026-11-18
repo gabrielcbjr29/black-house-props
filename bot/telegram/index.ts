@@ -39,6 +39,22 @@ async function sb(path: string, init: RequestInit = {}) {
 const tgRaw = async (m: string, body: unknown) => { const c = await cfg(); return fetch(`https://api.telegram.org/bot${c.token}/${m}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); };
 // horário com <tg-time> (cada um vê no próprio fuso); se a API recusar a marcação, reenvia com o horário em texto
 const noTime = (s: unknown) => typeof s === 'string' ? s.replace(/<tg-time[^>]*>([\s\S]*?)<\/tg-time>/g, '$1') : s;
+// corta um HTML do Telegram no limite de 4096 sem quebrar marcação (18/11: a lista de lances livres tentados passou
+// do limite, o corte cego deixava um <i> aberto e o Telegram recusava a mensagem inteira). Corta no fim do último
+// cartão completo (</blockquote>) ou da última linha, e fecha as tags que ficaram abertas.
+function fitHTML(s: string, max = 4090): string {
+  if (!s || s.length <= max) return s;
+  const lim = max - 120;
+  let cut = s.lastIndexOf('</blockquote>', lim);
+  if (cut > lim / 2) cut += '</blockquote>'.length; else { cut = s.lastIndexOf('\n', lim); if (cut < lim / 2) cut = lim; }
+  const t = s.slice(0, cut).replace(/<[^>]*$/, '').replace(/&[a-z#0-9]*$/i, '');
+  const open: string[] = [];
+  for (const m of t.matchAll(/<(\/?)([a-z][a-z0-9-]*)[^>]*>/gi)) {
+    const tag = m[2].toLowerCase(); if (m[0].endsWith('/>')) continue;
+    if (m[1]) { const i = open.lastIndexOf(tag); if (i >= 0) open.splice(i, 1); } else open.push(tag);
+  }
+  return t + open.reverse().map(x => `</${x}>`).join('') + '\n<i>… (mensagem cortada pelo limite do Telegram; use 🔎 para ver cada entrada)</i>';
+}
 const TG = async (m: string, body: any) => {
   const r = await tgRaw(m, body);
   if (!r?.ok && body && (String(body.text ?? '').includes('<tg-time') || String(body.caption ?? '').includes('<tg-time'))) {
@@ -419,7 +435,7 @@ async function pushDaily(force = false, minHour = 0, lead = 0) {
     for (const k of ['tent', 'ra'] as const) {
       if (!s[k] || !txt[k]) continue;
       const regs = T10[k].map((r, i) => BTN(`📝${i + 1}`, `bet:${keyOf(r)}:${k}`));
-      const r = await TG('sendMessage', { chat_id: s.chat_id, text: txt[k]!.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true,
+      const r = await TG('sendMessage', { chat_id: s.chat_id, text: fitHTML(txt[k]!), parse_mode: 'HTML', disable_web_page_preview: true,
         reply_markup: { inline_keyboard: [...chunk(regs, 5), [BTN('📋 Ver com detalhes', MT[k].cmd), BTN('📤 Texto p/ inscritos', 'cp:' + k)], [BTN('💼 Banca', '/banca')], [BTN('📬 Envio diário', '/receber'), BTN('🏠 Menu', '/menu')]] } });
       if (r.ok) sent++;
       await new Promise(res => setTimeout(res, 60));
@@ -821,7 +837,7 @@ async function morningPush(force = false) {
   for (const c of chats) {
     const text = await morningText(c, y, subs.some(x => +x.chat_id === c && (x.tent || x.ra)) ? picks : [], res);
     if (text) {
-      const r = await TG('sendMessage', { chat_id: c, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: quiet, reply_markup: MORNING_KB() });
+      const r = await TG('sendMessage', { chat_id: c, text: fitHTML(text), parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: quiet, reply_markup: MORNING_KB() });
       if (r.ok) sent++;
       await new Promise(ok => setTimeout(ok, 60));
     }
@@ -1228,7 +1244,7 @@ async function sendPauta(chatId: number, demo = false) {
   const next = d.games.map(g => g.utc ? Date.parse(g.utc) : NaN).filter(t => t > now).sort((a, b) => a - b)[0];
   const head = `<b>🎯 PAUTA DO TIPSTER${demo ? ' · EXEMPLO' : ''}</b>${demo ? '\n<i>(montada como se fosse 2h antes do primeiro jogo de hoje)</i>' : ''}\n<i>${dateBR(d.date)} · ${next ? `próximo jogo às ${hourBR(new Date(next).toISOString())}` : 'sem jogo por começar'} · atualizado ${hourBR(d.gen)}</i>`;
   const kb = { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta'), BTN('🪜 Escadas', '/escadas')], HOME] };
-  const send = (text: string, k?: any) => TG('sendMessage', { chat_id: chatId, text: text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, ...(k ? { reply_markup: k } : {}) });
+  const send = (text: string, k?: any) => TG('sendMessage', { chat_id: chatId, text: fitHTML(text), parse_mode: 'HTML', disable_web_page_preview: true, ...(k ? { reply_markup: k } : {}) });
   if (!P.singles.length && !esc3.length) { await send(head + '\n\nSem entradas para a pauta agora: os jogos já começaram ou a 99play ainda não tem as linhas (o leitor precisa estar lendo).', kb); return; }
   // 1) simples
   await send(head + `\n<i>Escolhidas por sequência e matchup (não por EV), com o Modelo BH concordando. Linhas e odds da 99play. "Precisa" = acerto mínimo para não perder com aquela odd.</i>\n\n<b>🔥 ${P.singles.length} SIMPLES</b>\n\n` +
@@ -1767,7 +1783,7 @@ async function handle(update: any) {
   if (cpm) {
     if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
     const d = await data().catch(() => null);
-    await TG('sendMessage', { chat_id: chatId, text: d ? shareList(d, cpm[1], await userMin(chatId)).slice(0, 4090) : 'Não consegui ler os dados agora.', parse_mode: 'HTML', disable_web_page_preview: true });
+    await TG('sendMessage', { chat_id: chatId, text: d ? fitHTML(shareList(d, cpm[1], await userMin(chatId))) : 'Não consegui ler os dados agora.', parse_mode: 'HTML', disable_web_page_preview: true });
     return;
   }
   // card em imagem de uma entrada (botão 🖼️ das listas)
@@ -1785,7 +1801,7 @@ async function handle(update: any) {
   if (!text.startsWith('/')) { await TG('sendMessage', { chat_id: chatId, text: 'Escolha abaixo ou digite /ajuda.', reply_markup: MENU }); return; }
   let res: Out;
   try { res = await answer(text, chatId, page); } catch (e) { res = { text: 'Não consegui ler os dados agora (' + esc(String((e as Error).message)) + '). Tente de novo em instantes.', kb: { inline_keyboard: [HOME] } }; }
-  const body = { chat_id: chatId, text: res.text.slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, ...(res.kb ? { reply_markup: res.kb } : {}) };
+  const body = { chat_id: chatId, text: fitHTML(res.text), parse_mode: 'HTML', disable_web_page_preview: true, ...(res.kb ? { reply_markup: res.kb } : {}) };
   // botão: troca o conteúdo da mesma mensagem (navegação fluida); comando digitado: mensagem nova
   if (cq) {
     const r = await TG('editMessageText', { ...body, message_id: msg.message_id });
