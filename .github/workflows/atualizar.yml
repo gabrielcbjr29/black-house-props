@@ -38,7 +38,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
       - uses: actions/setup-node@v5
@@ -108,7 +108,7 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       # pega a versão mais nova (com os dados que a coleta acabou de salvar)
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
       - uses: actions/configure-pages@v5

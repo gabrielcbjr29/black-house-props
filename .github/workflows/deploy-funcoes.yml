@@ -34,7 +34,7 @@ jobs:
       PROJECT_REF: brtexfomhlvltdsuezsi
       FN_IN: ${{ inputs.funcoes }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
       - name: Sem token, sem deploy
