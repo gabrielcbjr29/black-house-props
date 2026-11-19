@@ -7,6 +7,7 @@ import { topOdds, mergeTopLines } from './topodds.js';
 import { loadState, saveState } from './oddsplan.js';
 import { fetch99, merge99 } from './casa99.js';
 import { pickStrategies } from './strategies.js';
+import { buildCombo } from './combo.js';
 const dir = new URL('../public/data/', import.meta.url);
 const STATE = new URL('../data/odds-state.json', import.meta.url).pathname;
 const slate = JSON.parse(readFileSync(new URL('slate.json', dir), 'utf8'));
@@ -38,4 +39,7 @@ try {
   writeFileSync(new URL('strategies.json', dir), JSON.stringify(st));
   console.log('estratégias: ' + st.strategies.map(s => `${s.id} ${st.picks.filter(p => p.strategy_id === s.id).length}`).join(' · '));
 } catch (e) { console.log('estratégias: falhou (' + e.message + ')'); }
+// /combo (19/11): escada de rebotes/assistências da Finta por jogador + últimos 20 jogos; a escada da 99play entra no bot
+try { const C = buildCombo(slate, finta); if (C) { writeFileSync(new URL('combo.json', dir), JSON.stringify(C)); console.log(`combo.json: ${C.players.length} jogadores`); } }
+catch (e) { console.log('combo.json: falhou (' + e.message + ')'); }
 console.log(`bot.json refeito com o Modelo BH: ${bot.rows.length} linhas, modelo em ${Object.keys(slate.model?.players || {}).length} jogadores`);

@@ -10,6 +10,7 @@
 //
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
+import { parseLadder99, combosOf, normName as nName } from '../../public/ladder99.js';
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
 type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; dom99: string; dom365: string; at: number };
 let CFG: Cfg | null = null;
@@ -671,6 +672,57 @@ async function vereditoCmd(arg = ''): Promise<Out> {
   const text = `<b>⚖️ VEREDITO PELO FECHAMENTO · ${tit}</b>\n<i>O papel julgado pelo CLV: quanto a odd da 99play andou a nosso favor até o jogo, em pontos de chance. Com poucas centenas de entradas o green/red ainda é sorte; o CLV mostra antes se o método pega valor.</i>\n\n${body}\n\n<i>🟢 bate o fechamento (t ≥ 2) · 🟡 sem prova ainda · 🔴 atrás do fechamento (t ≤ −2) · ⚪ cedo demais (menos de 30 leituras). ROI ± = faixa de sorte: se cruza o zero, o lucro ainda não prova nada.</i>`;
   return { text: fitHTML(text), kb: { inline_keyboard: [[BTN(mode === 'metodo' ? '• Métodos' : 'Métodos', '/veredito'), BTN(mode === 'faixa' ? '• Faixa de valor' : 'Faixa de valor', '/veredito faixa'), BTN(mode === 'mercado' ? '• Estratégias' : 'Estratégias', '/veredito mercado')], [BTN('🧪 Placar', '/estrategias'), { text: '📈 No app', url: APP_URL + '#placar' }], [HOME[0]]] } };
 }
+// ---------- /combo (19/11): escada de rebotes e assistências da Finta × marcos da 99play, só odd 15+ na Finta ----------
+// Abas: 🎯 Ast + Reb (principal) · ➕ Ast/Reb + duplo-duplo · 🔺 Ast + Reb + triplo-duplo. A escada da Finta vem do
+// combo.json (coleta); a da 99play, da última foto do leitor (marcos 5+/7+/10+, desde o leitor 1.2), lida na hora.
+// Odd do combo nas duas casas = produto das pernas × K (combo.json K), até as capturas do Criar Aposta calibrarem.
+let C99L: { at: number; snap: string | null; by: Record<string, any> } | null = null;
+async function lad99() {
+  if (C99L && Date.now() - C99L.at < 60_000) return C99L;
+  const j: any = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?latest=1').then(r => r.ok ? r.json() : null).catch(() => null);
+  C99L = { at: Date.now(), snap: j?.taken_at ?? null, by: j?.payload ? parseLadder99(j.payload) : {} }; return C99L;
+}
+const CB_LB: Record<string, string> = { AST: 'Ast', REB: 'Reb', DD: 'Duplo-duplo', TD: 'Triplo-duplo' };
+const legTxt = (l: any) => l.line == null ? CB_LB[l.mk] : `${CB_LB[l.mk]} ${n1(l.line)}+`;
+const marco = (l: any) => l.line == null ? CB_LB[l.mk] : `${CB_LB[l.mk]} ${Math.round(l.line + .5)}+`;
+async function comboCmd(chatId: number, rest: string[]): Promise<Out> {
+  const TABS: Record<string, string> = { ar: '🎯 Ast + Reb', dd: '➕ Duplo-duplo', td: '🔺 Triplo-duplo' };
+  let tipo = 'ar', a = [...rest];
+  if (a[0] === 'ler') {
+    if (!(await isAdmin(chatId))) return { text: 'Só o administrador pede leitura da 99play.', kb: { inline_keyboard: [HOME] } };
+    await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'C99_PEDIDO', value: new Date().toISOString() }) }).catch(() => null);
+    C99L = null;
+    const back = a.slice(1).join(' ');
+    return { text: '🔵 <b>Pedido enviado.</b> Com a aba da 99play aberta no PC, o leitor lê em até 1 minuto (leva mais ~1 min para ler todos os jogos). Toque em <b>Atualizar</b> daqui a 2 minutos.', kb: { inline_keyboard: [[BTN('🔄 Atualizar', ('/combo ' + back).slice(0, 60))], HOME] } };
+  }
+  if (TABS[a[0]]) tipo = a.shift()!;
+  const q = a.join(' ').trim();
+  if (!q) return { text: '<b>🟣 COMBO FINTA × 99PLAY</b>\nDigite o jogador: <code>/combo lebron</code>\nMostra as combinações de assistências e rebotes (e com duplo/triplo-duplo) que pagam <b>15+ na Finta</b>, e a mesma entrada na 99play.', kb: { inline_keyboard: [HOME] } };
+  const C: any = await fetch(APP_URL + 'data/combo.json?t=' + Math.floor(Date.now() / 120_000)).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!C?.players?.length) return { text: 'A escada da Finta de hoje ainda não foi lida. Ela entra com a coleta (de hora em hora).', kb: { inline_keyboard: [HOME] } };
+  const nq = nName(q);
+  let found = /^\d+$/.test(q) ? C.players.filter((p: any) => p.id === q) : C.players.filter((p: any) => p.k.includes(nq));
+  if (!found.length) return { text: `Não achei <b>${esc(q)}</b> com escada de rebotes/assistências na Finta hoje.`, kb: { inline_keyboard: [HOME] } };
+  if (found.length > 1 && !found.some((p: any) => p.k === nq)) return { text: `Achei ${found.length} jogadores. Qual?`, kb: { inline_keyboard: [...chunk(found.slice(0, 10).map((p: any) => BTN(`${p.n} (${p.t})`, `/combo ${tipo} ${p.id}`)), 2), HOME] } };
+  const P = found.find((p: any) => p.k === nq) ?? found[0];
+  const L9 = await lad99(), lad = L9.by[P.k] ?? null;
+  const list = combosOf(P, tipo, lad, C.K, C.min);
+  const pc0 = (x: number) => Math.round(Math.abs(x) * 100) + '%';
+  const item = (x: any, i: number) => {
+    const fin = x.legs.map((l: any) => n2(l.fo)).join(' × ');
+    const miss = x.legs.filter((l: any) => !(l.o99 > 1)).map(marco);
+    const l99 = x.n99 ? `🔵 99play ${x.legs.map((l: any) => n2(l.o99)).join(' × ')} ≈ <b>@${n2(x.n99)}</b>\n   ➜ ${Math.abs(x.dif) < .005 ? 'mesma odd nas duas' : x.dif > 0 ? `<b>Finta paga ${pc0(x.dif)} a mais</b>` : `<b>99play paga ${pc0(1 / (1 + x.dif) - 1)} a mais</b>`}`
+      : `🔵 99play: ${miss.length === x.legs.length ? 'nenhuma perna lida' : `${esc(miss.join(', '))} não lido`}${lad ? '' : ' <i>(sem a escada do leitor 1.2+)</i>'}`;
+    return `<b>${i + 1}. ${x.legs.map(legTxt).join(' e ')}</b>\n   🟣 Finta ${fin} ≈ <b>@${n2(x.fin)}</b>\n   ${l99}\n   📊 Bateu ${x.h10}/${x.n10} · ${x.h20}/${x.n20}`;
+  };
+  const vazio = tipo === 'td' && !P.legs.TD ? `A Finta não oferece triplo-duplo de ${esc(P.n)} hoje.` : tipo === 'dd' && !P.legs.DD ? `A Finta não oferece duplo-duplo de ${esc(P.n)} hoje.` : `Nenhuma combinação dessa aba paga 15+ na Finta.`;
+  const hdr = `<b>🟣 COMBO · ${esc(P.n)}</b>  <i>${P.home ? `${P.t} x ${P.o}` : `${P.t} @ ${P.o}`} · ${P.h}</i>${P.st && P.st !== 'ok' ? ' 🟡' : ''}\n${TABS[tipo]} · só odd 15+ na Finta\n<i>Finta ${C.fg ? hourBR(C.fg) : '–'} · 99play ${L9.snap ? hourBR(L9.snap) : '–'}</i>`;
+  const body = list.length ? `<blockquote>${list.slice(0, 8).map(item).join('\n\n')}</blockquote>${list.length > 8 ? `\n<i>+${list.length - 8} combinações 15+ (as 8 que mais bateram nos últimos 20)</i>` : ''}` : `\n${vazio}`;
+  const nota = `\n<i>Odd do combo estimada: produto das pernas × ${n2(C.K.finta)} na Finta e × ${n2(C.K['99play'])} na 99play (as casas descontam a correlação). Marco 7+ na 99play = mais de 6,5 na Finta.</i>`;
+  const tabs = Object.entries(TABS).map(([k, lb]) => BTN((k === tipo ? '• ' : '') + lb, `/combo ${k} ${P.id}`));
+  const adm = await isAdmin(chatId);
+  return { text: fitHTML(hdr + '\n' + body + nota), kb: { inline_keyboard: [tabs, [...(adm ? [BTN('🔵 Ler 99play agora', `/combo ler ${tipo} ${P.id}`)] : []), BTN('🔄 Atualizar', `/combo ${tipo} ${P.id}`)], [BTN('🏠 Menu', '/menu')]] } };
+}
 // ---------- Histórico automático do top 10 e resultado da manhã ----------
 const etDate = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 async function getResults() { return fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 300_000)).then(r => r.ok ? r.json() : null).catch(() => null); }
@@ -1061,6 +1113,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /estrategias · modelo por mercado: placar e entradas do dia
 /minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
 /veredito · Veredito pelo fechamento (CLV) de cada método, lado e faixa de valor
+/combo · Combo Finta × 99play de um jogador: ast + reb (e duplo/triplo-duplo) 15+ na Finta (ex.: /combo lebron)
 /finta · overs da Finta com valor (linha principal e escada)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
 /placar · placar da verdade: modelo × 99play × Kalshi no fechamento · /placar 7
@@ -1146,8 +1199,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     if (!(await isAdmin(chatId))) return { text: 'Comando só do administrador.', kb: { inline_keyboard: [HOME] } };
     const tok = (await sb('bot_config?key=eq.C99_TOKEN&select=value').catch(() => null))?.[0]?.value;
     if (!tok) return { text: 'Token do leitor não encontrado.', kb: { inline_keyboard: [HOME] } };
-    const link = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest/leitor99.user.js?token=${encodeURIComponent(tok)}`;
-    return { text: `<b>🔵 LEITOR DA 99PLAY</b>\nAbra o link abaixo no Chrome do PC (onde está o Tampermonkey) e toque em <b>Atualizar</b>/<b>Instalar</b>. Depois disso ele se atualiza sozinho.\n\n${esc(link)}\n\n<i>Não compartilhe: o link tem a chave do leitor.</i>`, kb: { inline_keyboard: [[{ text: '📥 Abrir o link', url: link }], HOME] } };
+    const base = 'https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest/', link = `${base}leitor99.user.js?token=${encodeURIComponent(tok)}`, fin = `${base}finta.user.js?token=${encodeURIComponent(tok)}`;
+    return { text: `<b>🔵 SCRIPTS DO NAVEGADOR</b>\nAbra os links no Chrome do PC (onde está o Tampermonkey) e toque em <b>Instalar</b>/<b>Atualizar</b>. Depois disso eles se atualizam sozinhos.\n\n<b>1. Leitor da 99play</b> (linhas, escada de marcos, Criar Aposta)\n${esc(link)}\n\n<b>2. Finta</b> (odd do Criador de Aposta)\n${esc(fin)}\n\n<i>Não compartilhe: os links têm a chave do leitor.</i>`, kb: { inline_keyboard: [[{ text: '📥 Leitor 99play', url: link }, { text: '📥 Finta', url: fin }], HOME] } };
   }
   if (cmd === 'placar' || cmd === 'verdade') return placarCmd(rest[0]);
   if (cmd === 'canal' || cmd === 'canais') return canaisCmd(chatId, arg);
@@ -1188,10 +1241,13 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     const g = d.games.find(x => x.a === q || x.h === q); if (!g) return { text: `Não achei jogo hoje com <b>${esc(q)}</b>. Escolha abaixo:`, kb: pickKb };
     return list(d, d.rows.filter(r => r.g === g.id), `🏟️ ${g.a} @ ${g.h} · ${g.t}`, 16, raw, page);
   }
+  if (cmd === 'combo' || cmd === 'combos') return comboCmd(chatId, rest);
   if (cmd === 'jogador') {
     const q = norm(arg); if (q.length < 3) return { text: 'Digite o nome assim: <code>/jogador brunson</code>', kb: { inline_keyboard: [HOME] } };
     const rows = d.rows.filter(r => norm(r.n).includes(q)); if (!rows.length) return { text: `Nenhuma linha boa hoje para <b>${esc(arg)}</b>.`, kb: { inline_keyboard: [HOME] } };
-    return list(d, rows, '👤 ' + rows[0].n.toUpperCase(), 12, raw, page, false);
+    const o = list(d, rows, '👤 ' + rows[0].n.toUpperCase(), 12, raw, page, false);
+    o.kb.inline_keyboard.unshift([BTN('🟣 Combo Finta 15+ (Ast · Reb · DD)', ('/combo ' + rows[0].id).slice(0, 60))]);
+    return o;
   }
   if (cmd === 'multipla') return multipla(d, rest[0], om);
   if (cmd === 'jogos') {
@@ -1907,7 +1963,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos, erros e faltas'], ['faltas', 'Faltas cometidas'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

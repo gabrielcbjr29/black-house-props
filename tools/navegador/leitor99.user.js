@@ -1,40 +1,97 @@
 // ==UserScript==
 // @name         Black House · leitor 99play
 // @namespace    blackhouse
-// @version      1.2
-// @description  Enquanto uma aba da 99play estiver aberta no seu navegador, lê as linhas de jogador da NBA de hora em hora (aos :35) e manda para o Black House. Desde a 1.2 lê também os marcos (5+, 7+, 10+…) e o duplo-duplo.
-// @updateURL    __C99_SELF__
-// @downloadURL  __C99_SELF__
+// @version      1.3
+// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
 // @match        https://99play.io/*
 // @match        https://99play.im/*
 // @match        https://*.99play.im/*
+// @match        https://*.biahosted.com/*
+// @updateURL    __C99_SELF__
+// @downloadURL  __C99_SELF__
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 // Roda dentro da página da 99play, no seu navegador, exatamente como o próprio site busca as linhas
 // (a 99play recusa pedidos que não venham do site). Instale com o Tampermonkey e deixe uma aba fixada.
+// O script nunca clica, monta bilhete ou aposta: só lê o que a página já recebe.
 (() => {
   const TOKEN = '__C99_TOKEN__';
-  const KEY = 'bh_leitor99_ultimo', LOCK = 'bh_leitor99_lock';
+  const API = 'https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest';
+  const KEY = 'bh_leitor99_ultimo', LOCK = 'bh_leitor99_lock', PROX = 'bh_leitor99_prox';
   const BASE = 'https://sb2frontend-altenar2.biahosted.com/api/widget/';
   const TYPES = new Set([768, 772, 770, 774, 773, 771, 25050, 2312, 2313, 2314, 2315, 2317, 2318, 2322, 30070, 30071, 30072, 30073, 30078]);
   const qs = x => new URLSearchParams({ culture: 'pt-BR', timezoneOffset: '180', integration: '24games1', deviceType: '1', numFormat: 'en-GB', countryCode: 'BR', ...x });
-  const get = async p => { const r = await fetch(BASE + p); if (!r.ok) throw new Error(p.split('?')[0] + ' ' + r.status); return r.json(); };
   const hhmm = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  // selo discreto no canto da tela com o status da última leitura
-  const badge = document.createElement('div');
-  badge.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;font:12px/1.3 system-ui,sans-serif;background:#111;color:#9f9;padding:4px 8px;border-radius:6px;opacity:.85;pointer-events:none';
-  const show = (txt, ok = true) => { badge.textContent = 'BH ' + txt; badge.style.color = ok ? '#9f9' : '#f99'; if (!badge.isConnected) document.body.appendChild(badge); };
-  async function ler() {
+  const isTop = /(^|\.)99play\.(io|im)$/.test(location.hostname) && window.top === window;
+
+  // ---------- captura passiva do Criar Aposta (1.3): lê a resposta que a própria página recebe ----------
+  // Só respostas com cara de preço de bilhete/criar aposta. Tira qualquer campo pessoal antes de mandar.
+  const RX = /bet\s*builder|betbuilder|builder|calculat|betslip|bet-slip|quote|combin|placewidget|getodds/i;
+  const PRIV = /token|session|user|balance|saldo|email|cpf|phone|telefone|account|conta|wallet|cookie|auth|password|senha/i;
+  const clean = (x, d = 0) => {
+    if (d > 8 || x == null) return x;
+    if (Array.isArray(x)) return x.slice(0, 60).map(v => clean(v, d + 1));
+    if (typeof x === 'object') { const o = {}; for (const [k, v] of Object.entries(x)) if (!PRIV.test(k)) o[k] = clean(v, d + 1); return o; }
+    return typeof x === 'string' ? x.slice(0, 300) : x;
+  };
+  let lastCap = '', lastCapAt = 0;
+  const capture = (url, reqBody, resText) => {
+    try {
+      if (!RX.test(url) || !resText || resText.length > 400000) return;
+      const res = JSON.parse(resText); const sig = url.split('?')[0] + resText.length + resText.slice(0, 200);
+      if (sig === lastCap && Date.now() - lastCapAt < 15000) return; lastCap = sig; lastCapAt = Date.now();
+      let req = null; try { req = typeof reqBody === 'string' ? JSON.parse(reqBody) : null; } catch { req = typeof reqBody === 'string' ? reqBody.slice(0, 2000) : null; }
+      const body = JSON.stringify({ casa: '99play', fonte: url.split('?')[0].slice(0, 200), bruto: clean({ req, res }) }).slice(0, 300000);
+      fetch(API + '?captura=1&token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).catch(() => {});
+    } catch { /* resposta que não é JSON: ignora */ }
+  };
+  const of = window.fetch;
+  window.fetch = async function (input, init) {
+    const r = await of.apply(this, arguments);
+    try { const url = typeof input === 'string' ? input : input?.url || ''; if (RX.test(url)) r.clone().text().then(t => capture(url, init?.body, t)).catch(() => {}); } catch {}
+    return r;
+  };
+  const xo = XMLHttpRequest.prototype.open, xs = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, url) { this.__bhUrl = String(url || ''); return xo.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function (b) {
+    if (RX.test(this.__bhUrl || '')) this.addEventListener('load', () => { try { capture(this.__bhUrl, b, typeof this.response === 'string' ? this.response : JSON.stringify(this.response)); } catch {} });
+    return xs.apply(this, arguments);
+  };
+  // segunda fonte: o painel do Criar Aposta na tela (caso o preço não venha por fetch/XHR). Manda o trecho do painel
+  // quando ele muda; o Black House separa pernas e odd total.
+  let lastTela = '';
+  const tela = () => {
+    try {
+      const txt = document.body?.innerText || ''; const i = txt.search(/criar aposta/i); if (i < 0) return;
+      const bloco = txt.slice(i, i + 1500), m = /(odds?|cota[çc][aã]o)\s*(total)?\s*:?\s*([\d]+[.,][\d]+)/i.exec(bloco); if (!m) return;
+      const sig = bloco.replace(/\s+/g, ' '); if (sig === lastTela) return; lastTela = sig;
+      of(API + '?captura=1&token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ casa: '99play', fonte: 'tela', odd: parseFloat(m[3].replace(',', '.')), bruto: { tela: sig } }) }).catch(() => {});
+    } catch { /* tela sem o painel */ }
+  };
+  const obs = () => { if (!document.body) return; new MutationObserver(() => { clearTimeout(window.__bhT); window.__bhT = setTimeout(tela, 800); }).observe(document.body, { childList: true, subtree: true, characterData: true }); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', obs); else obs();
+  if (!isTop) return; // no quadro do sportsbook só captura; a leitura roda na aba principal
+
+  // ---------- leitura das linhas ----------
+  const get = async p => { const r = await of(BASE + p); if (!r.ok) throw new Error(p.split('?')[0] + ' ' + r.status); return r.json(); };
+  let badge = null;
+  const show = (txt, ok = true) => {
+    if (!document.body) return;
+    if (!badge) { badge = document.createElement('div'); badge.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;font:12px/1.3 system-ui,sans-serif;background:#111;color:#9f9;padding:4px 8px;border-radius:6px;opacity:.85;pointer-events:none'; }
+    badge.textContent = 'BH ' + txt; badge.style.color = ok ? '#9f9' : '#f99'; if (!badge.isConnected) document.body.appendChild(badge);
+  };
+  async function ler(motivo = '') {
     const lock = +localStorage.getItem(LOCK) || 0;
     if (Date.now() - lock < 5 * 60e3) return; // outra aba já está lendo
     localStorage.setItem(LOCK, String(Date.now()));
-    show('lendo as linhas…');
+    show('lendo as linhas…' + (motivo ? ` (${motivo})` : ''));
     try {
       const ev = await get('GetEvents?' + qs({ eventCount: '0', sportId: '0', champIds: '2980' }));
       const now = Date.now();
       const events = (ev.events || []).filter(e => e.champId === 2980 && Date.parse(e.startDate) > now && Date.parse(e.startDate) < now + 36 * 3600e3)
         .map(e => ({ id: e.id, champId: e.champId, startDate: e.startDate, competitorIds: e.competitorIds }));
+      localStorage.setItem(PROX, JSON.stringify(events.map(e => Date.parse(e.startDate))));
       if (!events.length) { localStorage.setItem(KEY, String(now)); show(`${hhmm(now)} · sem jogos abertos`); return; }
       const details = {}, erros = [];
       for (const e of events) {
@@ -42,9 +99,8 @@
           const d = await get('GetEventDetails?' + qs({ eventId: String(e.id) }));
           const cm = (d.childMarkets || []).filter(m => TYPES.has(m.typeId)).map(m => ({ typeId: m.typeId, childName: m.childName, sv: m.sv, desktopOddIds: m.desktopOddIds }));
           const ids = new Set(cm.flatMap(m => (m.desktopOddIds || []).flat()));
-          // 1.2 (19/11): os outros mercados de jogador (marcos 5+/7+/10+, duplo-duplo…), para comparar a mesma linha com a
-          // Finta. Vão à parte (extra), com o nome do mercado e de cada odd; o resto da leitura não muda.
-          const xm = [...(d.childMarkets || []), ...(d.markets || [])].filter(m => !TYPES.has(m.typeId) && (m.childName || /\+|marco|milestone|duplo|double/i.test(m.name || '')))
+          // marcos (5+/7+/10+…), duplo e triplo-duplo e outros mercados de jogador, à parte, com o nome do mercado e de cada odd
+          const xm = [...(d.childMarkets || []), ...(d.markets || [])].filter(m => !TYPES.has(m.typeId) && (m.childName || /\+|marco|milestone|duplo|double|triplo|triple/i.test(m.name || '')))
             .map(m => ({ id: m.id, typeId: m.typeId, name: m.name, childName: m.childName, sv: m.sv, desktopOddIds: m.desktopOddIds }));
           const xids = new Set(xm.flatMap(m => (m.desktopOddIds || []).flat()));
           details[e.id] = { childMarkets: cm, odds: (d.odds || []).filter(o => ids.has(o.id)).map(o => ({ id: o.id, typeId: o.typeId, price: o.price, oddStatus: o.oddStatus })),
@@ -52,8 +108,8 @@
         } catch (err) { erros.push(e.id + ': ' + err.message); }
         await new Promise(r => setTimeout(r, 400)); // sem pressa: um jogo de cada vez
       }
-      const body = { at: new Date(now).toISOString(), fonte: 'navegador', versao: '1.2', events, competitors: (ev.competitors || []).map(c => ({ id: c.id, name: c.name, abbreviation: c.abbreviation })), details, erros };
-      const r = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const body = { at: new Date(now).toISOString(), fonte: 'navegador', versao: '1.3', motivo, events, competitors: (ev.competitors || []).map(c => ({ id: c.id, name: c.name, abbreviation: c.abbreviation })), details, erros };
+      const r = await of(API + '?token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error('envio ' + r.status);
       localStorage.setItem(KEY, String(now));
@@ -63,8 +119,17 @@
       localStorage.setItem(KEY, String(Date.now() - 50 * 60e3)); // nova tentativa em ~10 min
     } finally { localStorage.removeItem(LOCK); }
   }
-  // lê uma vez por hora, a partir dos :35 (e logo ao abrir, se a última leitura tiver mais de 50 min)
-  const due = () => Date.now() - (+localStorage.getItem(KEY) || 0) > 60 * 60e3 || (new Date().getMinutes() >= 35 && Date.now() - (+localStorage.getItem(KEY) || 0) > 50 * 60e3);
-  setTimeout(() => { const last = +localStorage.getItem(KEY) || 0; if (Date.now() - last > 50 * 60e3) ler(); else show(`última leitura ${hhmm(last)} ✓`); }, 8000);
-  setInterval(() => { if (due()) ler(); }, 60e3);
+  // ritmo: a cada 15 min se algum jogo começa nas próximas 3h; senão de hora em hora (a partir dos :35)
+  const last = () => +localStorage.getItem(KEY) || 0;
+  const perto = () => { try { const n = Date.now(); return JSON.parse(localStorage.getItem(PROX) || '[]').some(t => t > n && t - n < 3 * 3600e3); } catch { return false; } };
+  const due = () => { const a = Date.now() - last(); return perto() ? a > 15 * 60e3 : a > 60 * 60e3 || (new Date().getMinutes() >= 35 && a > 50 * 60e3); };
+  // "Ler 99play agora" no bot: o leitor confere o pedido a cada minuto
+  async function pedido() {
+    try { const j = await of(API + '?pedido=1').then(r => r.json()); const t = Date.parse(j?.pedido || ''); if (t && t > last() && Date.now() - t < 15 * 60e3) await ler('pedido no bot'); } catch { /* sem rede: tenta no próximo minuto */ }
+  }
+  const start = () => {
+    setTimeout(() => { if (Date.now() - last() > 50 * 60e3) ler(); else show(`última leitura ${hhmm(last())} ✓`); }, 8000);
+    setInterval(() => { if (due()) ler(perto() ? 'perto do jogo' : ''); else pedido(); }, 60e3);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
