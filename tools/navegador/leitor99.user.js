@@ -43,7 +43,7 @@
       if (sig === lastCap && Date.now() - lastCapAt < 15000) return; lastCap = sig; lastCapAt = Date.now();
       let req = null; try { req = typeof reqBody === 'string' ? JSON.parse(reqBody) : null; } catch { req = typeof reqBody === 'string' ? reqBody.slice(0, 2000) : null; }
       const body = JSON.stringify({ casa: '99play', fonte: url.split('?')[0].slice(0, 200), bruto: clean({ req, res }) }).slice(0, 300000);
-      fetch(API + '?captura=1&token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).catch(() => {});
+      of(API + '?captura=1&token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).catch(() => {});
     } catch { /* resposta que não é JSON: ignora */ }
   };
   const of = window.fetch;
