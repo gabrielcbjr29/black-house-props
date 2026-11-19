@@ -1,8 +1,10 @@
 // ==UserScript==
 // @name         Black House · leitor 99play
 // @namespace    blackhouse
-// @version      1.1
-// @description  Enquanto uma aba da 99play estiver aberta no seu navegador, lê as linhas de jogador da NBA de hora em hora (aos :35) e manda para o Black House.
+// @version      1.2
+// @description  Enquanto uma aba da 99play estiver aberta no seu navegador, lê as linhas de jogador da NBA de hora em hora (aos :35) e manda para o Black House. Desde a 1.2 lê também os marcos (5+, 7+, 10+…) e o duplo-duplo.
+// @updateURL    __C99_SELF__
+// @downloadURL  __C99_SELF__
 // @match        https://99play.io/*
 // @match        https://99play.im/*
 // @match        https://*.99play.im/*
@@ -40,11 +42,17 @@
           const d = await get('GetEventDetails?' + qs({ eventId: String(e.id) }));
           const cm = (d.childMarkets || []).filter(m => TYPES.has(m.typeId)).map(m => ({ typeId: m.typeId, childName: m.childName, sv: m.sv, desktopOddIds: m.desktopOddIds }));
           const ids = new Set(cm.flatMap(m => (m.desktopOddIds || []).flat()));
-          details[e.id] = { childMarkets: cm, odds: (d.odds || []).filter(o => ids.has(o.id)).map(o => ({ id: o.id, typeId: o.typeId, price: o.price, oddStatus: o.oddStatus })) };
+          // 1.2 (19/11): os outros mercados de jogador (marcos 5+/7+/10+, duplo-duplo…), para comparar a mesma linha com a
+          // Finta. Vão à parte (extra), com o nome do mercado e de cada odd; o resto da leitura não muda.
+          const xm = [...(d.childMarkets || []), ...(d.markets || [])].filter(m => !TYPES.has(m.typeId) && (m.childName || /\+|marco|milestone|duplo|double/i.test(m.name || '')))
+            .map(m => ({ id: m.id, typeId: m.typeId, name: m.name, childName: m.childName, sv: m.sv, desktopOddIds: m.desktopOddIds }));
+          const xids = new Set(xm.flatMap(m => (m.desktopOddIds || []).flat()));
+          details[e.id] = { childMarkets: cm, odds: (d.odds || []).filter(o => ids.has(o.id)).map(o => ({ id: o.id, typeId: o.typeId, price: o.price, oddStatus: o.oddStatus })),
+            extra: { markets: xm, odds: (d.odds || []).filter(o => xids.has(o.id)).map(o => ({ id: o.id, typeId: o.typeId, name: o.name, sv: o.sv, price: o.price, oddStatus: o.oddStatus })) } };
         } catch (err) { erros.push(e.id + ': ' + err.message); }
         await new Promise(r => setTimeout(r, 400)); // sem pressa: um jogo de cada vez
       }
-      const body = { at: new Date(now).toISOString(), fonte: 'navegador', events, competitors: (ev.competitors || []).map(c => ({ id: c.id, name: c.name, abbreviation: c.abbreviation })), details, erros };
+      const body = { at: new Date(now).toISOString(), fonte: 'navegador', versao: '1.2', events, competitors: (ev.competitors || []).map(c => ({ id: c.id, name: c.name, abbreviation: c.abbreviation })), details, erros };
       const r = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error('envio ' + r.status);

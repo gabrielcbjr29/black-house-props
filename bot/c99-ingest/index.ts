@@ -14,6 +14,15 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   try {
     if (req.method === 'GET') {
+      // instalação e atualização automática do leitor (19/11): .../c99-ingest/leitor99.user.js?token=<C99_TOKEN>
+      // devolve o script do repositório com o token e o próprio endereço (para o Tampermonkey buscar as versões novas)
+      if (url.pathname.endsWith('/leitor99.user.js')) {
+        const tok = (await sb('bot_config?key=eq.C99_TOKEN&select=value'))?.[0]?.value;
+        if (!tok || url.searchParams.get('token') !== tok) return new Response('token inválido', { status: 403 });
+        const src = await fetch('https://raw.githubusercontent.com/gabrielcbjr29/black-house-props/main/tools/navegador/leitor99.user.js?t=' + Date.now()).then(r => r.text());
+        const self = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest/leitor99.user.js?token=${encodeURIComponent(tok)}`;
+        return new Response(src.replaceAll('__C99_TOKEN__', tok).replaceAll('__C99_SELF__', self), { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
+      }
       if (!url.searchParams.get('latest')) return json({ ok: true });
       const r = await sb('c99_snapshots?select=taken_at,n_events,n_markets,payload&order=taken_at.desc&limit=1');
       return json(r?.[0] ?? { payload: null });

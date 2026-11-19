@@ -1141,6 +1141,14 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   }
   if (cmd === 'gabarito') return gabaritoCmd();
   if (cmd === 'status' || cmd === 'saude') return statusCmd();
+  // link de instalação/atualização do leitor da 99play (19/11): só o administrador; o link leva o token do leitor
+  if (cmd === 'leitor') {
+    if (!(await isAdmin(chatId))) return { text: 'Comando só do administrador.', kb: { inline_keyboard: [HOME] } };
+    const tok = (await sb('bot_config?key=eq.C99_TOKEN&select=value').catch(() => null))?.[0]?.value;
+    if (!tok) return { text: 'Token do leitor não encontrado.', kb: { inline_keyboard: [HOME] } };
+    const link = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest/leitor99.user.js?token=${encodeURIComponent(tok)}`;
+    return { text: `<b>🔵 LEITOR DA 99PLAY</b>\nAbra o link abaixo no Chrome do PC (onde está o Tampermonkey) e toque em <b>Atualizar</b>/<b>Instalar</b>. Depois disso ele se atualiza sozinho.\n\n${esc(link)}\n\n<i>Não compartilhe: o link tem a chave do leitor.</i>`, kb: { inline_keyboard: [[{ text: '📥 Abrir o link', url: link }], HOME] } };
+  }
   if (cmd === 'placar' || cmd === 'verdade') return placarCmd(rest[0]);
   if (cmd === 'canal' || cmd === 'canais') return canaisCmd(chatId, arg);
   if (cmd === 'escadas' || cmd === 'escada') return escadasCmd(arg);
