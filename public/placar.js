@@ -64,6 +64,8 @@ export function vereditoHTML(V) {
   const T = V.total;
   return `<section class="panel pbox"><h3>Veredito pelo fechamento <small>${T.npp} entradas com leitura · CLV médio ${pp(T.clv)}</small></h3>
     ${tbl([row('Tudo no papel', T), ...V.metodo.map(x => row(x.k, x, `${x.n} entradas · ${x.g}G ${x.r}R`)), ...V.lado.map(x => row(x.k, x, `${x.n} entradas`))], 'Método')}
+    ${V.casa ? tbl(V.casa.map(x => row(x.k, x, `${x.n} entradas · ${x.g}G ${x.r}R`)), 'Casa') : ''}
+    ${V.comparo?.n ? `<p class="fn"><b>99play × Finta no mesmo over:</b> a Finta pagou mais em ${V.comparo.fin} de ${V.comparo.n} (a 99play em ${V.comparo.p99}); pegar sempre a melhor rende ${spct(V.comparo.ganho)} na odd em média.${V.comparo.conferidas ? ` Nas ${V.comparo.conferidas} já conferidas: ROI ${spct(V.comparo.roi99)} na 99play, ${spct(V.comparo.roiFin)} na Finta, ${spct(V.comparo.roiMelhor)} na melhor das duas.` : ''}</p>` : ''}
     <p class="muted fn">CLV = chance implícita na odd de fechamento da 99play menos a da entrada, na mesma linha (em pontos). Positivo: o mercado andou para o nosso lado. <b>Bate o fechamento</b> = t de 2 ou mais; <b>cedo demais</b> = menos de 30 leituras. O ROI vem com a faixa de sorte (2 erros-padrão): se ela cruza o zero, o lucro ainda não prova nada.</p>
   </section>
   <section class="panel pbox"><h3>Por faixa de valor <small>EV do modelo na hora da entrada (sem a Tendência)</small></h3>

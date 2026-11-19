@@ -149,11 +149,12 @@ async function record(silent = false) {
   for (const p of st.picks) {
     if (p.tip_utc && Date.parse(p.tip_utc) <= now + 5 * 6e4) continue; // jogo começado: fica a última gravada
     if (!p.odd) continue; // sem odd da 99play: não entra
-    const { t9, ...pp } = p; if (t9) t9Of.set(key(p), t9); // hora da leitura da 99play: só para o alerta (não vai para o banco)
+    const { t9, fo, ...pp } = p; if (t9) t9Of.set(key(p), t9); // hora da leitura da 99play: só para o alerta (não vai para o banco)
     const row = { date: st.date, ...pp, stat: MK2STAT[p.mk], odd_src: p.odd_src || '99play', updated_at: new Date(now).toISOString() };
     if (had.has(key(p))) { rows.push(row); continue; }
     if ((count[p.strategy_id] || 0) >= (maxOf[p.strategy_id] ?? 5)) continue; // teto do dia já preenchido
-    count[p.strategy_id] = (count[p.strategy_id] || 0) + 1; fresh.push(row);
+    // Finta (19/11): odd do mesmo over na hora da entrada; o fechamento (fin_odd) segue em closeFinta até o jogo
+    count[p.strategy_id] = (count[p.strategy_id] || 0) + 1; fresh.push({ ...row, fin_open: fo ?? null, fin_odd: fo ?? null });
   }
   // o papel grava TODAS as entradas (para medir cada faixa de EV); o alerta só manda as de EV mínimo (bot_config
   // ALERT_EV, padrão 5%) e uma por jogador no dia: a de maior EV (mercados do mesmo jogador andam juntos)
@@ -184,6 +185,7 @@ async function record(silent = false) {
     }
   }
   const fechadas = await closeRest(st.date, new Set([...rows, ...fresh].map(key)), now).catch(e => ({ erro: String(e) }));
+  const finta = await closeFinta(st.date, now).catch(e => ({ erro: String(e) }));
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
   for (const x of trendLate) await sb(`strategy_picks?date=eq.${x.date}&strategy_id=eq.${x.strategy_id}&pid=eq.${x.pid}&mk=eq.${encodeURIComponent(x.mk)}`, { method: 'PATCH', body: JSON.stringify({ alerted: true }) }).catch(() => null);
@@ -193,7 +195,7 @@ async function record(silent = false) {
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
   const leitor = await leitorCheck().catch(e => ({ erro: String(e) }));
   const coleta = await coletaCheck(bot).catch(e => ({ erro: String(e) }));
-  return { ok: true, date: st.date, atualizadas: rows.length, fechamento: fechadas, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor, coleta };
+  return { ok: true, date: st.date, atualizadas: rows.length, fechamento: fechadas, finta, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor, coleta };
 }
 // Fechamento das entradas que saíram da lista do dia (19/11): a estratégia deixou de apontar a linha (a odd ou a linha
 // andou, o modelo mudou...), mas a entrada continua valendo e o fechamento precisa seguir até o jogo; senão o CLV fica
@@ -213,6 +215,23 @@ async function closeRest(date: string, inList: Set<string>, now: number) {
     n++;
   }
   return { fora_da_lista: open.filter(x => !inList.has(`${x.strategy_id}|${x.pid}|${x.mk}`)).length, atualizadas: n };
+}
+
+// Fechamento da Finta (19/11, o usuário passou a apostar na 99play e na Finta): para os overs do dia que ainda não
+// começaram, a odd da Finta no over da LINHA DA ENTRADA (open_line), na última leitura da coleta (finta.json, de hora em
+// hora) feita antes do jogo. A Finta só tem over: under não tem leitura dela.
+async function closeFinta(date: string, now: number) {
+  const F = await getJ('finta.json').catch(() => null); if (!F?.lines?.length || F.date !== date) return { skip: 'sem finta.json do dia' };
+  const at = Date.parse(F.gen ?? ''); const idx = new Map<string, number>();
+  for (const l of F.lines) if (l.o > 1) idx.set(`${l.pid}|${l.mk}|${+l.line}`, +l.o);
+  const open: any[] = await sb(`strategy_picks?date=eq.${date}&status=eq.aberta&side=eq.o&tip_utc=gt.${new Date(now + 5 * 6e4).toISOString()}&select=id,pid,mk,line,open_line,fin_odd,tip_utc`) ?? [];
+  let n = 0;
+  for (const x of open) {
+    if (at && at >= Date.parse(x.tip_utc)) continue;
+    const o = idx.get(`${x.pid}|${x.mk}|${+(x.open_line ?? x.line)}`); if (!o || +x.fin_odd === o) continue;
+    await sb(`strategy_picks?id=eq.${x.id}`, { method: 'PATCH', body: JSON.stringify({ fin_odd: o }) }).catch(() => null); n++;
+  }
+  return { overs: open.length, atualizadas: n, leitura: F.gen };
 }
 
 // ---------- Leitor da 99play parado (PC do usuário desligado, aba fechada…) ----------
@@ -359,7 +378,7 @@ Deno.serve(async (req: Request) => {
     // veredito pelo fechamento: público e agregado (nenhum dado de usuário; as entradas do papel já são públicas no placar)
     if (u.searchParams.get('veredito')) {
       const [rows, st] = await Promise.all([
-        sbAll('strategy_picks?select=strategy_id,side,open_line,open_odd,line,odd,edge,status,profit&order=id.asc'),
+        sbAll('strategy_picks?select=strategy_id,side,open_line,open_odd,line,odd,edge,status,profit,fin_open,fin_odd&order=id.asc'),
         sb('strategies?select=id,name'),
       ]);
       const nomes = Object.fromEntries((st ?? []).map((s: any) => [s.id, s.name]));
@@ -380,10 +399,10 @@ Deno.serve(async (req: Request) => {
     const rep = await cfg('REPORT_TOKEN');
     if (rep && u.searchParams.get('csv') === rep) {
       const rows: any[] = await sbAll('strategy_picks?select=*,strategies(name)&order=date.asc,strategy_id.asc,id.asc');
-      const head = ['data', 'estrategia', 'jogador', 'time', 'adversario', 'mercado', 'lado', 'linha', 'odd', 'fonte_odd', 'chance_modelo', 'valor_esperado', 'nota', 'resultado', 'status', 'lucro_u', 'linha_fechamento', 'clv_linha'];
+      const head = ['data', 'estrategia', 'jogador', 'time', 'adversario', 'mercado', 'lado', 'linha', 'odd', 'fonte_odd', 'chance_modelo', 'valor_esperado', 'nota', 'resultado', 'status', 'lucro_u', 'linha_fechamento', 'clv_linha', 'odd_finta', 'odd_finta_fechamento'];
       const q = (x: unknown) => { const t = x == null ? '' : String(x); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
       const ST: Record<string, string> = { aberta: 'Aberta', green: 'Green', red: 'Red', void: 'Anulada' };
-      const body = rows.map(r => [r.date, r.strategies?.name ?? r.strategy_id, r.name, r.team, r.opp, r.mk, r.side === 'o' ? 'Mais' : 'Menos', r.open_line ?? r.line, r.open_odd ?? r.odd, r.odd_src, r.p, r.edge, r.nota, r.result, ST[r.status] ?? r.status, r.status === 'aberta' ? '' : r.profit, r.line, r.clv_line]);
+      const body = rows.map(r => [r.date, r.strategies?.name ?? r.strategy_id, r.name, r.team, r.opp, r.mk, r.side === 'o' ? 'Mais' : 'Menos', r.open_line ?? r.line, r.open_odd ?? r.odd, r.odd_src, r.p, r.edge, r.nota, r.result, ST[r.status] ?? r.status, r.status === 'aberta' ? '' : r.profit, r.line, r.clv_line, r.fin_open, r.fin_odd]);
       return new Response([head, ...body].map(l => l.map(q).join(',')).join('\n'), { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
     }
     return json({ ok: true });

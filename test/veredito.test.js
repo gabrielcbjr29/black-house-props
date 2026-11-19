@@ -60,3 +60,33 @@ test('lavada: chance de 20+ cresce com o handicap; curva nova só entra com lav 
   const st2 = v2.filter(p => p.ctx.adj.some(x => x.lb.startsWith('Risco de lavada')));
   assert.ok(st2.length && st2.every(p => p.ctx.adj.find(x => x.lb.startsWith('Risco de lavada')).f > .94));
 });
+
+import { finClv, comparaCasas, fintaIdx, updateFinta } from '../public/clv.js';
+test('Finta: CLV só no over, pela odd da Finta na entrada e no fechamento; comparativo de quem pagou mais', () => {
+  assert.equal(finClv({ side: 'u', fin_open: 2, fin_odd: 1.9 }), null);
+  assert.deepEqual(finClv({ side: 'o', fin_open: 2.1, fin_odd: 2 }), { v: 'f', pp: 2.38 });
+  const rows = [
+    { strategy_id: 'v2-pts', side: 'o', open_line: 10.5, open_odd: 1.9, line: 10.5, odd: 1.9, fin_open: 2.1, fin_odd: 2.0, status: 'green', profit: .9, edge: .05 },
+    { strategy_id: 'v2-pts', side: 'o', open_line: 5.5, open_odd: 2.0, line: 5.5, odd: 2.0, fin_open: 1.8, fin_odd: 1.8, status: 'red', profit: -1, edge: .05 },
+    { strategy_id: 'm-ra', side: 'u', open_line: 8.5, open_odd: 1.9, line: 8.5, odd: 1.9, status: 'green', profit: .9, edge: .02 },
+  ];
+  const C = comparaCasas(rows);
+  assert.deepEqual([C.n, C.fin, C.p99, C.conferidas], [2, 1, 1, 2]);
+  assert.equal(C.roiFin, r3((1.1 - 1) / 2)); assert.equal(C.roiMelhor, r3((1.1 - 1) / 2)); assert.equal(C.roi99, r3((.9 - 1) / 2));
+  const V = veredito(rows);
+  assert.deepEqual(V.casa.map(x => [x.k, x.n]), [['99play', 3], ['Finta (só over)', 2]]);
+  assert.equal(V.casa[1].lucro, .1);
+});
+const r3 = x => Math.round(x * 1000) / 1000;
+
+test('Finta no canal: fechamento só nas pernas de over que não começaram, na mesma linha', () => {
+  const idx = fintaIdx({ lines: [{ pid: '1', mk: 'PTS', line: 20.5, o: 1.95 }, { pid: '2', mk: 'REB', line: 7.5, o: 2.2 }] });
+  const now = Date.parse('2026-11-19T20:00:00Z'), tip = '2026-11-20T00:00:00Z';
+  const legs = [{ pid: '1', mk: 'PTS', line: 20.5, side: 'o', tip }, { pid: '2', mk: 'REB', line: 7.5, side: 'u', tip }, { pid: '2', mk: 'REB', line: 7.5, side: 'o', tip: '2026-11-19T19:00:00Z' }];
+  const r = updateFinta(legs, idx, { now, gen: '2026-11-19T19:50:00Z' });
+  assert.ok(r.changed); assert.deepEqual(r.legs.map(l => l.fclose ?? null), [1.95, null, null]);
+  assert.equal(updateFinta(r.legs, idx, { now }).changed, false);
+  const posts = [{ kind: 'simples', odd: 1.9, stake: 1, status: 'green', profit: .9, clv: { bateu: null }, legs: [{ side: 'o', odd: 1.9, line: 20.5, fodd: 2.05, fclose: 1.95 }] }];
+  const V = vereditoCanal(posts);
+  const f = V.tipos.find(x => x.k === 'Simples na Finta (over)'); assert.ok(f); assert.equal(f.lucro, 1.05);
+});

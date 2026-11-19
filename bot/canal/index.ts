@@ -17,7 +17,7 @@
 // administrador, usados no canal dele quando o canal não tem ref próprio).
 //   ?resultados=<canal>&t=<token>[&fmt=csv][&dias=N]  (painel e planilha do canal) entradas com resultado e fechamento/CLV;
 //                              token por canal (o dono vê os links em /canais → canal → 📊 Resultados)
-import { updateClosing, postClv, legVerdict } from '../../public/clv.js';
+import { updateClosing, postClv, legVerdict, fintaIdx, updateFinta } from '../../public/clv.js';
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
@@ -161,7 +161,7 @@ async function tgCaption(method: string, body: any, capKey: 'caption' | 'media' 
   return r;
 }
 const minLegs = (x: any) => legsOf(x).map((l: any) => ({ pid: l.pid, name: l.name, team: l.team, opp: l.opp, home: l.home, away: l.away, game: l.game, ev: l.ev,
-  mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip, sq: l.sq ?? null,
+  mk: l.mk, stat: MK2STAT[l.mk], side: l.side, line: l.line, odd: l.odd, tip: l.tip, sq: l.sq ?? null, ...(l.fo ? { fodd: l.fo } : {}),
   ...(l.met ? { met: l.met, pk: l.pk, evk: l.evk, pm: l.p, evm: l.edge } : {}) })); // Método Alavanca: chance da Kalshi e do modelo na hora do post
 const img365 = (img: string) => img.replace(/^canal\//, 'canal/365/');
 // botões embaixo do post no canal (controles no canal, não no privado do bot). Só o dono do canal consegue usar;
@@ -296,11 +296,16 @@ async function closing() {
   const open: any[] = await sb('channel_posts?status=eq.postada&select=id,legs') ?? [];
   const now = Date.now(), live = open.filter(p => (p.legs ?? []).some((l: any) => Date.parse(l.tip) > now));
   if (!live.length) return 0;
-  const L = await getJ('linhas99.json'); if (!L?.l) return 0;
+  const L = await getJ('linhas99.json').catch(() => null);
+  // Finta (19/11): fechamento do over na mesma linha (fclose), da leitura da coleta de hora em hora
+  const F = await getJ('finta.json').catch(() => null), FI = F?.lines?.length ? fintaIdx(F) : null;
+  if (!L?.l && !FI) return 0;
   let n = 0;
   for (const p of live) {
-    const r = updateClosing(p.legs, L.l, { now, gen: L.gen });
-    if (r.changed) { await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ legs: r.legs }) }); n++; }
+    let legs = p.legs, ch = false;
+    if (L?.l) { const r = updateClosing(legs, L.l, { now, gen: L.gen }); legs = r.legs; ch ||= r.changed; }
+    if (FI) { const r = updateFinta(legs, FI, { now, gen: F.gen }); legs = r.legs; ch ||= r.changed; }
+    if (ch) { await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ legs }) }); n++; }
   }
   return n;
 }
@@ -318,13 +323,13 @@ async function resultados(cid: string, dias: number) {
   return { canal: k.title, de: from, ate: etDate(), gen: new Date().toISOString(), posts: rows.map(p => ({
     id: p.id, date: p.date, hora: hourBR(p.created_at), kind: p.kind, band: p.band, odd: +p.odd, stake: +p.stake || 1, status: p.status, profit: +p.profit || 0,
     clv: (({ vs, ...c }) => c)(postClv({ odd: +p.odd, legs: p.legs })),
-    legs: (p.legs ?? []).map((l: any) => ({ name: l.name, team: l.team, opp: l.opp, mk: l.mk, side: l.side, line: +l.line, odd: +l.odd, tip: l.tip, cline: l.cline ?? null, close: l.close ?? null, real: real(p.date, l), v: legVerdict(l).v })),
+    legs: (p.legs ?? []).map((l: any) => ({ name: l.name, team: l.team, opp: l.opp, mk: l.mk, side: l.side, line: +l.line, odd: +l.odd, tip: l.tip, cline: l.cline ?? null, close: l.close ?? null, fodd: l.fodd ?? null, fclose: l.fclose ?? null, real: real(p.date, l), v: legVerdict(l).v })),
   })) };
 }
 const MKL: Record<string, string> = { PTS: 'Pontos', REB: 'Rebotes', AST: 'Assistências', '3PM': 'Bolas de 3 convertidas', PRA: 'Pts+Reb+Ast', PR: 'Pts+Reb', PA: 'Pts+Ast', RA: 'Reb+Ast', FGM: 'Arremessos convertidos', FGA: 'Arremessos tentados', '2PM': 'Arremessos de 2 convertidos', '2PA': 'Arremessos de 2 tentados', '3PA': 'Bolas de 3 tentadas', FTM: 'Lances livres convertidos', FTA: 'Lances livres tentados', STL: 'Roubos', BLK: 'Tocos', SB: 'Roubos+Tocos', TOV: 'Erros', PF: 'Faltas' };
 function toCSV(R: any) {
   const q = (x: unknown) => { const s = x == null ? '' : String(x); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const head = ['Data', 'Hora', 'Tipo', 'Faixa', 'Entrada', 'Mercado', 'Lado', 'Linha', 'Odd', 'Linha fechamento', 'Odd fechamento', 'CLV %', 'Bateu o fechamento', 'Resultado real', 'Resultado', 'Stake', 'Lucro (un)'];
+  const head = ['Data', 'Hora', 'Tipo', 'Faixa', 'Entrada', 'Mercado', 'Lado', 'Linha', 'Odd', 'Linha fechamento', 'Odd fechamento', 'CLV %', 'Bateu o fechamento', 'Resultado real', 'Resultado', 'Stake', 'Lucro (un)', 'Odd Finta', 'Fechamento Finta'];
   const out = [head.join(',')];
   for (const p of R.posts) {
     const s = p.kind === 'simples', l = p.legs[0] ?? {};
@@ -332,7 +337,7 @@ function toCSV(R: any) {
     out.push([p.date, p.hora, s ? 'Simples' : 'Múltipla', p.band ?? '', entrada, s ? (MKL[l.mk] ?? l.mk) : `${p.legs.length} pernas`, s ? (l.side === 'o' ? 'Mais' : 'Menos') : '', s ? l.line : '', p.odd,
       s ? (l.cline ?? '') : '', p.clv.closeOdd ?? (s ? '' : `${p.clv.f} a favor / ${p.clv.c} contra`), p.clv.clv == null ? '' : Math.round(p.clv.clv * 1000) / 10,
       p.clv.bateu == null ? '' : p.clv.bateu ? 'Sim' : 'Não', s ? (l.real ?? '') : p.legs.map((x: any) => x.real ?? '-').join(' | '),
-      { green: 'Green', red: 'Red', void: 'Anulada', postada: 'Aberta' }[p.status as string] ?? p.status, p.stake, p.status === 'postada' ? '' : p.profit].map(q).join(','));
+      { green: 'Green', red: 'Red', void: 'Anulada', postada: 'Aberta' }[p.status as string] ?? p.status, p.stake, p.status === 'postada' ? '' : p.profit, s ? (l.fodd ?? '') : '', s ? (l.fclose ?? '') : ''].map(q).join(','));
   }
   return out.join('\n') + '\n';
 }

@@ -8,7 +8,7 @@
 //              linhas da 99play do bot com chance 57%+ e EV 0+, a de maior chance em cada faixa; sem repetir jogador entre as
 //              faixas do mesmo lado (só se faltar perna).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
-import { lines99 } from '../public/clv.js';
+import { lines99, fintaIdx } from '../public/clv.js';
 import { alavancaPlan } from './alavanca.mjs';
 import { criarPlan } from './criar.mjs';
 import { join, dirname } from 'node:path';
@@ -353,6 +353,11 @@ async function main() {
   const kalshi = existsSync(join(ROOT, 'data', 'kalshi.json')) ? J('kalshi.json') : null;
   const P = hub?.canais?.length && botOk ? applyAlavanca({ ...planHub({ bot: botOk, slate, events, hub }), gen: strat?.gen ?? null }, { hub, slate, kalshi, events })
     : plan({ strat, slate, events, bot: botOk });
+  // Finta (19/11): odd do mesmo over em cada perna (fo), só para medir a casa (CLV e quem pagou mais); não muda a pauta
+  const finta = existsSync(join(ROOT, 'data', 'finta.json')) ? J('finta.json') : null;
+  if (finta?.date === slate.meta?.date) { const fi = fintaIdx(finta);
+    for (const x of P.v === 2 ? Object.values(P.canais).flatMap(c => [...c.singles, ...c.multis]) : [...(P.singles ?? []), ...(P.multis ?? [])])
+      for (const l of x.legs ?? [x]) if (l.side === 'o') { const o = fi[`${l.pid}|${l.mk}|${+l.line}`]; if (o) l.fo = o; } }
   const dir = join(ROOT, 'data', 'canal'); rmSync(dir, { recursive: true, force: true }); mkdirSync(join(dir, '365'), { recursive: true });
   const font = f => readFileSync(join(ROOT, 'fonts', f)).toString('base64');
   const css = CSS(font); const css365 = CSS365(font);

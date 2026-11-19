@@ -32,6 +32,19 @@ export function updateClosing(legs, L, { now = Date.now(), gen = null } = {}) {
   return { legs: out, changed };
 }
 
+/* Finta (19/11): índice "pid|mk|linha" → odd do over, da leitura da coleta (finta.json); só over */
+export function fintaIdx(F) { const m = {}; for (const l of F?.lines ?? []) if (+l.o > 1) m[`${l.pid}|${l.mk}|${+l.line}`] = +l.o; return m; }
+/* grava o fechamento da Finta (fclose) nas pernas de over que ainda não começaram; mesma regra da 99play */
+export function updateFinta(legs, idx, { now = Date.now(), gen = null } = {}) {
+  let changed = false;
+  const out = (legs ?? []).map(l => {
+    const tip = Date.parse(l.tip); if (l.side !== 'o' || !(tip > now) || (gen && Date.parse(gen) >= tip)) return l;
+    const o = idx?.[`${l.pid}|${l.mk}|${+l.line}`]; if (!o || +l.fclose === o) return l;
+    changed = true; return { ...l, fclose: o };
+  });
+  return { legs: out, changed };
+}
+
 /* veredito de uma perna: f = bateu o fechamento, c = contra, n = igual, s = sem leitura */
 export function legVerdict(l) {
   if (l?.close == null || l?.cline == null) return { v: 's' };
@@ -121,13 +134,34 @@ export function veredito(rows, { nomes = {} } = {}) {
   };
   const famOrder = ['Método Minutos', 'Modelo v2 (todos os mercados)', 'Modelo por mercado', 'Tendência', 'Outras do modelo'];
   const bandOrder = [...EDGE_BANDS.map(b => b[2]), 'Sem EV'];
+  // Finta (19/11): só over; CLV pela odd da Finta na linha da entrada (fin_open → fin_odd) e lucro na odd dela
+  const F = P.map(r => ({ r, c: finClv(r) })).filter(x => x.c).map(({ r, c }) => ({ ...c, status: r.status, profit: r.status === 'green' ? +r.fin_open - 1 : r.status === 'red' ? -1 : 0 }));
   return {
     total: clvStats(P),
+    casa: [{ k: '99play', ...clvStats(P) }, { k: 'Finta (só over)', ...clvStats(F) }],
+    comparo: comparaCasas(rows),
     metodo: group(x => familia(x.strategy_id), famOrder),
     estrategia: group(x => x.strategy_id).map(e => ({ ...e, nome: nomes[e.k] ?? e.k })),
     lado: group(x => x.side === 'o' ? 'Over' : 'Under', ['Over', 'Under']),
     faixa: group(x => x.strategy_id === 'tendencia' ? null : edgeBand(x.edge), bandOrder),
   };
+}
+
+/* CLV de uma entrada na Finta (só over; odd do mesmo over na hora da entrada e no fechamento) */
+export function finClv(r) {
+  if (r.side !== 'o' || !(+r.fin_open > 1) || !(+r.fin_odd > 1)) return null;
+  const pp = ppOf(r.fin_open, r.fin_odd); return { v: pp > 0 ? 'f' : pp < 0 ? 'c' : 'n', pp };
+}
+
+/* qual casa pagou mais no mesmo over, na hora da entrada (99play open_odd × Finta fin_open, mesma linha), e o lucro de
+   entrar em cada uma e na melhor das duas, nas entradas já conferidas */
+export function comparaCasas(rows) {
+  const B = rows.filter(r => r.side === 'o' && +r.open_odd > 1 && +r.fin_open > 1);
+  const D = B.filter(r => r.status === 'green' || r.status === 'red');
+  const roi = f => D.length ? r3(D.reduce((a, r) => a + (r.status === 'green' ? f(r) - 1 : -1), 0) / D.length) : null;
+  return { n: B.length, fin: B.filter(r => +r.fin_open > +r.open_odd).length, p99: B.filter(r => +r.open_odd > +r.fin_open).length,
+    ganho: B.length ? r3(B.reduce((a, r) => a + Math.max(+r.fin_open, +r.open_odd) / +r.open_odd - 1, 0) / B.length) : null,
+    conferidas: D.length, roi99: roi(r => +r.open_odd), roiFin: roi(r => +r.fin_open), roiMelhor: roi(r => Math.max(+r.open_odd, +r.fin_open)) };
 }
 
 /* posts do canal (endpoint ?resultados) → veredito por tipo: simples, múltiplas, Criar Aposta */
@@ -142,5 +176,11 @@ export function vereditoCanal(posts) {
     return { tipo, v, pp, status: p.status, profit: p.profit };
   });
   const tipos = ['Simples', 'Múltiplas', 'Criar Aposta'].map(k => ({ k, ...clvStats(P.filter(x => x.tipo === k)) })).filter(x => x.n);
+  // Finta: simples de over com odd da Finta na postagem (fodd) e no fechamento (fclose), mesma linha
+  const F = posts.filter(p => p.kind === 'simples' && p.legs?.[0]?.side === 'o' && +p.legs[0].fodd > 1 && +p.legs[0].fclose > 1).map(p => {
+    const l = p.legs[0], pp = ppOf(l.fodd, l.fclose);
+    return { v: pp > 0 ? 'f' : pp < 0 ? 'c' : 'n', pp, status: p.status, profit: p.status === 'green' ? (+p.stake || 1) * (+l.fodd - 1) : p.status === 'red' ? -(+p.stake || 1) : 0 };
+  });
+  if (F.length) tipos.push({ k: 'Simples na Finta (over)', ...clvStats(F) });
   return { total: clvStats(P), tipos };
 }

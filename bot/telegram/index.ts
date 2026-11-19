@@ -514,7 +514,7 @@ async function betStart(chatId: number, d: Data, r: Row, src: string): Promise<O
   const row = (await sb('bets', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ chat_id: chatId, date: d.date, pid: r.id, name: r.n, team: r.t, opp: r.o, mk: r.m, stat, line: r.l, ref_line: r.l, side: r.s, p_model: r.p, nota: r.nt ?? null, src, status: 'aguardando_odd' }) }))?.[0];
   return { text: `<b>📝 REGISTRAR ENTRADA · 1u</b>
 <blockquote><b>${esc(r.n)}</b> <i>${r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`} · ${r.h}</i>
-${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · modelo ${pc(r.p)}${r.nt != null ? ` · nota ${r.nt}` : ''}</blockquote>
+${r.s === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(r.l)}</b> ${MK[r.m] ?? r.m} · modelo ${pc(r.p)}${r.nt != null ? ` · nota ${r.nt}` : ''}${r.s === 'o' && r.fo ? `\n🟣 Finta paga <code>@${n2(r.fo)}</code> nesse over${r.d ? ` · 99play <code>@${n2(r.d)}</code>` : ''}` : ''}</blockquote>
 <b>Qual odd você pegou?</b> Toque abaixo ou <b>responda com a odd</b>, por exemplo <code>1,83</code>.
 Se a linha da sua casa for outra, mande odd e linha: <code>1,83 ${n1(r.l + 1)}</code>
 Para outra stake, some as unidades: <code>1,83 2u</code>`, kb: ODD_KB(row.id), force: true };
@@ -533,13 +533,24 @@ function parseOdd(text: string) {
   if (stake != null && (stake <= 0 || stake > 20)) stake = null;
   return { odd, line, stake };
 }
+const CASA_LB: Record<string, string> = { '99play': '99play', finta: '🟣 Finta' };
+const casaKB = (id: number, casa: string) => [BTN((casa === '99play' ? '✅ ' : '') + '99play', `bc:${id}:99play`), BTN((casa === 'finta' ? '✅ ' : '') + '🟣 Finta', `bc:${id}:finta`)];
+async function betCasa(chatId: number, id: number, casa: string): Promise<Out> {
+  if (!CASA_LB[casa]) casa = '99play';
+  const b = (await sb(`bets?id=eq.${id}&chat_id=eq.${chatId}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ casa }) }).catch(() => []))?.[0];
+  if (!b) return { text: 'Não achei essa entrada na sua banca.', kb: { inline_keyboard: [HOME] } };
+  return { text: `✅ <b>Entrada #${b.id}</b> · ${esc(b.name)} · ${b.side === 'o' ? 'mais' : 'menos'} de ${n1(+b.line)} ${MK[b.mk] ?? b.mk} @${n2(+b.odd)}\nCasa: <b>${CASA_LB[casa]}</b>. As próximas entradas já começam nela.`,
+    kb: { inline_keyboard: [casaKB(b.id, casa), [BTN('💼 Minha banca', '/banca'), BTN('🏠 Menu', '/menu')]] } };
+}
 async function betFinish(chatId: number, id: number | null, text: string): Promise<Out | null> {
   const q = id != null ? `bets?id=eq.${id}&chat_id=eq.${chatId}&status=eq.aguardando_odd` : `bets?chat_id=eq.${chatId}&status=eq.aguardando_odd&order=created_at.desc&limit=1`;
   const b = (await sb(q + '&select=*').catch(() => []))?.[0];
   if (!b) return null;
   const v = parseOdd(text);
   if (!v) return { text: 'Não entendi. Mande só a odd, por exemplo <code>1,83</code>, ou odd e linha: <code>1,83 3,5</code>.', kb: ODD_KB(b.id) };
-  const patch: Record<string, unknown> = { odd: v.odd, status: 'aberta' };
+  // casa (19/11): a última que o usuário usou (padrão 99play); troca com um toque na confirmação
+  const casa = (await sb(`bets?chat_id=eq.${chatId}&status=neq.aguardando_odd&select=casa&order=id.desc&limit=1`).catch(() => []))?.[0]?.casa ?? '99play';
+  const patch: Record<string, unknown> = { odd: v.odd, status: 'aberta', casa };
   if (v.stake) patch.stake = v.stake;
   if (v.line != null && v.line !== +b.line) {
     patch.line = v.line;
@@ -551,7 +562,8 @@ async function betFinish(chatId: number, id: number | null, text: string): Promi
   return { text: `✅ <b>Entrada #${b.id} registrada</b>
 <blockquote><b>${esc(b.name)}</b> · ${b.side === 'o' ? 'mais' : 'menos'} de ${n1(line)} ${MK[b.mk] ?? b.mk}
 Odd <b>${n2(v.odd)}</b> · ${n1(st)}u${p ? ` · modelo ${pc(p)}${need(v.odd)}` : ''}${ev != null ? ` · EV pelo modelo ${pctS(ev)}` : ''}${line !== +b.ref_line ? `\n<i>linha da casa ${n1(line)} (referência era ${n1(+b.ref_line)})</i>` : ''}</blockquote>
-Confiro sozinho depois do jogo e te conto de manhã. Acompanhe em /banca.`, kb: { inline_keyboard: [[BTN('💼 Minha banca', '/banca'), ...(srcCmd(b.src) ? [BTN('◀ Voltar', srcCmd(b.src))] : []), BTN('🏠 Menu', '/menu')]] } };
+Casa: <b>${CASA_LB[casa] ?? casa}</b> <i>(toque abaixo se foi na outra)</i>
+Confiro sozinho depois do jogo e te conto de manhã. Acompanhe em /banca.`, kb: { inline_keyboard: [casaKB(b.id, casa), [BTN('💼 Minha banca', '/banca'), ...(srcCmd(b.src) ? [BTN('◀ Voltar', srcCmd(b.src))] : []), BTN('🏠 Menu', '/menu')]] } };
 }
 // o jogo do time já tem box score final? (results.json só lista jogos encerrados; sem o time na lista, a entrada segue aberta)
 const gameDone = (res: any, date: string, team?: string) => { const g = res?.games?.[date]; if (!g) return false; if (!team) return true; return g.some((x: any[]) => x[1] === team || x[2] === team); };
@@ -588,6 +600,7 @@ function bancaResumo(rows: any[]) {
   return `<blockquote>✅ <b>${done.filter(r => r.status === 'green').length}</b> · ❌ <b>${done.filter(r => r.status === 'red').length}</b> · ➖ ${rows.filter(r => r.status === 'void').length} · ⏳ ${rows.filter(r => r.status === 'aberta').length} em aberto
 Apostado <b>${n1(Math.round(T.st * 100) / 100)}u</b> · Lucro <b>${u2(T.pr)}</b> · ROI <b>${pctS(T.roi)}</b>
 Acerto ${Math.round(T.hit * 1000) / 10}%${avgOdd ? ` · odd média ${n2(avgOdd)} (empata com ${Math.round(100 / avgOdd)}%)` : ''}</blockquote>`
+    + tab('Por casa', by(r => r.casa === 'finta' ? 'Finta' : '99play'))
     + tab('Por lista', by(r => srcName(r.src)))
     + tab('Por mercado', by(r => (MK[r.mk] ?? r.mk)))
     + tab('Por lado', by(r => r.side === 'o' ? 'Mais de' : 'Menos de'))
@@ -601,7 +614,7 @@ async function bancaCmd(chatId: number, rest: string[]): Promise<Out> {
   await settleBets(rows);
   if (!rows.length) return { text: `<b>💼 BANCA DO MODELO BH</b>\nNenhuma entrada registrada ainda.\n\nNos tops (/toptentativas, /topra) e nas listas, toque em <b>📝</b> e informe a odd que você pegou. Cada entrada vale 1u e eu confiro sozinho depois do jogo.`, kb: { inline_keyboard: [[BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')], HOME] } };
   const ic = (r: any) => r.status === 'green' ? '✅' : r.status === 'red' ? '❌' : r.status === 'void' ? '➖' : '⏳';
-  const last = rows.slice(0, 10).map(r => `${ic(r)} <code>#${r.id}</code> ${esc(r.name)} · ${r.side === 'o' ? 'mais' : 'menos'} ${n1(+r.line)} ${MK[r.mk] ?? r.mk} @${n2(+r.odd)}${r.result != null ? ` <i>(fez ${n1(+r.result)})</i>` : ''}${r.profit != null && r.status !== 'aberta' ? ` ${u2(+r.profit)}` : ''}`).join('\n');
+  const last = rows.slice(0, 10).map(r => `${ic(r)} <code>#${r.id}</code> ${esc(r.name)} · ${r.side === 'o' ? 'mais' : 'menos'} ${n1(+r.line)} ${MK[r.mk] ?? r.mk} @${n2(+r.odd)}${r.casa === 'finta' ? ' 🟣' : ''}${r.result != null ? ` <i>(fez ${n1(+r.result)})</i>` : ''}${r.profit != null && r.status !== 'aberta' ? ` ${u2(+r.profit)}` : ''}`).join('\n');
   const text = `<b>💼 ${all ? 'BANCA DE TODOS' : 'SUA BANCA'} · MODELO BH</b>\n` + bancaResumo(rows) + (await topsResumo()) + `\n\n<b>Últimas</b>\n${last}\n<i>Apagar uma entrada errada: <code>/apagar 12</code>. Amostra pequena engana: o ROI começa a dizer algo com 100+ entradas.</i>`;
   return { text: text.length > 4000 ? text.slice(0, 3990) + '…' : text, kb: { inline_keyboard: [[BTN(all ? '👤 Só a minha' : '👥 De todos', all ? '/banca' : '/banca todos'), BTN('🔄 Atualizar', all ? '/banca todos' : '/banca')], [BTN('🏹 Top Tentativas', '/toptentativas'), BTN('🙌 Top Reb+Ast', '/topra'), BTN('🏠 Menu', '/menu')]] } };
 }
@@ -648,7 +661,10 @@ async function vereditoCmd(arg = ''): Promise<Out> {
   const ln = (lb: string, x: any) => `${ICO[x.ver.k]} <b>${esc(lb)}</b> · ${x.ver.lb}\n   CLV <b>${pp(x.clv)} pts</b> (t ${tt(x.t)}, ${x.npp} leituras) · bateu ${x.lidas ? Math.round(x.f / x.lidas * 100) : 0}%${roi(x)}`;
   const mode = arg === 'faixa' ? 'faixa' : arg === 'mercado' ? 'mercado' : 'metodo';
   let body = '';
-  if (mode === 'metodo') body = [ln('Tudo no papel', V.total), ...V.metodo.map((x: any) => ln(x.k, x)), '', ...V.lado.map((x: any) => ln(x.k, x))].join('\n');
+  const pc1 = (x: number | null) => x == null ? '–' : (x >= 0 ? '+' : '−') + (Math.abs(x) * 100).toFixed(1).replace('.', ',') + '%';
+  const C = V.comparo;
+  const comp = C?.n ? `\n<b>99play × Finta no mesmo over:</b> Finta pagou mais em ${C.fin} de ${C.n} (99play em ${C.p99}); pegar sempre a melhor = <b>${pc1(C.ganho)}</b> na odd${C.conferidas ? `\nConferidas (${C.conferidas}): ROI 99play ${pc1(C.roi99)} · Finta ${pc1(C.roiFin)} · melhor das duas <b>${pc1(C.roiMelhor)}</b>` : ''}` : '';
+  if (mode === 'metodo') body = [ln('Tudo no papel', V.total), ...V.metodo.map((x: any) => ln(x.k, x)), '', ...V.lado.map((x: any) => ln(x.k, x)), '', ...(V.casa ?? []).map((x: any) => ln(x.k, x))].join('\n') + comp;
   else if (mode === 'faixa') body = V.faixa.map((x: any) => ln('EV ' + x.k, x)).join('\n');
   else body = V.estrategia.filter((x: any) => x.npp >= 5).sort((a: any, b: any) => (b.t ?? -99) - (a.t ?? -99)).slice(0, 25).map((x: any) => ln(x.nome, x)).join('\n');
   const tit = { metodo: 'POR MÉTODO E LADO', faixa: 'POR FAIXA DE VALOR', mercado: 'POR ESTRATÉGIA' }[mode];
@@ -1782,7 +1798,7 @@ async function handle(update: any) {
   // /start: liga o teclado fixo (uma mensagem curta) e mostra o início
   if (!cq && /^\/start(@\S+)?(\s|$)/i.test(text)) await TG('sendMessage', { chat_id: chatId, text: '👇 Use os botões aqui embaixo para navegar: <b>Hoje</b>, <b>Modelo BH</b>, <b>Banca</b> e <b>Mais</b>.', parse_mode: 'HTML', reply_markup: RKB });
   // registro de entrada: 📝 (bet:<chave>:<origem>), registrar do /modelo (bm:...), odd por botão (bo:id:odd), cancelar (bx:id)
-  const bt = /^(bet|be|bm|bo|bx):(.+)$/.exec(text);
+  const bt = /^(bet|be|bm|bo|bx|bc):(.+)$/.exec(text);
   if (bt) {
     if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id });
     let out: Out | null = null;
@@ -1797,6 +1813,7 @@ async function handle(update: any) {
           if (m) r = { id: pid, n: m.n, t: m.t, o: m.o, home: m.home, h: m.h, m: mk, s: side as 'o' | 'u', l: +line, p: p ?? .5, nt: undefined } as unknown as Row;
         }
         out = r ? await betStart(chatId, d, r, src) : { text: 'Essa entrada saiu da lista na última atualização. Abra a lista de novo.', kb: { inline_keyboard: [HOME] } };
+      } else if (bt[1] === 'bc') { const [id, casa] = bt[2].split(':'); out = await betCasa(chatId, +id, casa);
       } else if (bt[1] === 'bo') { const [id, odd] = bt[2].split(':'); out = await betFinish(chatId, +id, odd); out ??= { text: 'Esse registro já foi concluído ou cancelado. Veja em /banca.', kb: { inline_keyboard: [HOME] } }; }
       else { await sb(`bets?id=eq.${+bt[2]}&chat_id=eq.${chatId}&status=eq.aguardando_odd`, { method: 'DELETE' }); out = { text: 'Registro cancelado.', kb: { inline_keyboard: [HOME] } }; }
     } catch (e) { out = { text: 'Não consegui registrar agora (' + esc(String((e as Error).message)) + ').', kb: { inline_keyboard: [HOME] } }; }
