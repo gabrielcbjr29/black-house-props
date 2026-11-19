@@ -43,7 +43,11 @@ export function minSig(pr) {
 }
 // full: todas as linhas (sem cortar nota baixa nem B fraco), para o PDF do dia; o bot.json usa o corte
 // kalshi = public/data/kalshi.json do dia (escada da bolsa). Vira kp: chance da Kalshi para o lado da linha (só informação).
-export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}) {
+// finta = leitura da Finta (collector/finta.js): só "mais de", linha principal e escada. Vira fo (odd da Finta na mesma
+// linha do over) nas linhas do bot e a lista fin: os overs da Finta com valor pela nossa chance (19/11).
+export function buildBotData(slate, { w = .4, full = false, kalshi = null, finta = null } = {}) {
+  const FIN = new Map(); for (const f of finta?.lines ?? []) if (f.mk !== 'DD') { const k = f.pid + '|' + f.mk; (FIN.get(k) ?? FIN.set(k, []).get(k)).push(f); }
+  const fin = [];
   const kFresh = kalshi?.list?.length && kalshi.date === slate.meta?.date
     && !(kalshi.gen && slate.meta?.generatedAt && Math.abs(Date.parse(slate.meta.generatedAt) - Date.parse(kalshi.gen)) / 36e5 >= 3);
   const KAL = kFresh ? new Map(kalshi.list.map(k => [kNorm(k.name) + '|' + k.mk, k])) : null;
@@ -54,6 +58,21 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
     if (pr.p.status === 'out' || pr.p.status === 'doubtful' || OFF_MK.has(pr.mk)) continue;
     const e = evaluate(pr, null, { w });
     const mi = minSig(pr);
+    const fl = FIN.get(pr.p.id + '|' + pr.mk);
+    if (fl && !full) {
+      const g0 = gById[pr.game.id], b9 = pr.book?.books?.['99play'];
+      for (const f of fl) {
+        let p; try { p = evaluate(pr, { line: f.line }, { w }).over.p; } catch { continue; }
+        const fe = p * f.o - 1, v10 = (pr.vals ?? []).slice(0, 10);
+        // cauda da escada é onde o modelo mais erra: valor de 3% a 30%, chance de 25%+ e, na linha alternativa,
+        // pelo menos 3 dos últimos 10 acima dela
+        const hit10 = v10.length ? v10.filter(x => x > f.line).length / v10.length : 0;
+        if (fe < .03 || fe > .30 || p < .25 || f.o < 1.3 || f.o > 8 || (pr.ctx?.exp ?? 0) < 18 || (f.alt && hit10 < .3)) continue;
+        fin.push({ id: pr.p.id, n: pr.p.name, t: pr.p.team, o: pr.p.team === g0.home ? g0.away : g0.home, g: pr.game.id, h: brTime(g0.timeUTC), m: pr.mk, l: f.line,
+          fo: f.o, alt: f.alt, p: r3(p), fe: r3(fe), st: pr.p.status, mn: Math.round(pr.ctx.exp ?? 0),
+          h10: v10.length ? [v10.filter(x => x > f.line).length, v10.length] : null, ...(b9 ? { l9: pr.book.line, o9: b9.o ?? null } : {}) });
+      }
+    }
     for (const side of [e.best, e.best === 'over' ? 'under' : 'over']) {
     const s = e[side], isBest = side === e.best, miHere = !!mi && mi.side === side;
     // regra de tendência (sequência + matchup + defesa + odd): pode puxar o outro lado ou um lado de nota baixa.
@@ -92,6 +111,7 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
     const kk = KAL && ALV.mk.includes(pr.mk) ? KAL.get(kNorm(pr.p.name) + '|' + pr.mk) : null, ka = kk ? kalshiAt(kk, e.line, pr.mk) : null;
     if (ka) row.kp = r3(row.s === 'o' ? ka.p : 1 - ka.p);
     const tr = trendOK(row); if (tr) row.tr = 1;
+    if (fl && row.s === 'o') { const f = fl.find(x => x.line === row.l); if (f) row.fo = f.o; } // odd da Finta no mesmo over
     if (miHere) row.mi = Math.round(mi.dx * 10) / 10; // Método Minutos: diferença de minutos (previstos − média L10)
     // o lado que o modelo não escolheu (ou de nota baixa) fica numa lista à parte (só a estratégia Tendência usa; listas e alertas não mudam)
     if (isBest && gradeOk) rows.push(row);
@@ -142,5 +162,6 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null } = {}
         h2h: logs.filter(x => x[L.opp] === (g.home === p.team ? g.away : g.home)).slice(0, 10).map(x => Object.fromEntries(Object.keys(ST).map(k => [k, ST[k](x)]))) };
     }
   }
-  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, trend, mins, mdl };
+  fin.sort((a, b) => b.fe - a.fe);
+  return { v: 3, date: slate.meta.date, gen: slate.meta.generatedAt, demo: !!slate.meta.demo, w, games, injuries, rows, trend, mins, mdl, ...(finta ? { fin: fin.slice(0, 150), fg: finta.gen } : {}) };
 }

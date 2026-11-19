@@ -13,6 +13,7 @@ import { fetchInjuries, fetchGameOdds } from './espn.js';
 import { fetchLines } from './oddsapi.js';
 import { fetchSGO } from './sgo.js';
 import { fetchKalshi, DEFAULT_SERIES } from './kalshi.js';
+import { fetchFinta } from './finta.js';
 import { MODES, DEFAULT_BOOKS, loadState, saveState, mergeLines } from './oddsplan.js';
 import { USAGE } from './http.js';
 import { dailySummary, sendTelegram, radarAlerts } from './notify.js';
@@ -282,7 +283,13 @@ async function main() {
   const prevSeason = buildPrevSeason(Object.values(prev.games), prevL);
   try { const txt = JSON.stringify(prevSeason); let old = ''; try { old = await readFile(PREV, 'utf8'); } catch { } if (old !== txt) await writeFile(PREV, txt); } catch (e) { warnings.push('prev.json falhou: ' + e.message); }
   // lista pronta para o bot do Telegram
-  try { const bd = buildBotData({ ...slate, prev: prevSeason }, { w: +(env.BOT_W || .4), kalshi: kalshi.length ? { date, gen: new Date().toISOString(), list: kalshi } : null }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
+  // Finta (19/11): props de NBA (só "mais de") lidas do JSON público do site; vão para finta.json e para o bot
+  let finta = null;
+  if (slate.games?.length && env.FINTA !== '0') {
+    try { finta = await fetchFinta({ players: slate.players, log }); await writeFile(join(dirname(OUT), 'finta.json'), JSON.stringify({ date, ...finta })); }
+    catch (e) { warnings.push('Finta falhou: ' + e.message); finta = null; }
+  }
+  try { const bd = buildBotData({ ...slate, prev: prevSeason }, { w: +(env.BOT_W || .4), finta, kalshi: kalshi.length ? { date, gen: new Date().toISOString(), list: kalshi } : null }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
   catch (e) { warnings.push('bot.json falhou: ' + e.message); }
   // 7. resultados dos últimos dias: o app usa para liquidar as tips registradas (green/red/devolvida)
   await writeFile(RESULTS, JSON.stringify(buildResults([...Object.values(cur.games), ...Object.values(prev.games)], { ...prev.names, ...cur.names }, date)));
