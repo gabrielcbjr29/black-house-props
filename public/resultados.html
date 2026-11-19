@@ -74,7 +74,7 @@ const n2 = x => (+x).toFixed(2), n1 = x => String(x).replace('.', ','), sg = x =
 const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '–';
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dm = d => d.slice(8, 10) + '/' + d.slice(5, 7);
-let ALL = null, DIAS = 7, FILT = 'all';
+let ALL = null, DIAS = 7, FILT = 'all', CLVM = null;
 try { const v = localStorage.getItem('bh-res-dias'); if (v != null) DIAS = +v; } catch {}
 document.querySelectorAll('.chip[data-d]').forEach(b => { b.setAttribute('aria-pressed', +b.dataset.d === DIAS);
   b.addEventListener('click', () => { DIAS = +b.dataset.d; try { localStorage.setItem('bh-res-dias', DIAS); } catch {} document.querySelectorAll('.chip[data-d]').forEach(x => x.setAttribute('aria-pressed', x === b)); draw(); }); });
@@ -82,6 +82,7 @@ document.querySelectorAll('.chip[data-d]').forEach(b => { b.setAttribute('aria-p
 async function load() {
   if (!CID || !TOK) { document.getElementById('app').innerHTML = '<div class="msg">Este link está incompleto. Abra o painel pelo bot: <b>/canais → seu canal → 📈 Desempenho → 📊 Painel e planilha</b>.</div>'; document.getElementById('sub').textContent = ''; return; }
   try {
+    CLVM = await import('./clv.js').catch(() => null); // veredito pelo fechamento (o resto do painel não depende dele)
     const r = await fetch(API, { cache: 'no-store' }); const j = await r.json();
     if (!r.ok) throw new Error(j.erro || 'erro ' + r.status);
     ALL = j; document.getElementById('title').textContent = j.canal || 'Resultados do canal'; draw();
@@ -115,12 +116,27 @@ function draw() {
       <div class="chart"><h3>Bateu o fechamento × acerto</h3><p>Simples que pegaram odd ou linha melhor que a de fechamento, contra as demais</p><svg id="c-clv" viewBox="0 0 520 150" role="img" aria-label="Fechamento e acerto"></svg></div>
       <div class="chart"><h3>Simples por faixa de odd</h3><p>Acerto e unidades em cada faixa</p><svg id="c-odd" viewBox="0 0 520 150" role="img" aria-label="Por faixa de odd"></svg></div>
     </div>
+    ${verHTML(P)}
     <div class="sheet"><div class="bar"><h2>Entradas</h2>
       ${[['all','Todas'],['simples','Simples'],['multipla','Múltiplas'],['green','Green'],['red','Red'],['bateu','Bateu o fechamento']].map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${FILT === k}">${t}</button>`).join('')}</div>
       <div class="scroll"><table><thead><tr><th>Data</th><th>Tipo</th><th>Entrada · resultado real</th><th class="r">Odd</th><th class="r">Fechamento</th><th class="r">CLV</th><th>Resultado</th><th class="r">Un.</th></tr></thead><tbody id="rows"></tbody></table></div>
       <div class="foot" id="foot"></div></div></div>`;
   document.querySelectorAll('.chip[data-f]').forEach(b => b.addEventListener('click', () => { FILT = b.dataset.f; document.querySelectorAll('.chip[data-f]').forEach(x => x.setAttribute('aria-pressed', x === b)); table(P); }));
   table(P); line(P, done); byMk(S); clvChart(lidas, S.filter(p => p.clv.bateu !== true)); oddChart(S);
+}
+// Veredito pelo fechamento (19/11): CLV em pontos de chance (1/odd de fechamento − 1/odd da entrada, mesma linha) e o t
+// da média; 2+ = bate o fechamento, menos de 30 leituras = cedo demais. ROI com a faixa de sorte (2 erros-padrão).
+function verHTML(P) {
+  if (!CLVM?.vereditoCanal) return '';
+  const V = CLVM.vereditoCanal(P), pp = x => x == null ? '–' : (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2).replace('.', ',') + ' pts';
+  const cl = k => k === 'bate' ? 'ok' : k === 'atras' ? 'ko' : '';
+  const row = (lb, x) => `<tr><td><b>${lb}</b> <small class="mu">${x.n} entradas</small></td><td><b class="${cl(x.ver.k)}">${x.ver.lb}</b> <small class="mu">t ${x.t == null ? '–' : String(x.t).replace('.', ',')}</small></td>
+    <td class="r">${pp(x.clv)} <small class="mu">${x.npp} leituras</small></td><td class="r">${x.lidas ? Math.round(x.f / x.lidas * 100) + '%' : '–'} <small class="mu">${x.f}↑ ${x.c}↓</small></td>
+    <td class="r">${x.roi == null ? '–' : `<b class="${x.roi >= 0 ? 'ok' : 'ko'}">${x.roi >= 0 ? '+' : ''}${Math.round(x.roi * 100)}%</b> <small class="mu">± ${Math.round(x.faixa * 100)}%</small>`}</td></tr>`;
+  return `<div class="sheet"><div class="bar"><h2>Veredito pelo fechamento</h2></div>
+    <div class="scroll"><table><thead><tr><th>Tipo</th><th>Veredito</th><th class="r">CLV médio</th><th class="r">Bateu o fechamento</th><th class="r">ROI ± sorte</th></tr></thead>
+    <tbody>${row('Tudo', V.total)}${V.tipos.map(x => row(x.k, x)).join('')}</tbody></table></div>
+    <div class="foot">CLV = quanto a chance implícita da odd andou a nosso favor até o jogo (pontos). Com poucas centenas de entradas o green/red ainda é sorte; o CLV mostra antes se o método pega valor. "Cedo demais" = menos de 30 leituras.</div></div>`;
 }
 const legTxt = l => `<span class="leg">${esc(l.name)} <small>· ${MK[l.mk] ?? l.mk} ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)} · @${n2(l.odd)}</small> ${l.real == null ? '' : `<small class="${(l.side === 'o' ? l.real > l.line : l.real < l.line) ? 'ok' : 'ko'}">fez ${l.real}</small>`}</span>`;
 function fechCell(p) {

@@ -6,6 +6,9 @@
 //   ?csv=<REPORT_TOKEN>       todas as entradas em CSV (aba Estratégias da planilha)
 //   ?stats=1                  resumo por estratégia (view strategy_stats)
 //   ?placar=1                 placar público agregado para o app (função SQL placar_json; CORS; cache 60 s)
+//   ?veredito=1               veredito pelo fechamento (CLV) por método, estratégia, lado e faixa de valor: só números
+//                             agregados das entradas do papel (public/clv.js; CORS; cache 120 s)
+import { veredito } from '../../public/clv.js';
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const ODD_EST = 1.87;
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
@@ -17,6 +20,12 @@ async function sb(path: string, init: RequestInit = {}) {
   const r = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { apikey: key!, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
   if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 160));
   const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+// todas as linhas (o PostgREST devolve no máximo 1000 por vez): páginas de 1000 pelo cabeçalho Range
+async function sbAll(path: string) {
+  const out: any[] = [];
+  for (let i = 0; i < 100; i++) { const pg = await sb(path, { headers: { Range: `${i * 1000}-${i * 1000 + 999}` } }) ?? []; out.push(...pg); if (pg.length < 1000) break; }
+  return out;
 }
 const cfg = async (k: string) => (await sb(`bot_config?key=eq.${k}&select=value`))?.[0]?.value as string | undefined;
 const getJ = (f: string) => fetch(APP + f + '?t=' + Math.floor(Date.now() / 120_000), { headers: { 'Cache-Control': 'no-cache' } }).then(r => r.ok ? r.json() : null);
@@ -174,6 +183,7 @@ async function record(silent = false) {
       if (fresh.includes(x)) x.alerted = true; else trendLate.push(x);
     }
   }
+  const fechadas = await closeRest(st.date, new Set([...rows, ...fresh].map(key)), now).catch(e => ({ erro: String(e) }));
   if (rows.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   if (fresh.length) await sb('strategy_picks?on_conflict=date,strategy_id,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(fresh) });
   for (const x of trendLate) await sb(`strategy_picks?date=eq.${x.date}&strategy_id=eq.${x.strategy_id}&pid=eq.${x.pid}&mk=eq.${encodeURIComponent(x.mk)}`, { method: 'PATCH', body: JSON.stringify({ alerted: true }) }).catch(() => null);
@@ -183,8 +193,28 @@ async function record(silent = false) {
   const risk = bot?.date === st.date ? await risco(bot).catch(e => ({ erro: String(e) })) : { skip: 'bot.json de outro dia' };
   const leitor = await leitorCheck().catch(e => ({ erro: String(e) }));
   const coleta = await coletaCheck(bot).catch(e => ({ erro: String(e) }));
-  return { ok: true, date: st.date, atualizadas: rows.length, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor, coleta };
+  return { ok: true, date: st.date, atualizadas: rows.length, fechamento: fechadas, novas: fresh.length, alertadas: toAlert.length, alertas, risco: risk, leitor, coleta };
 }
+// Fechamento das entradas que saíram da lista do dia (19/11): a estratégia deixou de apontar a linha (a odd ou a linha
+// andou, o modelo mudou...), mas a entrada continua valendo e o fechamento precisa seguir até o jogo; senão o CLV fica
+// preso na última leitura em que ela ainda estava na lista. Lê as linhas da 99play (linhas99.json, gerado no pipeline)
+// e grava linha/odd do lado da entrada, só com leitura feita antes do início do jogo.
+async function closeRest(date: string, inList: Set<string>, now: number) {
+  const L = await getJ('linhas99.json').catch(() => null); if (!L?.l) return { skip: 'sem linhas99' };
+  const open: any[] = await sb(`strategy_picks?date=eq.${date}&status=eq.aberta&tip_utc=gt.${new Date(now + 5 * 6e4).toISOString()}&select=id,strategy_id,pid,mk,side,line,odd,odd_src,tip_utc`) ?? [];
+  let n = 0;
+  for (const x of open) {
+    if (inList.has(`${x.strategy_id}|${x.pid}|${x.mk}`) || (x.odd_src && x.odd_src !== '99play')) continue;
+    const v = L.l[`${x.pid}|${x.mk}`]; if (!v) continue;
+    const at = v[3] ?? L.gen; if (at && Date.parse(at) >= Date.parse(x.tip_utc)) continue;
+    const odd = x.side === 'o' ? v[1] : v[2]; if (!odd) continue;
+    if (+x.line === +v[0] && +x.odd === +odd) continue;
+    await sb(`strategy_picks?id=eq.${x.id}`, { method: 'PATCH', body: JSON.stringify({ line: v[0], odd, updated_at: new Date(now).toISOString() }) }).catch(() => null);
+    n++;
+  }
+  return { fora_da_lista: open.filter(x => !inList.has(`${x.strategy_id}|${x.pid}|${x.mk}`)).length, atualizadas: n };
+}
+
 // ---------- Leitor da 99play parado (PC do usuário desligado, aba fechada…) ----------
 // Roda junto com a gravação (a cada 15 min). Se a última leitura tem 2h+ avisa uma vez; quando volta, avisa de novo.
 // Estado em bot_config C99_ALERT (= taken_at da leitura já avisada). De 0h às 8h o aviso chega sem som.
@@ -326,6 +356,15 @@ Deno.serve(async (req: Request) => {
       const r = await sb('rpc/placar_json', { method: 'POST', body: '{}' });
       return json(r, 200, { ...CORS, 'Cache-Control': 'public, max-age=60' });
     }
+    // veredito pelo fechamento: público e agregado (nenhum dado de usuário; as entradas do papel já são públicas no placar)
+    if (u.searchParams.get('veredito')) {
+      const [rows, st] = await Promise.all([
+        sbAll('strategy_picks?select=strategy_id,side,open_line,open_odd,line,odd,edge,status,profit&order=id.asc'),
+        sb('strategies?select=id,name'),
+      ]);
+      const nomes = Object.fromEntries((st ?? []).map((s: any) => [s.id, s.name]));
+      return json({ gen: new Date().toISOString(), ...veredito(rows ?? [], { nomes }) }, 200, { ...CORS, 'Cache-Control': 'public, max-age=120' });
+    }
     const secret = await cfg('WEBHOOK_SECRET');
     if (u.searchParams.get('record') && u.searchParams.get('record') === secret) return json(await record(u.searchParams.get('silent') === '1'));
     if (u.searchParams.get('settle') && u.searchParams.get('settle') === secret) return json(await settle());
@@ -340,7 +379,7 @@ Deno.serve(async (req: Request) => {
     if (u.searchParams.get('stats')) return json(await sb('strategy_stats?select=*&order=lucro.desc.nullslast'));
     const rep = await cfg('REPORT_TOKEN');
     if (rep && u.searchParams.get('csv') === rep) {
-      const rows: any[] = await sb('strategy_picks?select=*,strategies(name)&order=date.asc,strategy_id.asc,id.asc&limit=20000') ?? [];
+      const rows: any[] = await sbAll('strategy_picks?select=*,strategies(name)&order=date.asc,strategy_id.asc,id.asc');
       const head = ['data', 'estrategia', 'jogador', 'time', 'adversario', 'mercado', 'lado', 'linha', 'odd', 'fonte_odd', 'chance_modelo', 'valor_esperado', 'nota', 'resultado', 'status', 'lucro_u', 'linha_fechamento', 'clv_linha'];
       const q = (x: unknown) => { const t = x == null ? '' : String(x); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
       const ST: Record<string, string> = { aberta: 'Aberta', green: 'Green', red: 'Red', void: 'Anulada' };

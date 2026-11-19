@@ -4,6 +4,7 @@
 import { MARKETS, jerseySVG } from './engine.js';
 
 export const PLACAR_URL = 'https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/estrategias?placar=1';
+export const VEREDITO_URL = 'https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/estrategias?veredito=1';
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const n1 = x => (Math.round(x * 10) / 10).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const n2 = x => (+x).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,9 +23,11 @@ const SKIND = id => id.startsWith('m-') ? 'Modelo por mercado' : id === 'tendenc
 let CACHE = null;
 export async function loadPlacar(force = false) {
   if (!force && CACHE && Date.now() - CACHE.at < 60_000) return CACHE.data;
-  const r = await fetch(PLACAR_URL + '&t=' + Math.floor(Date.now() / 60_000));
+  const t = '&t=' + Math.floor(Date.now() / 60_000);
+  // o veredito pelo fechamento vem à parte: se falhar, o placar sai sem ele
+  const [r, ver] = await Promise.all([fetch(PLACAR_URL + t), fetch(VEREDITO_URL + t).then(x => x.ok ? x.json() : null).catch(() => null)]);
   if (!r.ok) throw new Error('placar indisponível (' + r.status + ')');
-  const data = await r.json(); CACHE = { at: Date.now(), data }; return data;
+  const data = { ...(await r.json()), veredito: ver }; CACHE = { at: Date.now(), data }; return data;
 }
 
 /* curva de unidades acumuladas por dia (começa em zero no dia anterior ao primeiro) */
@@ -44,6 +47,29 @@ function curveSVG(dias) {
   pts.forEach((p, i) => { if (!i) return; s += `<circle class="pt ${p.day >= 0 ? 'up' : 'down'}" cx="${x(i)}" cy="${y(p.u)}" r="4.5"><title>${p.d}: ${u(p.day)} no dia (${p.g}/${p.n})</title></circle>`; });
   pts.forEach((p, i) => { if (pts.length > 14 && i % Math.ceil(pts.length / 10)) return; s += `<text class="axis" x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}">${p.d}</text>`; });
   return s + '</svg>';
+}
+
+/* Veredito pelo fechamento (19/11): o método é julgado pelo CLV (o mercado andou para o nosso lado até o jogo?), que tem
+   pouco ruído, e não só pelo green/red, que com poucas centenas de entradas ainda é sorte. */
+const VCLS = { bate: 'ok', atras: 'bad', semprova: '', cedo: 'mut' };
+const pp = x => x == null ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' pts';
+export function vereditoHTML(V) {
+  if (!V?.total) return '';
+  const row = (lb, x, sub = '') => `<tr><td><b>${esc(lb)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</td>
+    <td class="num"><span class="vchip ${VCLS[x.ver.k]}">${x.ver.lb}</span><small>t ${x.t == null ? '–' : x.t.toLocaleString('pt-BR')}</small></td>
+    <td class="num"><b class="${cls(x.clv)}">${pp(x.clv)}</b><small>${x.npp} leituras</small></td>
+    <td class="num">${x.lidas ? `<b>${pct(x.f / x.lidas)}</b><small>${x.f} a favor · ${x.c} contra</small>` : '–'}</td>
+    <td class="num">${x.roi == null ? '–' : `<b class="${cls(x.roi)}">${spct(x.roi)}</b><small>± ${pct(x.faixa)} de sorte</small>`}</td></tr>`;
+  const tbl = (list, lb) => `<div class="tblwrap"><table class="ptbl vtbl"><thead><tr><th>${lb}</th><th class="num">Veredito</th><th class="num">CLV médio</th><th class="num">Bateu o fechamento</th><th class="num">ROI</th></tr></thead><tbody>${list.join('')}</tbody></table></div>`;
+  const T = V.total;
+  return `<section class="panel pbox"><h3>Veredito pelo fechamento <small>${T.npp} entradas com leitura · CLV médio ${pp(T.clv)}</small></h3>
+    ${tbl([row('Tudo no papel', T), ...V.metodo.map(x => row(x.k, x, `${x.n} entradas · ${x.g}G ${x.r}R`)), ...V.lado.map(x => row(x.k, x, `${x.n} entradas`))], 'Método')}
+    <p class="muted fn">CLV = chance implícita na odd de fechamento da 99play menos a da entrada, na mesma linha (em pontos). Positivo: o mercado andou para o nosso lado. <b>Bate o fechamento</b> = t de 2 ou mais; <b>cedo demais</b> = menos de 30 leituras. O ROI vem com a faixa de sorte (2 erros-padrão): se ela cruza o zero, o lucro ainda não prova nada.</p>
+  </section>
+  <section class="panel pbox"><h3>Por faixa de valor <small>EV do modelo na hora da entrada (sem a Tendência)</small></h3>
+    ${tbl(V.faixa.map(x => row(x.k, x, `${x.n} entradas · ${x.g}G ${x.r}R`)), 'Faixa de EV')}
+    <p class="muted fn">Se as faixas altas não batem o fechamento, o valor grande é o modelo sem saber de algo que o mercado já sabe (lesão, escalação, minutos).</p>
+  </section>`;
 }
 
 const bar = (v, max) => `<i class="pbar ${cls(v)}" style="--w:${Math.min(100, Math.abs(v) / (max || 1) * 100).toFixed(0)}%"></i>`;
@@ -102,6 +128,7 @@ export function placarHTML(P, { fresh } = {}) {
     <div class="tblwrap"><table class="ptbl"><thead><tr><th>Estratégia</th><th class="num">Entradas</th><th class="num">Acerto</th><th class="num">Lucro</th><th class="num">ROI</th><th class="num">Odd média</th><th class="num">CLV+</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">Ainda sem entradas.</td></tr>'}</tbody></table></div>
     <p class="muted fn">Um mercado só merece stake de verdade com 50+ entradas, ROI e CLV positivos. Com menos que isso, o placar é ruído.</p>
   </section>
+  ${vereditoHTML(P.veredito)}
   <div class="pgrid">${brk('Por lado', lado, maxL, x => x.lb)}${brk('Por mercado', merc, maxM, x => mkLb(x.mk))}</div>
   <section class="panel pbox"><h3>Gabarito ${ontDate ? `de ${dateBR(ontDate)}` : ''} <small>${ont.length} entradas conferidas</small></h3>${gab || '<p class="muted">O gabarito do dia anterior aparece de manhã, depois dos boxscores.</p>'}</section>`;
 }

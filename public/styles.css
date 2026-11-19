@@ -1040,6 +1040,20 @@ ul.why li.n span { background: var(--warn-soft); color: var(--warn); }
 .hb em { font-style: normal; font-weight: 500; color: var(--muted); }
 .hb::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .hb.ok::before { background: var(--green); } .hb.bad::before { background: var(--bad); }
+.vchip { display: inline-block; font-size: 12px; font-weight: 800; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.vchip.ok { background: var(--green-soft); border-color: var(--green-line); color: var(--green); }
+.vchip.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.vchip.mut { color: var(--muted); font-weight: 600; }
+.vtbl td small { white-space: nowrap; }
+@media (max-width: 640px) {
+  .ptbl.vtbl, .ptbl.vtbl tbody { display: block; width: 100%; }
+  .ptbl.vtbl thead { display: none; }
+  .ptbl.vtbl tr { display: grid; grid-template-columns: auto 1fr 1fr; gap: 6px 14px; padding: 11px 2px; border-bottom: 1px solid var(--line); align-items: start; }
+  .ptbl.vtbl tr:last-child { border-bottom: 0; }
+  .ptbl.vtbl td { padding: 0; border: 0; text-align: left; }
+  .ptbl.vtbl td:first-child { grid-column: 1 / -1; }
+  .ptbl.vtbl td:nth-child(4) { display: none; }
+}
 .pbox { padding: 18px 20px; margin-top: 14px; }
 .pbox h3 { font-size: 17px; font-weight: 800; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; }
 .pbox h3 small { color: var(--muted); font-weight: 500; font-size: 13px; }

@@ -1,6 +1,6 @@
 // Dados prontos para o bot do Telegram (public/data/bot.json).
 // O modelo roda aqui, na coleta; o bot só filtra e formata, então responde rápido.
-import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB, OFF_MK } from '../public/engine.js';
+import { buildProps, evaluate, bestPrice, GRADE_ORDER, bhScore, reasons, inOddRange, L, POSLB, OFF_MK, lavada } from '../public/engine.js';
 import { STRATEGIES, strategyCtx, MIN_MK } from './strategies.js';
 import { kalshiAt, norm as kNorm, ALV } from '../scripts/alavanca.mjs';
 
@@ -51,7 +51,9 @@ export function buildBotData(slate, { w = .4, full = false, kalshi = null, finta
   const kFresh = kalshi?.list?.length && kalshi.date === slate.meta?.date
     && !(kalshi.gen && slate.meta?.generatedAt && Math.abs(Date.parse(slate.meta.generatedAt) - Date.parse(kalshi.gen)) / 36e5 >= 3);
   const KAL = kFresh ? new Map(kalshi.list.map(k => [kNorm(k.name) + '|' + k.mk, k])) : null;
-  const games = slate.games.map(g => ({ id: g.id, a: g.away, h: g.home, t: brTime(g.timeUTC), utc: g.timeUTC, sp: g.spread ?? null, to: g.total ?? null }));
+  // lv = chance de o jogo terminar com 20+ de diferença (handicap da casa, desvio de 13): só informação para as props
+  const games = slate.games.map(g => ({ id: g.id, a: g.away, h: g.home, t: brTime(g.timeUTC), utc: g.timeUTC, sp: g.spread ?? null, to: g.total ?? null,
+    lv: g.spread == null ? null : lavada(g.spread).p20 }));
   const gById = Object.fromEntries(slate.games.map(g => [g.id, g]));
   const rows = [], trend = [], mins = [];
   for (const pr of buildProps(slate, { calib: true })) {

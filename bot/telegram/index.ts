@@ -68,7 +68,7 @@ type Row = { id: string; n: string; t: string; o: string; home: boolean; g: stri
 type MStat = [number, number, number[], number | null];
 type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
 type Fin = { id: string; n: string; t: string; o: string; g: string; h: string; m: string; l: number; fo: number; alt: number; p: number; fe: number; st: string; mn: number; h10: [number, number] | null; l9?: number; o9?: number | null };
-type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; fin?: Fin[]; fg?: string; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
+type Data = { date: string; gen: string; demo: boolean; w: number; mdl?: Record<string, MPlayer>; fin?: Fin[]; fg?: string; games: { id: string; a: string; h: string; t: string; utc?: string; sp: number | null; to: number | null; lv?: number | null }[]; injuries: { n: string; t: string; st: string; no: string }[]; rows: Row[] };
 
 let CACHE: { at: number; data: Data } | null = null;
 // placar da verdade (scripts/auditoria.mjs → public/data/auditoria.json): só medição, alimenta o selo dos cards e o /placar
@@ -624,7 +624,7 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   if (!picks.length) { const st = await estToday(etDate()); picks = (st?.picks ?? []).map((p: any) => ({ ...p, status: 'aberta', odd_src: p.odd ? p.odd_src : 'estimada' })); }
   const ev = (x: any) => evS(x);
   const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || 1.87)}${x.odd_src === 'estimada' ? '*' : ''}${x.open_line != null && +x.open_line !== +x.line ? ` <i>(agora ${n1(+x.line)})</i>` : ''} · ${pc(+x.p)}${need(+(x.open_odd ?? x.odd))} · EV ${ev(x.edge == null ? null : +x.edge)}`;
-  const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('✅ Gabarito de ontem', '/gabarito')], [BTN('🏠 Menu', '/menu')]] };
+  const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('⚖️ Veredito (CLV)', '/veredito'), BTN('✅ Gabarito', '/gabarito')], [BTN('🏠 Menu', '/menu')]] };
   const S = id ? stats.find(s => s.id === id) : null;
   if (S) {
     const mine = picks.filter(x => x.strategy_id === S.id);
@@ -636,6 +636,23 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   const tab = stats.map(s => `${String(s.name).padEnd(18).slice(0, 18)} ${String(s.n).padStart(3)} ${(s.n ? Math.round(s.g / s.n * 100) + '%' : '–').padStart(4)} ${u2(+s.lucro || 0).padStart(7)} ${s.clv_linha_media == null ? '   –' : ((s.clv_linha_media >= 0 ? '+' : '') + n1(+s.clv_linha_media)).padStart(4)}`).join('\n');
   const hoje = stats.map(s => `${esc(s.name)}: <b>${picks.filter(x => x.strategy_id === s.id).length}</b>`).join(' · ');
   return { text: `<b>🧪 MODELO POR MERCADO</b>\n<i>As melhores entradas do Modelo BH em cada mercado, na linha e odd da 99play · registro automático, 1u por entrada</i>\n<pre>MERCADO             N  ACE   LUCRO  CLV\n${tab}</pre>\n<b>Entradas hoje</b>\n${hoje}\n\n<i>Um mercado só merece stake de verdade com 50+ entradas, ROI positivo e CLV positivo. CLV = quanto a linha andou a nosso favor até o jogo. Toque num mercado para ver as entradas de hoje.</i>`, kb };
+}
+// ---------- Veredito pelo fechamento (19/11): o papel julgado pelo CLV (função estrategias ?veredito=1, público e agregado) ----------
+async function vereditoCmd(arg = ''): Promise<Out> {
+  const V: any = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/estrategias?veredito=1').then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!V?.total) return { text: 'Não consegui ler o veredito agora. Tente de novo em alguns minutos.', kb: { inline_keyboard: [HOME] } };
+  const ICO: Record<string, string> = { bate: '🟢', atras: '🔴', semprova: '🟡', cedo: '⚪' };
+  const pp = (x: number | null) => x == null ? '   –' : (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2);
+  const roi = (x: any) => x.roi == null ? '' : ` · ROI ${x.roi >= 0 ? '+' : '−'}${Math.round(Math.abs(x.roi) * 100)}% ±${Math.round(x.faixa * 100)}`;
+  const ln = (lb: string, x: any) => `${ICO[x.ver.k]} <b>${esc(lb)}</b> · ${x.ver.lb}\n   CLV <b>${pp(x.clv)} pts</b> (t ${x.t == null ? '–' : n1(x.t)}, ${x.npp} leituras) · bateu ${x.lidas ? Math.round(x.f / x.lidas * 100) : 0}%${roi(x)}`;
+  const mode = arg === 'faixa' ? 'faixa' : arg === 'mercado' ? 'mercado' : 'metodo';
+  let body = '';
+  if (mode === 'metodo') body = [ln('Tudo no papel', V.total), ...V.metodo.map((x: any) => ln(x.k, x)), '', ...V.lado.map((x: any) => ln(x.k, x))].join('\n');
+  else if (mode === 'faixa') body = V.faixa.map((x: any) => ln('EV ' + x.k, x)).join('\n');
+  else body = V.estrategia.filter((x: any) => x.npp >= 5).sort((a: any, b: any) => (b.t ?? -99) - (a.t ?? -99)).slice(0, 25).map((x: any) => ln(x.nome, x)).join('\n');
+  const tit = { metodo: 'POR MÉTODO E LADO', faixa: 'POR FAIXA DE VALOR', mercado: 'POR ESTRATÉGIA' }[mode];
+  const text = `<b>⚖️ VEREDITO PELO FECHAMENTO · ${tit}</b>\n<i>O papel julgado pelo CLV: quanto a odd da 99play andou a nosso favor até o jogo, em pontos de chance. Com poucas centenas de entradas o green/red ainda é sorte; o CLV mostra antes se o método pega valor.</i>\n\n${body}\n\n<i>🟢 bate o fechamento (t ≥ 2) · 🟡 sem prova ainda · 🔴 atrás do fechamento (t ≤ −2) · ⚪ cedo demais (menos de 30 leituras). ROI ± = faixa de sorte: se cruza o zero, o lucro ainda não prova nada.</i>`;
+  return { text: fitHTML(text), kb: { inline_keyboard: [[BTN(mode === 'metodo' ? '• Métodos' : 'Métodos', '/veredito'), BTN(mode === 'faixa' ? '• Faixa de valor' : 'Faixa de valor', '/veredito faixa'), BTN(mode === 'mercado' ? '• Estratégias' : 'Estratégias', '/veredito mercado')], [BTN('🧪 Placar', '/estrategias'), { text: '📈 No app', url: APP_URL + '#placar' }], [HOME[0]]] } };
 }
 // ---------- Histórico automático do top 10 e resultado da manhã ----------
 const etDate = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
@@ -1026,6 +1043,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /ontem · resultado de ontem (chega sozinho de manhã)
 /estrategias · modelo por mercado: placar e entradas do dia
 /minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
+/veredito · Veredito pelo fechamento (CLV) de cada método, lado e faixa de valor
 /finta · overs da Finta com valor (linha principal e escada)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
 /placar · placar da verdade: modelo × 99play × Kalshi no fechamento · /placar 7
@@ -1051,7 +1069,7 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')], [BTN('🎯 Odd mínima', '/odd'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('🎯 Pauta do Tipster', '/pauta'), BTN('⏱️ Método Minutos', '/minutos'), BTN('🟣 Finta', '/finta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('🎯 Pauta do Tipster', '/pauta'), BTN('⏱️ Método Minutos', '/minutos'), BTN('🟣 Finta', '/finta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar'), BTN('⚖️ Veredito', '/veredito')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -1091,6 +1109,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'banca' || cmd === 'roi') return bancaCmd(chatId, rest);
   if (cmd === 'apagar') return apagarCmd(chatId, rest);
   if (cmd === 'estrategias' || cmd === 'estrategia') return estrategiasCmd(rest);
+  if (cmd === 'veredito' || cmd === 'clv') return vereditoCmd(rest[0]);
   // Método Minutos (18/11): atalho para o placar e as entradas do dia da estratégia 'minutos'
   if (cmd === 'minutos' || cmd === 'metodominutos') return estrategiasCmd(['minutos']);
   if (cmd === 'finta') {
@@ -1152,8 +1171,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'multipla') return multipla(d, rest[0], om);
   if (cmd === 'jogos') {
     const w = (s: string, n: number) => (s + ' '.repeat(n)).slice(0, n);
-    const rowsTxt = d.games.map(g => `${g.t}  ${w(`${g.a} @ ${g.h}`, 11)} ${w(g.sp != null ? `${g.sp < 0 ? g.h : g.a} -${n1(Math.abs(g.sp))}` : '', 10)} ${g.to ? n1(g.to) : ''}`).join('\n');
-    return { text: header(d, '🗓️ JOGOS DE HOJE') + `\n<pre>HORA   JOGO        FAVORITO   TOTAL\n${rowsTxt}</pre>\nToque num jogo para ver as linhas:`, kb: { inline_keyboard: [...chunk(d.games.map(g => BTN(`${g.a} @ ${g.h}`, `/jogo ${g.h}`)), 2), home('/jogos')] } };
+    const rowsTxt = d.games.map(g => `${g.t}  ${w(`${g.a} @ ${g.h}`, 11)} ${w(g.sp != null ? `${g.sp < 0 ? g.h : g.a} -${n1(Math.abs(g.sp))}` : '', 10)} ${w(g.to ? n1(g.to) : '', 6)}${g.lv != null ? String(Math.round(g.lv * 100)).padStart(3) + '%' : ''}`).join('\n');
+    return { text: header(d, '🗓️ JOGOS DE HOJE') + `\n<pre>HORA   JOGO        FAVORITO   TOTAL LAVADA\n${rowsTxt}</pre>\n<i>Lavada = chance de o jogo terminar com 20+ de diferença (titular joga menos). 25%+ pede cuidado com over de titular.</i>\nToque num jogo para ver as linhas:`, kb: { inline_keyboard: [...chunk(d.games.map(g => BTN(`${g.a} @ ${g.h}`, `/jogo ${g.h}`)), 2), home('/jogos')] } };
   }
   if (cmd === 'desfalques') {
     const ic: Record<string, string> = { out: '🔴', doubtful: '🟠', questionable: '🟡' };
@@ -1862,7 +1881,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos, erros e faltas'], ['faltas', 'Faltas cometidas'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

@@ -157,13 +157,32 @@ export function dvpRank(slate, team, pos, k) {
   return { rank: c[key][team] || null, of: c[key].n || 30 };
 }
 
+// ---------- lavada (19/11, ideia do simulador do BankrollSZN, só para props) ----------
+// Medido em 1.452 jogos (2025-26 e 2026-27): minutos do jogador ÷ média dos 10 jogos anteriores, pela margem final.
+// Titulares (26+ min): 1,04 em jogo decidido por até 5; 0,95 com 15–20; 0,91 com 20–25; 0,85 com 30+. Reservas de
+// 12–24 min quase não mudam (0,99–1,02): na média a lavada tira minutos do titular sem dar ao reserva de rotação.
+// A margem do jogo vem do handicap da casa, com desvio de 13 pontos (o simulador deles usa ~14; a literatura, 12–13).
+// fSt = minutos esperados do titular neste handicap ÷ minutos esperados num jogo qualquer (a média dele já mistura
+// jogos parelhos e lavadas). Dá ~+1,6% com handicap 3, ~0% com 10 e ~−2% com 15: bem menos que os degraus antigos.
+export const LAV_SD = 13;
+const LAV_ST = [[0, 1.040], [5, 1.031], [10, .995], [15, .954], [20, .912], [25, .873], [30, .851]], LAV_ST_BASE = .981;
+const lavF = m => { let f = LAV_ST[0][1]; for (const [a, v] of LAV_ST) if (m >= a) f = v; return f; };
+const LAV_MEMO = new Map();
+export function lavada(spread, sd = LAV_SD) {
+  const s = Math.abs(+spread || 0), k = s.toFixed(1) + '|' + sd; if (LAV_MEMO.has(k)) return LAV_MEMO.get(k);
+  let W = 0, p20 = 0, f = 0;
+  for (let x = -70; x <= 70; x += .5) { const w = Math.exp(-((x - s) ** 2) / (2 * sd * sd)); W += w; if (Math.abs(x) >= 20) p20 += w; f += w * lavF(Math.abs(x)); }
+  const r = { p20: Math.round(p20 / W * 1000) / 1000, fSt: Math.round(f / W / LAV_ST_BASE * 1000) / 1000 };
+  LAV_MEMO.set(k, r); return r;
+}
+
 // ---------- contexto do jogador (minutos, uso) ----------
 function playedLogs(p) { return p.logs.filter(g => g[L.min] > 0); }
 function avgMin(logs, n) { return mean(logs.slice(0, n).map(g => g[L.min])); }
 
 const dayDiff = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 864e5);
 
-function context(p, slate, game) {
+function context(p, slate, game, lavMode = 'v1') {
   const logs = playedLogs(p);
   const m5 = avgMin(logs, 5), m10 = avgMin(logs, 10), m20 = avgMin(logs, 20);
   let base = .4 * m5 + .35 * m10 + .25 * m20;
@@ -191,7 +210,12 @@ function context(p, slate, game) {
     adj.push({ lb: (p.lineup.confirmed ? 'Reserva confirmado' : 'Previsto no banco') + ' (era titular)', f: 1 });
   }
   const spread = game.spread == null ? null : Math.abs(game.spread);
-  if (spread != null && spread >= 10 && m10 >= 26) adj.push({ lb: 'Risco de lavada (handicap ' + spread.toFixed(1).replace('.', ',') + ')', f: .94 });
+  if (lavMode === 'v2') {
+    // curva medida (19/11): só titulares (26+ min); fator = minutos esperados pela margem provável do jogo
+    if (spread != null && m10 >= 26) { const L2 = lavada(spread), f = L2.fSt;
+      if (f <= .99) adj.push({ lb: 'Risco de lavada (handicap ' + spread.toFixed(1).replace('.', ',') + ', ' + Math.round(L2.p20 * 100) + '% de 20+)', f });
+      else if (f >= 1.01) adj.push({ lb: 'Jogo parelho (handicap ' + spread.toFixed(1).replace('.', ',') + ')', f }); }
+  } else if (spread != null && spread >= 10 && m10 >= 26) adj.push({ lb: 'Risco de lavada (handicap ' + spread.toFixed(1).replace('.', ',') + ')', f: .94 });
   else if (spread != null && spread >= 7.5 && m10 >= 26) adj.push({ lb: 'Jogo pode abrir (handicap ' + spread.toFixed(1).replace('.', ',') + ')', f: .97 });
   if (p.status === 'questionable') adj.push({ lb: 'Dúvida', f: .9 });
   if (p.status === 'doubtful') adj.push({ lb: 'Provável desfalque', f: .75 });
@@ -240,6 +264,8 @@ function ratePM(logs, k) { const mm = sum(logs.map(g => g[L.min])); return mm ? 
    confiante demais → aumenta a dispersão (d ÷ k²), o que puxa as chances para perto de 50%. */
 export function buildProps(slate, opts = {}) {
   const calib = opts.calib === false ? null : slate.calib || null;
+  // lavada: 'v1' = degraus antigos (handicap 7,5+ → ×0,97; 10+ → ×0,94 nos titulares); 'v2' = curva medida (lavadaFactor)
+  const lavMode = opts.lav ?? slate.meta?.lav ?? 'v1';
   const gameByTeam = {};
   for (const g of slate.games) { gameByTeam[g.home] = g; gameByTeam[g.away] = g; }
   const lines = {};
@@ -250,7 +276,7 @@ export function buildProps(slate, opts = {}) {
   const MODEL = slate.model && (!slate.meta?.date || slate.model.date === slate.meta.date) ? slate.model.players || {} : null;
   for (const p of slate.players) {
     const game = gameByTeam[p.team]; if (!game || p.status === 'out') continue;
-    const ctx = context(p, slate, game); if (ctx.logs.length < 3 || ctx.exp < 8) continue;
+    const ctx = context(p, slate, game, lavMode); if (ctx.logs.length < 3 || ctx.exp < 8) continue;
     const opp = ctx.opp;
     const tp = slate.teams?.[p.team]?.pace, op = slate.teams?.[opp]?.pace;
     let paceRatio = tp && op ? ((tp + op) / 2) / lgPace : 1;
