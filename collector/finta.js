@@ -7,7 +7,8 @@ import { getJSON } from './http.js';
 
 const BASE = 'https://finta.win/rs/finta/public';
 export const FINTA_MK = { Points: 'PTS', Rebounds: 'REB', Assists: 'AST', 'Threes Made': '3PM', 'Pts & Rebs & Asts': 'PRA', 'Pts & Rebs': 'PR',
-  'Pts & Asts': 'PA', 'Rebs & Asts': 'RA', Steals: 'STL', Blocks: 'BLK', 'Double Double': 'DD' };
+  'Pts & Asts': 'PA', 'Rebs & Asts': 'RA', Steals: 'STL', Blocks: 'BLK', 'Double Double': 'DD',
+  'Triple Double': 'TD', 'Triple-Double': 'TD' }; // TD (19/11): quando a Finta oferecer, para o /combo
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\b(jr|sr|ii|iii|iv)\b\.?/g, '').replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
 
 /* JSON de um jogo → [{name, team, mk, line, o, alt}] (só over, odd > 1) */
