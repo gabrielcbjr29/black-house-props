@@ -21,6 +21,7 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
   - job `coletar`: coleta e commita `data public/data`;
   - job `publicar`: roda `escadas.mjs` e depois `canal.mjs`.
 - **Odds da 99play:** vêm SÓ do script Tampermonkey no navegador do PC do usuário. O feed tem uma linha por mercado.
+- **Finta** (`collector/finta.js`, desde 19/11): JSON público do site (`/rs/finta/public/lobby` e `/match/<id>`), lido pela coleta. Só tem over (linha principal + escada). Vai para `public/data/finta.json`; no bot, `fo` (odd da Finta no mesmo over) e `fin` (overs com valor), tela `/finta`.
 
 ## Comandos
 - Testes: `npm test`. Depois rode `git checkout -q -- public/data`, porque os testes mexem nos dados.
