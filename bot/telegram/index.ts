@@ -642,9 +642,10 @@ async function vereditoCmd(arg = ''): Promise<Out> {
   const V: any = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/estrategias?veredito=1').then(r => r.ok ? r.json() : null).catch(() => null);
   if (!V?.total) return { text: 'Não consegui ler o veredito agora. Tente de novo em alguns minutos.', kb: { inline_keyboard: [HOME] } };
   const ICO: Record<string, string> = { bate: '🟢', atras: '🔴', semprova: '🟡', cedo: '⚪' };
-  const pp = (x: number | null) => x == null ? '   –' : (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2);
+  const pp = (x: number | null) => x == null ? '–' : (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2).replace('.', ',');
+  const tt = (x: number | null) => x == null ? '–' : (x < 0 ? '−' : '') + n1(Math.abs(x));
   const roi = (x: any) => x.roi == null ? '' : ` · ROI ${x.roi >= 0 ? '+' : '−'}${Math.round(Math.abs(x.roi) * 100)}% ±${Math.round(x.faixa * 100)}`;
-  const ln = (lb: string, x: any) => `${ICO[x.ver.k]} <b>${esc(lb)}</b> · ${x.ver.lb}\n   CLV <b>${pp(x.clv)} pts</b> (t ${x.t == null ? '–' : n1(x.t)}, ${x.npp} leituras) · bateu ${x.lidas ? Math.round(x.f / x.lidas * 100) : 0}%${roi(x)}`;
+  const ln = (lb: string, x: any) => `${ICO[x.ver.k]} <b>${esc(lb)}</b> · ${x.ver.lb}\n   CLV <b>${pp(x.clv)} pts</b> (t ${tt(x.t)}, ${x.npp} leituras) · bateu ${x.lidas ? Math.round(x.f / x.lidas * 100) : 0}%${roi(x)}`;
   const mode = arg === 'faixa' ? 'faixa' : arg === 'mercado' ? 'mercado' : 'metodo';
   let body = '';
   if (mode === 'metodo') body = [ln('Tudo no papel', V.total), ...V.metodo.map((x: any) => ln(x.k, x)), '', ...V.lado.map((x: any) => ln(x.k, x))].join('\n');
