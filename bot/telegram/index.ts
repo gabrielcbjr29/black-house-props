@@ -672,6 +672,40 @@ async function vereditoCmd(arg = ''): Promise<Out> {
   const text = `<b>⚖️ VEREDITO PELO FECHAMENTO · ${tit}</b>\n<i>O papel julgado pelo CLV: quanto a odd da 99play andou a nosso favor até o jogo, em pontos de chance. Com poucas centenas de entradas o green/red ainda é sorte; o CLV mostra antes se o método pega valor.</i>\n\n${body}\n\n<i>🟢 bate o fechamento (t ≥ 2) · 🟡 sem prova ainda · 🔴 atrás do fechamento (t ≤ −2) · ⚪ cedo demais (menos de 30 leituras). ROI ± = faixa de sorte: se cruza o zero, o lucro ainda não prova nada.</i>`;
   return { text: fitHTML(text), kb: { inline_keyboard: [[BTN(mode === 'metodo' ? '• Métodos' : 'Métodos', '/veredito'), BTN(mode === 'faixa' ? '• Faixa de valor' : 'Faixa de valor', '/veredito faixa'), BTN(mode === 'mercado' ? '• Estratégias' : 'Estratégias', '/veredito mercado')], [BTN('🧪 Placar', '/estrategias'), { text: '📈 No app', url: APP_URL + '#placar' }], [HOME[0]]] } };
 }
+// ---------- rodar os números na hora (20/11) ----------
+// Dispara o pipeline do GitHub com o token guardado em bot_config.GH_DISPATCH (o administrador manda com /github).
+async function cfgV(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
+async function ghRun(minGapMin = 3): Promise<string> {
+  const tok = await cfgV('GH_DISPATCH'); if (!tok) return 'sem token';
+  const last = Date.parse(await cfgV('GH_LAST') ?? ''); if (last && Date.now() - last < minGapMin * 6e4) return 'já rodando';
+  const r = await fetch('https://api.github.com/repos/gabrielcbjr29/black-house-props/actions/workflows/atualizar.yml/dispatches', {
+    method: 'POST', headers: { Authorization: `Bearer ${tok}`, Accept: 'application/vnd.github+json', 'User-Agent': 'blackhouse-bot', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main' }) });
+  if (r.status !== 204) return 'erro ' + r.status;
+  await putCfgKey('GH_LAST', new Date().toISOString()).catch(() => null);
+  return 'ok';
+}
+/* próxima rodada automática: :05/:20/:35/:50 das 12h às 0h de Brasília (15–03 UTC); fora disso, aos :50 */
+function nextRun(now = Date.now()) {
+  for (let t = Math.ceil(now / 6e4) * 6e4; t < now + 2 * 36e5; t += 6e4) {
+    const d = new Date(t), m = d.getUTCMinutes(), h = d.getUTCHours();
+    if (m === 50 || ([5, 20, 35].includes(m) && (h >= 15 || h <= 2))) return t;
+  }
+  return now + 36e5;
+}
+async function rodarCmd(chatId: number, ler = false): Promise<Out> {
+  if (!(await isAdmin(chatId))) return { text: 'Só o administrador roda os números.', kb: { inline_keyboard: [HOME] } };
+  if (ler) {
+    await putCfgKey('C99_PEDIDO', new Date().toISOString()).catch(() => null);
+    return { text: '🔵 <b>Leitura pedida.</b> Com a aba da 99play aberta no PC (leitor 1.3), ele lê em até 1 minuto e os números rodam sozinhos logo depois (~6 min no total). Toque em <b>Atualizar a pauta</b> daqui a uns 7 minutos.', kb: { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta')], HOME] } };
+  }
+  const r = await ghRun();
+  const txt = r === 'ok' ? '▶️ <b>Rodando os números agora.</b> Em ~6 minutos a pauta e o bot atualizam com a última leitura da 99play. Toque em <b>Atualizar a pauta</b> depois.'
+    : r === 'já rodando' ? '⏳ Os números já estão rodando (pedido há menos de 3 min). Em alguns minutos toque em <b>Atualizar a pauta</b>.'
+    : r === 'sem token' ? `Para eu rodar na hora, falta o token do GitHub. Mande <code>/github SEU_TOKEN</code> aqui (eu apago a mensagem na hora). Enquanto isso, a próxima rodada automática é às ${hourBR(new Date(nextRun()).toISOString())}.`
+    : `Não consegui rodar agora (${esc(r)}). A próxima rodada automática é às ${hourBR(new Date(nextRun()).toISOString())}.`;
+  return { text: txt, kb: { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta')], HOME] } };
+}
+
 // ---------- /combo (19/11): escada de rebotes e assistências da Finta × marcos da 99play, só odd 15+ na Finta ----------
 // Abas: 🎯 Ast + Reb (principal) · ➕ Ast/Reb + duplo-duplo · 🔺 Ast + Reb + triplo-duplo. A escada da Finta vem do
 // combo.json (coleta); a da 99play, da última foto do leitor (marcos 5+/7+/10+, desde o leitor 1.2), lida na hora.
@@ -1113,6 +1147,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /estrategias · modelo por mercado: placar e entradas do dia
 /minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
 /veredito · Veredito pelo fechamento (CLV) de cada método, lado e faixa de valor
+/rodar · Rodar os números agora (administrador) · /ler · pedir leitura da 99play ao PC
 /combo · Combo Finta × 99play de um jogador: ast + reb (e duplo/triplo-duplo) 15+ na Finta (ex.: /combo lebron)
 /finta · overs da Finta com valor (linha principal e escada)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
@@ -1242,6 +1277,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     return list(d, d.rows.filter(r => r.g === g.id), `🏟️ ${g.a} @ ${g.h} · ${g.t}`, 16, raw, page);
   }
   if (cmd === 'combo' || cmd === 'combos') return comboCmd(chatId, rest);
+  if (cmd === 'rodar') return rodarCmd(chatId);
+  if (cmd === 'ler') return rodarCmd(chatId, true);
   if (cmd === 'jogador') {
     const q = norm(arg); if (q.length < 3) return { text: 'Digite o nome assim: <code>/jogador brunson</code>', kb: { inline_keyboard: [HOME] } };
     const rows = d.rows.filter(r => norm(r.n).includes(q)); if (!rows.length) return { text: `Nenhuma linha boa hoje para <b>${esc(arg)}</b>.`, kb: { inline_keyboard: [HOME] } };
@@ -1358,7 +1395,19 @@ async function sendPauta(chatId: number, demo = false) {
   const head = `<b>🎯 PAUTA DO TIPSTER${demo ? ' · EXEMPLO' : ''}</b>${demo ? '\n<i>(montada como se fosse 2h antes do primeiro jogo de hoje)</i>' : ''}\n<i>${dateBR(d.date)} · ${next ? `próximo jogo às ${hourBR(new Date(next).toISOString())}` : 'sem jogo por começar'} · atualizado ${hourBR(d.gen)}</i>`;
   const kb = { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta'), BTN('🪜 Escadas', '/escadas')], HOME] };
   const send = (text: string, k?: any) => TG('sendMessage', { chat_id: chatId, text: fitHTML(text), parse_mode: 'HTML', disable_web_page_preview: true, ...(k ? { reply_markup: k } : {}) });
-  if (!P.singles.length && !esc3.length) { await send(head + '\n\nSem entradas para a pauta agora: os jogos já começaram ou a 99play ainda não tem as linhas (o leitor precisa estar lendo).', kb); return; }
+  if (!P.singles.length && !esc3.length) {
+    // 20/11: diz por quê (leitura velha nos números × leitura nova ainda não processada × PC sem ler) e oferece rodar já
+    const t9s = d.rows.map(r => Date.parse((r as any).t9 ?? '')).filter(Boolean), usada = t9s.length ? Math.max(...t9s) : NaN;
+    const ult: any = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?ultima=1').then(r => r.ok ? r.json() : null).catch(() => null);
+    const pc = Date.parse(ult?.taken_at ?? ''), hb = (t: number) => hourBR(new Date(t).toISOString()), prox = hb(nextRun());
+    const jogos = !(next > now) ? 'Os jogos de hoje já começaram.' : '';
+    const why = jogos || (pc && (!usada || pc - usada > 5 * 6e4)
+      ? `Seu PC leu a 99play às <b>${hb(pc)}</b>, mas essa leitura ainda não entrou nos números (a última que entrou é ${usada ? `das ${hb(usada)}` : 'de antes'}). A próxima rodada automática é às <b>${prox}</b>, ou toque em ▶️ Rodar agora.`
+      : pc && Date.now() - pc >= 2 * 36e5 ? `A última leitura da 99play é das <b>${hb(pc)}</b> (mais de 2h). Abra a aba da 99play no PC ou toque em 🔵 Pedir leitura.`
+      : 'Nenhuma linha passou nos filtros da pauta agora (odd 1,40–3,20, chance 55%+, 7/10 nos últimos 10, titular).');
+    const adm = await isAdmin(chatId);
+    await send(head + '\n\nSem entradas para a pauta agora. ' + why, adm && !jogos ? { inline_keyboard: [[BTN('▶️ Rodar agora', '/rodar'), BTN('🔵 Pedir leitura', '/ler')], ...kb.inline_keyboard] } : kb); return;
+  }
   // 1) simples
   await send(head + `\n<i>Escolhidas por sequência e matchup (não por EV), com o Modelo BH concordando. Linhas e odds da 99play. "Precisa" = acerto mínimo para não perder com aquela odd.</i>\n\n<b>🔥 ${P.singles.length} SIMPLES</b>\n\n` +
     P.singles.map(({ r }, i) => `<b>${i + 1}. ${esc(r.n)}</b> <i>${r.home ? `${r.t} x ${r.o}` : `${r.t} @ ${r.o}`} · ${r.h}</i>
@@ -1849,6 +1898,17 @@ async function handle(update: any) {
       }
       await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', disable_web_page_preview: true, text: await shareLinksText(codes, chatId) }); return;
     }
+  }
+  // /github <token> (20/11): o administrador guarda o token que dispara o pipeline; a mensagem com o token é apagada na hora
+  if (!cq && /^\/github(@\S+)?\s+\S+/i.test(text)) {
+    const mid = update.message?.message_id;
+    if (mid) await TG('deleteMessage', { chat_id: chatId, message_id: mid }).catch(() => null);
+    if (!(await isAdmin(chatId))) { await TG('sendMessage', { chat_id: chatId, text: 'Comando só do administrador.' }); return; }
+    const tok = text.trim().split(/\s+/)[1];
+    await putCfgKey('GH_DISPATCH', tok);
+    const r = await ghRun(0);
+    await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: r === 'ok' ? '✅ <b>Token guardado</b> (apaguei a sua mensagem). Testei: os números já estão rodando. A partir de agora cada leitura nova da 99play roda os números na hora, e o botão ▶️ Rodar agora funciona.' : `⚠️ Guardei o token, mas o GitHub recusou o teste (${esc(r)}). Confira se ele tem permissão <b>Actions: Read and write</b> no repositório black-house-props.` });
+    return;
   }
   // trocar a casa de um post do canal (botões do aviso "Postado no canal"): responde com um aviso rápido, sem nova mensagem
   if (cq && /^\/cs\s/.test(text)) {

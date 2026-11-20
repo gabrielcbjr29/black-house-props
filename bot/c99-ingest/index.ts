@@ -9,6 +9,18 @@ async function sb(path: string, init: RequestInit = {}) {
   if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 120));
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
+// 20/11: cada leitura nova da 99play dispara o pipeline na hora (sem esperar o horário fixo), com o token do GitHub
+// guardado em bot_config.GH_DISPATCH (só permissão de Actions neste repositório). No máximo 1 disparo a cada 8 min.
+async function cfgVal(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
+export async function ghDispatch(minGapMin = 8): Promise<string> {
+  const tok = await cfgVal('GH_DISPATCH'); if (!tok) return 'sem token';
+  const last = Date.parse(await cfgVal('GH_LAST') ?? ''); if (last && Date.now() - last < minGapMin * 6e4) return 'já disparado há pouco';
+  const r = await fetch('https://api.github.com/repos/gabrielcbjr29/black-house-props/actions/workflows/atualizar.yml/dispatches', {
+    method: 'POST', headers: { Authorization: `Bearer ${tok}`, Accept: 'application/vnd.github+json', 'User-Agent': 'blackhouse-bot', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main' }) });
+  if (r.status !== 204) return 'erro ' + r.status;
+  await sb('bot_config?on_conflict=key', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'GH_LAST', value: new Date().toISOString() }) }).catch(() => null);
+  return 'ok';
+}
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   const url = new URL(req.url);
@@ -27,6 +39,8 @@ Deno.serve(async (req: Request) => {
       }
       // "Ler 99play agora" (bot /combo): o leitor confere a cada minuto se há pedido mais novo que a última leitura
       if (url.searchParams.get('pedido')) return json({ pedido: (await sb('bot_config?key=eq.C99_PEDIDO&select=value'))?.[0]?.value ?? null });
+      // hora da última leitura (leve, para o bot explicar a pauta vazia)
+      if (url.searchParams.get('ultima')) { const r = await sb('c99_snapshots?select=taken_at,n_events,versao:payload->>versao&order=taken_at.desc&limit=1'); return json(r?.[0] ?? null); }
       if (!url.searchParams.get('latest')) return json({ ok: true });
       const r = await sb('c99_snapshots?select=taken_at,n_events,n_markets,payload&order=taken_at.desc&limit=1');
       return json(r?.[0] ?? { payload: null });
@@ -47,7 +61,8 @@ Deno.serve(async (req: Request) => {
     if (!Array.isArray(p?.events) || typeof p?.details !== 'object') return json({ ok: false, erro: 'formato' }, 400);
     const nm = Object.values(p.details as Record<string, any>).reduce((a: number, d: any) => a + (d?.childMarkets?.length || 0), 0);
     await sb('c99_snapshots', { method: 'POST', body: JSON.stringify({ n_events: p.events.length, n_markets: nm, payload: p }) });
+    const rodada = await Promise.race([ghDispatch().catch(e => 'erro ' + e.message), new Promise<string>(r => setTimeout(() => r('sem resposta'), 6000))]);
     // guarda todas as fotos: são o histórico de linhas reais da 99play para testar estratégias (backtest e CLV)
-    return json({ ok: true, jogos: p.events.length, mercados: nm });
+    return json({ ok: true, jogos: p.events.length, mercados: nm, rodada });
   } catch (e) { return json({ ok: false, erro: String((e as Error).message) }, 500); }
 });
