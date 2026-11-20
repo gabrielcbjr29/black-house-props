@@ -3,17 +3,14 @@
 # Com o runner próprio instalado no seu computador, crie a variável COLETOR = computador em
 # Settings → Secrets and variables → Actions → Variables: a coleta passa a sair pela sua internet
 # de casa e usa as fontes oficiais da NBA. A PUBLICAÇÃO do site sempre roda na nuvem.
-# Horários (Brasília): de hora em hora aos :50 e, das 12h à 0h, também aos :05, :20 e :35. Além disso, cada leitura nova
-# da 99play feita no computador do usuário dispara uma rodada na hora (função c99-ingest, com o token GH_DISPATCH). Assim o modelo roda logo que a linha abre ou muda, e as
+# Horários (Brasília): de hora em hora aos :50. Fora disso, só quando alguém pede no bot (▶️ Rodar agora / pauta com
+# leitura nova ainda não processada), com o token GH_DISPATCH guardado no banco. Assim o modelo roda logo que a linha abre ou muda, e as
 # entradas novas viram alerta no bot. Também roda quando você clica em "Run workflow" e a cada push.
 name: Atualizar dados e publicar
 
 on:
   schedule:
     - cron: '50 * * * *'
-    # 20/11: também aos :05, :20 e :35 das 12h à 0h de Brasília (15–03 UTC), para a leitura da 99play entrar rápido nos
-    # números. Não gasta crédito de odds a mais: cada foto de odds é tirada uma vez por jogo (oddsplan/topodds).
-    - cron: '5,20,35 0-2,15-23 * * *'
   workflow_dispatch:
     inputs:
       odds_agora:

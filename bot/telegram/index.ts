@@ -684,16 +684,9 @@ async function ghRun(minGapMin = 3): Promise<string> {
   await putCfgKey('GH_LAST', new Date().toISOString()).catch(() => null);
   return 'ok';
 }
-/* próxima rodada automática: :05/:20/:35/:50 das 12h às 0h de Brasília (15–03 UTC); fora disso, aos :50 */
-function nextRun(now = Date.now()) {
-  for (let t = Math.ceil(now / 6e4) * 6e4; t < now + 2 * 36e5; t += 6e4) {
-    const d = new Date(t), m = d.getUTCMinutes(), h = d.getUTCHours();
-    if (m === 50 || ([5, 20, 35].includes(m) && (h >= 15 || h <= 2))) return t;
-  }
-  return now + 36e5;
-}
+/* próxima rodada automática: aos :50 de cada hora */
+function nextRun(now = Date.now()) { const d = new Date(now); d.setUTCSeconds(0, 0); if (d.getUTCMinutes() >= 50) d.setUTCHours(d.getUTCHours() + 1); d.setUTCMinutes(50); return d.getTime(); }
 async function rodarCmd(chatId: number, ler = false): Promise<Out> {
-  if (!(await isAdmin(chatId))) return { text: 'Só o administrador roda os números.', kb: { inline_keyboard: [HOME] } };
   if (ler) {
     await putCfgKey('C99_PEDIDO', new Date().toISOString()).catch(() => null);
     return { text: '🔵 <b>Leitura pedida.</b> Com a aba da 99play aberta no PC (leitor 1.3), ele lê em até 1 minuto e os números rodam sozinhos logo depois (~6 min no total). Toque em <b>Atualizar a pauta</b> daqui a uns 7 minutos.', kb: { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta')], HOME] } };
@@ -701,7 +694,7 @@ async function rodarCmd(chatId: number, ler = false): Promise<Out> {
   const r = await ghRun();
   const txt = r === 'ok' ? '▶️ <b>Rodando os números agora.</b> Em ~6 minutos a pauta e o bot atualizam com a última leitura da 99play. Toque em <b>Atualizar a pauta</b> depois.'
     : r === 'já rodando' ? '⏳ Os números já estão rodando (pedido há menos de 3 min). Em alguns minutos toque em <b>Atualizar a pauta</b>.'
-    : r === 'sem token' ? `Para eu rodar na hora, falta o token do GitHub. Mande <code>/github SEU_TOKEN</code> aqui (eu apago a mensagem na hora). Enquanto isso, a próxima rodada automática é às ${hourBR(new Date(nextRun()).toISOString())}.`
+    : r === 'sem token' ? `Rodar na hora ainda não está ligado (falta o token do GitHub do administrador: <code>/github SEU_TOKEN</code>). A próxima rodada automática é às ${hourBR(new Date(nextRun()).toISOString())}.`
     : `Não consegui rodar agora (${esc(r)}). A próxima rodada automática é às ${hourBR(new Date(nextRun()).toISOString())}.`;
   return { text: txt, kb: { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta')], HOME] } };
 }
@@ -1147,7 +1140,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /estrategias · modelo por mercado: placar e entradas do dia
 /minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
 /veredito · Veredito pelo fechamento (CLV) de cada método, lado e faixa de valor
-/rodar · Rodar os números agora (administrador) · /ler · pedir leitura da 99play ao PC
+/rodar · Rodar os números agora · /ler · pedir leitura da 99play ao PC
 /combo · Combo Finta × 99play de um jogador: ast + reb (e duplo/triplo-duplo) 15+ na Finta (ex.: /combo lebron)
 /finta · overs da Finta com valor (linha principal e escada)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
@@ -1347,9 +1340,8 @@ const matchup = (r: Row) => r.dv?.r && r.dv.of ? (r.s === 'o' ? (r.dv.r - 1) : (
 export function pautaPick(d: Data, now = Date.now(), om = 0) {
   const utc = Object.fromEntries(d.games.map(g => [g.id, g.utc ? Date.parse(g.utc) : NaN]));
   const cand = d.rows.filter(r => {
-    const t9 = (r as any).t9;
     return r.c9 && r.d && r.d >= Math.max(1.4, om) && r.d <= 3.2 && r.p >= .55 && r.st === 'ok' && (r.mn ?? 0) >= 24
-      && (rate(r.l10, 8) ?? 0) >= .7 && !(utc[r.g] <= now + 10 * 6e4) && !(t9 && now - Date.parse(t9) >= 2 * 36e5);
+      && (rate(r.l10, 8) ?? 0) >= .7 && !(utc[r.g] <= now + 10 * 6e4); // 20/11: sem corte pela idade da leitura (o card mostra a hora)
   }).map(r => {
     const h10 = rate(r.l10, 8)!, h5 = rate(r.l5, 4) ?? h10, hs = rate(r.ss, 8) ?? h10, hh = rate(r.hh, 2);
     const sq = .5 * h10 + .25 * h5 + .25 * hs + .01 * Math.min(r.sk ?? 0, 5);
@@ -1392,21 +1384,25 @@ async function sendPauta(chatId: number, demo = false) {
   const E = await fetch(APP_URL + 'data/escadas.json?t=' + Math.floor(now / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
   const esc3 = (E?.date === d.date ? E.list : []).filter((x: any) => Date.parse(x.tip) > now + 10 * 6e4).slice(0, 3);
   const next = d.games.map(g => g.utc ? Date.parse(g.utc) : NaN).filter(t => t > now).sort((a, b) => a - b)[0];
-  const head = `<b>🎯 PAUTA DO TIPSTER${demo ? ' · EXEMPLO' : ''}</b>${demo ? '\n<i>(montada como se fosse 2h antes do primeiro jogo de hoje)</i>' : ''}\n<i>${dateBR(d.date)} · ${next ? `próximo jogo às ${hourBR(new Date(next).toISOString())}` : 'sem jogo por começar'} · atualizado ${hourBR(d.gen)}</i>`;
-  const kb = { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta'), BTN('🪜 Escadas', '/escadas')], HOME] };
+  let head = `<b>🎯 PAUTA DO TIPSTER${demo ? ' · EXEMPLO' : ''}</b>${demo ? '\n<i>(montada como se fosse 2h antes do primeiro jogo de hoje)</i>' : ''}\n<i>${dateBR(d.date)} · ${next ? `próximo jogo às ${hourBR(new Date(next).toISOString())}` : 'sem jogo por começar'} · atualizado ${hourBR(d.gen)}</i>`;
+  const kb = { inline_keyboard: [[BTN('🔄 Atualizar a pauta', '/pauta'), BTN('🪜 Escadas', '/escadas')], [BTN('▶️ Rodar agora', '/rodar'), BTN('🔵 Pedir leitura', '/ler')], HOME] };
+  // 20/11: solta na hora o que já tem; diz de quando é a odd da 99play e, se o PC já leu algo mais novo que os números,
+  // roda os números sozinho (com o token) para a próxima pauta
+  const t9s = d.rows.map(r => Date.parse((r as any).t9 ?? '')).filter(Boolean), usada = t9s.length ? Math.max(...t9s) : NaN;
+  const ult: any = demo ? null : await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?ultima=1').then(r => r.ok ? r.json() : null).catch(() => null);
+  const pcAt = Date.parse(ult?.taken_at ?? ''), hb = (t: number) => hourBR(new Date(t).toISOString());
+  let aviso = usada ? `\n🔵 Odds da 99play lidas às <b>${hb(usada)}</b>${Date.now() - usada >= 2 * 36e5 ? ' <i>(confira a odd na casa antes de entrar)</i>' : ''}` : '';
+  if (!demo && pcAt && (!usada || pcAt - usada > 5 * 6e4)) {
+    const r = await ghRun(8);
+    aviso += r === 'ok' || r === 'já rodando' ? `\n⏳ Seu PC leu às ${hb(pcAt)}: rodando os números com essa leitura. Em ~6 min toque em <b>Atualizar a pauta</b>.` : `\n⏳ Seu PC leu às ${hb(pcAt)}; essa leitura entra na próxima rodada (${hb(nextRun())}).`;
+  }
+  head += aviso;
   const send = (text: string, k?: any) => TG('sendMessage', { chat_id: chatId, text: fitHTML(text), parse_mode: 'HTML', disable_web_page_preview: true, ...(k ? { reply_markup: k } : {}) });
   if (!P.singles.length && !esc3.length) {
-    // 20/11: diz por quê (leitura velha nos números × leitura nova ainda não processada × PC sem ler) e oferece rodar já
-    const t9s = d.rows.map(r => Date.parse((r as any).t9 ?? '')).filter(Boolean), usada = t9s.length ? Math.max(...t9s) : NaN;
-    const ult: any = await fetch('https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest?ultima=1').then(r => r.ok ? r.json() : null).catch(() => null);
-    const pc = Date.parse(ult?.taken_at ?? ''), hb = (t: number) => hourBR(new Date(t).toISOString()), prox = hb(nextRun());
-    const jogos = !(next > now) ? 'Os jogos de hoje já começaram.' : '';
-    const why = jogos || (pc && (!usada || pc - usada > 5 * 6e4)
-      ? `Seu PC leu a 99play às <b>${hb(pc)}</b>, mas essa leitura ainda não entrou nos números (a última que entrou é ${usada ? `das ${hb(usada)}` : 'de antes'}). A próxima rodada automática é às <b>${prox}</b>, ou toque em ▶️ Rodar agora.`
-      : pc && Date.now() - pc >= 2 * 36e5 ? `A última leitura da 99play é das <b>${hb(pc)}</b> (mais de 2h). Abra a aba da 99play no PC ou toque em 🔵 Pedir leitura.`
-      : 'Nenhuma linha passou nos filtros da pauta agora (odd 1,40–3,20, chance 55%+, 7/10 nos últimos 10, titular).');
-    const adm = await isAdmin(chatId);
-    await send(head + '\n\nSem entradas para a pauta agora. ' + why, adm && !jogos ? { inline_keyboard: [[BTN('▶️ Rodar agora', '/rodar'), BTN('🔵 Pedir leitura', '/ler')], ...kb.inline_keyboard] } : kb); return;
+    const why = !(next > now) ? 'Os jogos de hoje já começaram.'
+      : !usada ? 'A 99play ainda não tem linhas lidas para os jogos de hoje: abra a aba da 99play no PC ou toque em 🔵 Pedir leitura.'
+      : 'Nenhuma linha passou nos filtros da pauta (odd 1,40–3,20, chance 55%+, 7/10 nos últimos 10, titular).';
+    await send(head + '\n\nSem entradas para a pauta agora. ' + why, kb); return;
   }
   // 1) simples
   await send(head + `\n<i>Escolhidas por sequência e matchup (não por EV), com o Modelo BH concordando. Linhas e odds da 99play. "Precisa" = acerto mínimo para não perder com aquela odd.</i>\n\n<b>🔥 ${P.singles.length} SIMPLES</b>\n\n` +

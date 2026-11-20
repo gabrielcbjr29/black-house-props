@@ -9,8 +9,8 @@ async function sb(path: string, init: RequestInit = {}) {
   if (!r.ok) throw new Error('banco ' + r.status + ' ' + (await r.text()).slice(0, 120));
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
-// 20/11: cada leitura nova da 99play dispara o pipeline na hora (sem esperar o horário fixo), com o token do GitHub
-// guardado em bot_config.GH_DISPATCH (só permissão de Actions neste repositório). No máximo 1 disparo a cada 8 min.
+// 20/11: a leitura pedida no bot (/ler) dispara o pipeline na hora, com o token do GitHub guardado em
+// bot_config.GH_DISPATCH (só permissão de Actions neste repositório). No máximo 1 disparo a cada 8 min.
 async function cfgVal(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
 export async function ghDispatch(minGapMin = 8): Promise<string> {
   const tok = await cfgVal('GH_DISPATCH'); if (!tok) return 'sem token';
@@ -61,7 +61,8 @@ Deno.serve(async (req: Request) => {
     if (!Array.isArray(p?.events) || typeof p?.details !== 'object') return json({ ok: false, erro: 'formato' }, 400);
     const nm = Object.values(p.details as Record<string, any>).reduce((a: number, d: any) => a + (d?.childMarkets?.length || 0), 0);
     await sb('c99_snapshots', { method: 'POST', body: JSON.stringify({ n_events: p.events.length, n_markets: nm, payload: p }) });
-    const rodada = await Promise.race([ghDispatch().catch(e => 'erro ' + e.message), new Promise<string>(r => setTimeout(() => r('sem resposta'), 6000))]);
+    // 20/11 (pedido do usuário): não roda a cada leitura; só roda quando a leitura veio de um pedido no bot (/ler)
+    const rodada = p.motivo === 'pedido no bot' ? await Promise.race([ghDispatch().catch(e => 'erro ' + e.message), new Promise<string>(r => setTimeout(() => r('sem resposta'), 6000))]) : 'não pedida';
     // guarda todas as fotos: são o histórico de linhas reais da 99play para testar estratégias (backtest e CLV)
     return json({ ok: true, jogos: p.events.length, mercados: nm, rodada });
   } catch (e) { return json({ ok: false, erro: String((e as Error).message) }, 500); }
