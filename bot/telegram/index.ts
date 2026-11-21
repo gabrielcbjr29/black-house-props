@@ -2214,7 +2214,7 @@ Deno.serve(async (req: Request) => {
     // dentro do Supabase a função vê só /telegram-bot; o endereço público tem /functions/v1 na frente
     const base = Deno.env.get('SUPABASE_URL');
     const self = base ? `${base}/functions/v1/telegram-bot` : `https://${url.host}${url.pathname}`;
-    const hook = await TG('setWebhook', { url: self, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'channel_post', 'my_chat_member'], drop_pending_updates: true });
+    const hook = await TG('setWebhook', { url: self, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'channel_post', 'edited_channel_post', 'my_chat_member'], drop_pending_updates: true });
     const cmds = await TG('setMyCommands', { commands: [
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
