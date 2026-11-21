@@ -435,7 +435,10 @@ async function settleFut(posts: any[]) {
     .filter(x => (x.c.esporte === 'Futebol' || !x.c.esporte || x.c.manual) && x.c.esporte !== 'Tênis' && x.p.date >= ymdIso(today, -4)); // até 4 dias para trás
   if (!P.length) return 0;
   const boards = new Map<string, any[]>(), sums = new Map<string, any>();
-  const board = async (d: string) => { if (!boards.has(d)) boards.set(d, (await fetch(ESPN_FUT + 'scoreboard?dates=' + d).then(r => r.ok ? r.json() : null).catch(() => null))?.events ?? []); return boards.get(d)!; };
+  const H = { 'User-Agent': 'Mozilla/5.0 (blackhouse-gabarito)', Accept: 'application/json' };
+  const errs: string[] = [];
+  const get = (u: string) => fetch(u, { headers: H }).then(async r => { if (!r.ok) { errs.push(`${r.status} ${u.slice(-30)}`); return null; } return r.json(); }).catch(e => { errs.push(String(e).slice(0, 80)); return null; });
+  const board = async (d: string) => { if (!boards.has(d)) boards.set(d, (await get(ESPN_FUT + 'scoreboard?dates=' + d))?.events ?? []); return boards.get(d)!; };
   let n = 0;
   for (const { p, c } of P) {
     const text = `${c.ocr ?? ''}\n${c.t ?? ''}`;
@@ -445,12 +448,12 @@ async function settleFut(posts: any[]) {
     const S: Record<string, any> = {};
     for (const { ev } of findEvents(text, events)) {
       if (ev?.status?.type?.state !== 'post') continue;
-      if (!sums.has(ev.id)) sums.set(ev.id, await fetch(ESPN_FUT + 'summary?event=' + ev.id).then(r => r.ok ? r.json() : null).catch(() => null));
+      if (!sums.has(ev.id)) sums.set(ev.id, await get(ESPN_FUT + 'summary?event=' + ev.id));
       if (sums.get(ev.id)) S[ev.id] = sums.get(ev.id);
     }
     const g = gradeFut(text, events, S);
-    const cap = JSON.stringify({ ...c, fut: { legs: g.legs, why: g.why ?? null, em: new Date().toISOString() } });
-    if (!g.status) { if (JSON.stringify(c.fut?.legs ?? null) !== JSON.stringify(g.legs) || c.fut?.why !== (g.why ?? null)) await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ cap }) }); continue; }
+    const cap = JSON.stringify({ ...c, fut: { legs: g.legs, why: g.why ?? null, nev: events.length, err: errs.slice(-2), em: new Date().toISOString() } });
+    if (!g.status) { if (JSON.stringify(c.fut?.legs ?? null) !== JSON.stringify(g.legs) || c.fut?.why !== (g.why ?? null) || c.fut?.nev !== events.length) await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ cap }) }); continue; }
     const stk = +p.stake || 1, odd = +p.odd;
     const profit = g.status === 'green' ? (odd > 1 ? Math.round(stk * (odd - 1) * 100) / 100 : 0) : g.status === 'red' ? -stk : 0;
     await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ status: g.status, profit, settled_at: new Date().toISOString(), cap }) });
