@@ -729,7 +729,27 @@ async function correlCmd(rest: string[]): Promise<Out> {
 // privado. Nada é enviado no canal (cfg.resultado = false); o resultado sai em /resultadoscanal.
 const GAB_HOUSES: Record<string, string> = { '99play': '99', finta: 'finta', br365: '365' };
 const brDate = (unix: number) => new Date(unix * 1000 - 3 * 36e5).toISOString().slice(0, 10);
+// duas chaves aceitas: sha256("gab:" + token do bot) OU o token OIDC da rodada do GitHub Actions deste repositório
+// (assinado pelo GitHub, sem segredo guardado no GitHub). Confere assinatura RS256, emissor, público, repositório e branch.
+const OIDC_ISS = 'https://token.actions.githubusercontent.com', OIDC_AUD = 'black-house-gab', OIDC_REPO = 'gabrielcbjr29/black-house-props';
+let JWKS: { at: number; keys: any[] } | null = null;
+const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=')), c => c.charCodeAt(0));
+async function oidcOk(jwt: string) {
+  try {
+    const [h64, p64, s64] = jwt.split('.'); if (!s64) return false;
+    const hd = JSON.parse(new TextDecoder().decode(b64u(h64))), pl = JSON.parse(new TextDecoder().decode(b64u(p64)));
+    const now = Date.now() / 1000;
+    if (hd.alg !== 'RS256' || pl.iss !== OIDC_ISS || pl.repository !== OIDC_REPO || pl.ref !== 'refs/heads/main' || !(pl.exp > now) || (pl.nbf && pl.nbf > now + 60)) return false;
+    if (!(Array.isArray(pl.aud) ? pl.aud.includes(OIDC_AUD) : pl.aud === OIDC_AUD)) return false;
+    if (!JWKS || Date.now() - JWKS.at > 36e5 || !JWKS.keys.some(k => k.kid === hd.kid)) JWKS = { at: Date.now(), keys: (await fetch(OIDC_ISS + '/.well-known/jwks').then(r => r.json())).keys ?? [] };
+    const jwk = JWKS.keys.find(k => k.kid === hd.kid); if (!jwk) return false;
+    const key = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true }, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64u(s64), new TextEncoder().encode(h64 + '.' + p64));
+  } catch { return false; }
+}
 async function gabAuth(req: Request, token: string) {
+  const bearer = (req.headers.get('authorization') ?? '').match(/^Bearer\s+(.+)$/i)?.[1];
+  if (bearer && await oidcOk(bearer)) return true;
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('gab:' + token)));
   return req.headers.get('x-bh-auth') === [...h].map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -792,6 +812,15 @@ async function gabHttp(req: Request, url: URL, token: string) {
   if (!(await gabAuth(req, token))) return J({ ok: false, erro: 'auth' }, 403);
   const op = url.searchParams.get('gab');
   if (op === 'list') return J(((await sb(`channel_posts?band=eq.gab&status=eq.aguardando&img=not.is.null&select=id,img,cap&order=id.asc&limit=40`).catch(() => [])) ?? []).map((r: any) => ({ id: r.id, img: r.img })));
+  // a imagem da entrada (o bot baixa do Telegram com o próprio token; o pipeline não precisa do token)
+  if (op === 'img') {
+    const r = ((await sb(`channel_posts?id=eq.${+(url.searchParams.get('id') ?? 0)}&band=eq.gab&select=img`).catch(() => [])) ?? [])[0];
+    if (!r?.img) return J({ ok: false, erro: 'não achei' }, 404);
+    const f = await TG('getFile', { file_id: r.img }).catch(() => null);
+    if (!f?.ok) return J({ ok: false, erro: 'getFile ' + (f?.description ?? '') }, 502);
+    const im = await fetch(`https://api.telegram.org/file/bot${token}/${f.result.file_path}`);
+    return new Response(im.body, { status: im.status, headers: { 'Content-Type': im.headers.get('content-type') ?? 'application/octet-stream' } });
+  }
   if (op === 'ocr' && req.method === 'POST') {
     const b = await req.json().catch(() => null); if (!b?.id) return J({ ok: false, erro: 'corpo' }, 400);
     return J(await gabProcess(+b.id, String(b.text ?? '')).catch(e => ({ ok: false, erro: String(e) })));

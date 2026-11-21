@@ -137,20 +137,19 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: node scripts/relatorio.mjs public
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: public
-      - id: deploy
-        uses: actions/deploy-pages@v4
       # gabarito do canal principal (21/11): lê o texto das imagens das entradas postadas no canal (OCR) e manda para o bot
-      # corrigir. Só instala o tesseract quando há imagem para ler.
+      # corrigir. Só instala o tesseract quando há imagem para ler. Chave: token OIDC da rodada (permissão id-token: write),
+      # sem secret. Fica ANTES do deploy do Pages: se o Pages falhar, a leitura já rodou.
       - name: Ler as entradas do canal (gabarito)
         continue-on-error: true
         timeout-minutes: 8
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           if node scripts/gabarito-ocr.mjs --check; then
             sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-por > /dev/null
             node scripts/gabarito-ocr.mjs
           fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deploy
+        uses: actions/deploy-pages@v4
