@@ -28,6 +28,12 @@ const MKTS = [
   [/roubos?\s*\+\s*(tocos?|bloq)/, 'SB', 'stl+blk'],
   [/triplo[\s-]*duplo|triple[\s-]*double/, 'TD', 'td'],
   [/duplo[\s-]*duplo|double[\s-]*double/, 'DD', 'dd'],
+  // arremessos de 2 / de 3 / de quadra (antes de "3 pontos" e de "pontos", que pegariam esses textos)
+  [/(arremessos?|cestas?)\s*de\s*(2|dois)\b[^\n]*?(tentad|tentativ)|tentativas?\s*de\s*(2|dois)\b/, '2PA', 'twoa'],
+  [/(arremessos?|cestas?)\s*de\s*(2|dois)\b|de\s*2\s*pontos?\s*convertid/, '2PM', 'twom'],
+  [/(arremessos?|cestas?)\s*de\s*(3|tres)\b[^\n]*?(tentad|tentativ)|tentativas?\s*de\s*(3|tres)\b/, '3PA', 'tpa'],
+  [/arremessos?\s*(de\s*quadra\s*)?tentad|field\s*goals?\s*attempt/, 'FGA', 'fga'],
+  [/arremessos?\s*(de\s*quadra\s*)?(convertid|certos|marcad)|field\s*goals?\s*made/, 'FGM', 'fgm'],
   [/cestas?\s*de\s*(3|tres)|bolas?\s*de\s*3|3\s*pontos|tres\s*pontos|triplos?\b|three/, '3PM', 'tpm'],
   [/lances?\s*livres?\s*(convertid|marcad)/, 'FTM', 'ftm'],
   [/lances?\s*livres?/, 'FTA', 'fta'],
@@ -56,7 +62,10 @@ export function oddsOf(s) {
   const t = nrm(s).replace(/(\d),(\d)/g, '$1.$2');
   const tot = /odds?\s*total\s*:?\s*(\d+\.\d{1,2})/.exec(t);
   const at = [...t.matchAll(/(?:@|odds?\s*(?:turbinada)?\s*:?)\s*(\d+\.\d{2})\b/g)].map(m => +m[1]).filter(x => x > 1 && x < 1000);
-  return { total: tot ? +tot[1] : null, list: at };
+  // odd solta no fim da linha do bilhete: "Cam Spencer (MEM) 1.66", "Arsenal 456 > 1,70" (2 casas; linha de prop tem 1)
+  const solta = t.split('\n').filter(l => !/(mais|menos|acima|abaixo|over|under)\s*(de|que)?\s*\d+\.\d{2}\s*$/.test(l))
+    .map(l => /(?:^|[\s>)])(\d{1,2}\.\d{2})\s*$/.exec(l)?.[1]).filter(Boolean).map(Number).filter(x => x > 1 && x < 50);
+  return { total: tot ? +tot[1] : null, list: [...at, ...solta.filter(x => !at.includes(x))] };
 }
 
 /* acha os jogadores do dia no texto (nome completo; sobrenome só quando é único no dia) */

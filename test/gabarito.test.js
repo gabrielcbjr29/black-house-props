@@ -43,3 +43,15 @@ test('peças: marco 10+, menos de, odd com @, sobrenome repetido não confunde',
   assert.equal(E.legs[0].pid, '1'); assert.equal(E.odd, 1.85);
   assert.equal(parseEntry('Williams mais de 5,5 rebotes', '', P).legs.length, 0, 'só o sobrenome repetido: não chuta');
 });
+
+// casos reais do canal (21/11): mercado "de 2 pontos convertidos" e odd solta no fim da linha
+test('gabarito: arremessos de 2 convertidos + odd solta', async () => {
+  const { parseEntry, oddsOf, marketOf } = await import('../public/gabarito.js');
+  const P = [{ id: '1642285', name: 'Cam Spencer', team: 'MEM', opp: 'MIN', game: 'g', tip: null }];
+  const E = parseEntry('Cam Spencer — Cam Spencer (MEM) 1.66\nmais 1,5\nArremessos de 2 pontos convertidos Mais de/Menos\nMinnesota Timberwolves x Memphis Grizzlies', 'NBA 1 unidade', P);
+  assert.equal(E.legs[0].mk, '2PM'); assert.equal(E.legs[0].line, 1.5); assert.equal(E.odd, 1.66);
+  assert.deepEqual(oddsOf('Defesas - Jogador - Real Madrid x Celta Vigo 1.88\nMais de 1.5').list, [1.88]);
+  assert.deepEqual(oddsOf('Newcastle x Arsenal 456 > 1,70\nMais de 1,5').list, [1.7]);
+  assert.equal(marketOf('Arremessos de 3 pontos tentados').mk, '3PA');
+  assert.equal(marketOf('Bolas de 3').mk, '3PM');
+});

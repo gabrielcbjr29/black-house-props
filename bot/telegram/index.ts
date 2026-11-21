@@ -12,7 +12,7 @@
 
 import { parseLadder99, combosOf, normName as nName } from '../../public/ladder99.js';
 import { correlOf } from '../../public/correl.js';
-import { readCaption, parseEntry } from '../../public/gabarito.js';
+import { readCaption, parseEntry, oddsOf } from '../../public/gabarito.js';
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
 type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; dom99: string; dom365: string; at: number };
 let CFG: Cfg | null = null;
@@ -792,7 +792,9 @@ async function gabProcess(id: number, ocr: string) {
     if (st) { const team = new Map(today.map(x => [x.id, x.team])); players = Object.keys(st).filter(id => R.names?.[id]).map(id => ({ id, name: R.names[id], team: team.get(id) ?? 'NBA', opp: '', game: '', tip: null })); dia = p.date; }
   }
   const nba = capj.esporte === 'NBA' || (!capj.esporte && true);
-  const E = nba ? parseEntry(ocr, capj.t, players) : { kind: 'simples', legs: [], odd: null, faltando: ['outro esporte'] };
+  // outro esporte: sem pernas (o dono marca green/red), mas guarda a odd lida para o resultado em unidades
+  const oo = nba ? null : oddsOf(`${ocr ?? ''}\n${capj.t ?? ''}`);
+  const E = nba ? parseEntry(ocr, capj.t, players) : { kind: 'simples', legs: [], odd: oo!.total ?? oo!.list[0] ?? null, faltando: ['outro esporte'] };
   const legs = E.legs.map((l: any) => ({ ...l, odd: l.odd ?? (E.legs.length === 1 ? E.odd : null) ?? null }));
   const ok = legs.length > 0;
   const patch: any = { legs, kind: E.kind, odd: E.odd, status: 'postada', date: ok ? dia : p.date,
