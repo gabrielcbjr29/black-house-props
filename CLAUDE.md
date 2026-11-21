@@ -21,6 +21,7 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
   - job `coletar`: coleta e commita `data public/data`;
   - job `publicar`: roda `escadas.mjs` e depois `canal.mjs`.
 - **Odds da 99play:** vêm SÓ do script Tampermonkey no navegador do PC do usuário. O feed tem uma linha por mercado.
+- **Gabarito do canal principal** (21/11): o bot entra no canal do usuário SEM permissão de postar (`cfg.gabarito`). Cada post (imagem + legenda) vira `channel_posts` com `band='gab'`; o pipeline lê a imagem (`scripts/gabarito-ocr.mjs`, tesseract) e `public/gabarito.js` separa jogador/mercado/linha/odd. NBA corrige sozinho; o resto o dono marca em `/resultadoscanal pendentes`. Nunca postar nem responder nesse canal.
 - **Finta** (`collector/finta.js`, desde 19/11): JSON público do site (`/rs/finta/public/lobby` e `/match/<id>`), lido pela coleta. Só tem over (linha principal + escada). Vai para `public/data/finta.json`; no bot, `fo` (odd da Finta no mesmo over) e `fin` (overs com valor), tela `/finta`.
 
 ## Comandos
