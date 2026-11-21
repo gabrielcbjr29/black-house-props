@@ -12,6 +12,7 @@
 
 import { parseLadder99, combosOf, normName as nName } from '../../public/ladder99.js';
 import { correlOf } from '../../public/correl.js';
+import { readCaption, parseEntry } from '../../public/gabarito.js';
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
 type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; dom99: string; dom365: string; at: number };
 let CFG: Cfg | null = null;
@@ -721,6 +722,129 @@ async function correlCmd(rest: string[]): Promise<Out> {
   return { text: fitHTML(head + body + small + nota), kb: { inline_keyboard: [[...ths, BTN('Outro patamar', `/correl ${P.id}`)], [BTN('🟣 Combo Finta', `/combo ${P.id}`), BTN('👤 Jogador', `/jogador ${P.id}`)], HOME] } };
 }
 
+// ---------- gabarito do canal principal (21/11) ----------
+// O bot entra no canal SEM permissão de postar. Cada post (imagem do bilhete + legenda) vira uma entrada em channel_posts
+// (band 'gab'): primeiro 'aguardando' a leitura da imagem (OCR no pipeline: scripts/gabarito-ocr.mjs), depois 'postada'
+// (a correção do canal confere sozinha pelo boxscore) ou, sem dá para ler / outro esporte, fica para o dono marcar no
+// privado. Nada é enviado no canal (cfg.resultado = false); o resultado sai em /resultadoscanal.
+const GAB_HOUSES: Record<string, string> = { '99play': '99', finta: 'finta', br365: '365' };
+const brDate = (unix: number) => new Date(unix * 1000 - 3 * 36e5).toISOString().slice(0, 10);
+async function gabAuth(req: Request, token: string) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('gab:' + token)));
+  return req.headers.get('x-bh-auth') === [...h].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function gabAdd(chatId: number | string, title: string | undefined, owner: number | string) {
+  await sb('canais?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ chat_id: +chatId, title: title ?? null, owner: +owner, ativo: true }) });
+  const k = await canalByChat(chatId);
+  if (k) await saveCfg(k, { gabarito: true, resultado: false, on: false });
+  await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', text: `📋 <b>Gabarito ligado:</b> ${esc(title ?? String(chatId))}\nEntrei sem permissão de postar: <b>não envio nada no canal</b>. Cada entrada que você postar lá eu registro, corrijo depois do jogo (NBA sozinho; outros esportes você marca aqui com um toque) e o resultado sai aqui no privado.\n\nPeça quando quiser: <code>/resultadoscanal</code>`, reply_markup: { inline_keyboard: [[BTN('📊 Resultados do canal', '/resultadoscanal')]] } });
+}
+async function gabPost(cp: any, k: Canal, edit = false) {
+  const photo = cp.photo?.at?.(-1)?.file_id ?? (cp.document?.mime_type?.startsWith('image/') ? cp.document.file_id : null);
+  const cap = String(cp.caption ?? cp.text ?? '');
+  if (!photo && !cap.trim()) return;
+  // só o que tem cara de entrada (unidade, SUPER ODD, bilhete, esporte); aviso, promoção e enquete ficam de fora
+  if (!/unidade|super\s*odd|bilhete|\bnba\b|futebol|\bnfl\b|\bnhl\b|t[eê]nis|\d+(?:[.,]\d+)?\s*u\b/i.test(cap)) return;
+  const urls = [...(cp.caption_entities ?? cp.entities ?? [])].filter((e: any) => e.url).map((e: any) => e.url);
+  const C = readCaption(cap, urls);
+  const pkey = `gab:${cp.chat.id}:${cp.message_id}`;
+  const old = ((await sb(`channel_posts?pkey=eq.${encodeURIComponent(pkey)}&select=id,status`).catch(() => [])) ?? [])[0];
+  if (old && ['green', 'red', 'void'].includes(old.status)) return; // já corrigida: edição não mexe
+  const row = { date: brDate(cp.date), kind: 'simples', legs: [], odd: null, band: 'gab', status: 'aguardando', channel_msg_id: cp.message_id, canal_id: k.id, owner_chat: k.owner,
+    pkey, cap: JSON.stringify({ t: cap.slice(0, 1500), esporte: C.esporte, superOdd: C.superOdd }), img: photo, casa: GAB_HOUSES[C.casa ?? ''] ?? '99', stake: C.stake, posted_at: new Date(cp.date * 1000).toISOString() };
+  const saved = old ? (await sb(`channel_posts?id=eq.${old.id}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(row) }))?.[0]
+    : (await sb('channel_posts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(row) }))?.[0];
+  // sem imagem: a legenda já é a entrada (lê na hora); com imagem: o pipeline lê a imagem na próxima rodada
+  if (saved && !photo) await gabProcess(saved.id, '');
+}
+/* lê a entrada (texto da imagem + legenda) e grava as pernas; avisa o dono no privado */
+async function gabProcess(id: number, ocr: string) {
+  const p = ((await sb(`channel_posts?id=eq.${id}&select=*`).catch(() => [])) ?? [])[0]; if (!p) return { ok: false, erro: 'não achei' };
+  const capj = (() => { try { return JSON.parse(p.cap ?? '{}'); } catch { return { t: p.cap ?? '' }; } })();
+  const d = await data();
+  const players = [...new Map(d.rows.map(r => [r.id, { id: r.id, name: r.n, team: r.t, opp: r.o, game: r.g, tip: GUTC.get(r.g) ?? null }])).values()];
+  const nba = capj.esporte === 'NBA' || (!capj.esporte && true);
+  const E = nba ? parseEntry(ocr, capj.t, players) : { kind: 'simples', legs: [], odd: null, faltando: ['outro esporte'] };
+  const legs = E.legs.map((l: any) => ({ ...l, odd: l.odd ?? (E.legs.length === 1 ? E.odd : null) ?? null }));
+  const ok = legs.length > 0;
+  const patch: any = { legs, kind: E.kind, odd: E.odd, status: 'postada', date: ok ? d.date : p.date,
+    cap: JSON.stringify({ ...capj, ocr: String(ocr ?? '').slice(0, 1500), falta: E.faltando, manual: !ok }) };
+  await sb(`channel_posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  const desc = ok ? legs.map((l: any) => `${esc(l.name)} · ${l.side === 'o' ? 'mais' : 'menos'} de ${n1(l.line)} ${MK[l.mk] ?? l.mk}`).join('\n') : `<i>${esc(String(capj.esporte ?? 'Entrada'))}: ${E.faltando.includes('outro esporte') ? 'outro esporte, você marca o resultado aqui' : 'não consegui ler jogador/mercado'}</i>`;
+  const owner = p.owner_chat ?? (await cfg()).allowed[0];
+  const kb: any[] = [];
+  if (!E.odd) kb.push([BTN('✍️ Informar a odd', `/gab odd ${id}`)]);
+  if (!ok) kb.push([BTN('✅ Green', `/gab r ${id} g`), BTN('❌ Red', `/gab r ${id} r`), BTN('↩️ Devolvida', `/gab r ${id} v`)]);
+  kb.push([BTN('🗑️ Não contar esta', `/gab del ${id}`), BTN('📊 Resultados', '/resultadoscanal')]);
+  await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', disable_notification: true, text: `📋 <b>Entrada do canal registrada</b> #G${id}\n${desc}\n💰 ${n1(+p.stake)}u${capj.superOdd ? ' (SUPER ODD)' : ''}${E.odd ? ` · odd <b>${n2(E.odd)}</b>` : ' · <b>falta a odd</b>'} · ${p.casa === 'finta' ? 'Finta' : p.casa === '365' ? 'BR365' : '99play'}${ok ? '\n<i>Confiro sozinho depois do jogo.</i>' : ''}`, reply_markup: { inline_keyboard: kb } });
+  return { ok: true, legs: legs.length, odd: E.odd, falta: E.faltando };
+}
+async function gabHttp(req: Request, url: URL, token: string) {
+  const J = (x: unknown, st = 200) => new Response(JSON.stringify(x), { status: st, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+  if (!(await gabAuth(req, token))) return J({ ok: false, erro: 'auth' }, 403);
+  const op = url.searchParams.get('gab');
+  if (op === 'list') return J(((await sb(`channel_posts?band=eq.gab&status=eq.aguardando&img=not.is.null&select=id,img,cap&order=id.asc&limit=40`).catch(() => [])) ?? []).map((r: any) => ({ id: r.id, img: r.img })));
+  if (op === 'ocr' && req.method === 'POST') {
+    const b = await req.json().catch(() => null); if (!b?.id) return J({ ok: false, erro: 'corpo' }, 400);
+    return J(await gabProcess(+b.id, String(b.text ?? '')).catch(e => ({ ok: false, erro: String(e) })));
+  }
+  return J({ ok: false, erro: 'op' }, 400);
+}
+async function gabOddReply(chatId: number, q: string, a: string) {
+  const id = +(/#G(\d+)/.exec(q)?.[1] ?? 0), o = parseFloat(String(a).replace(',', '.').replace(/[^0-9.]/g, ''));
+  if (!id) return false;
+  if (!(o > 1)) { await TG('sendMessage', { chat_id: chatId, text: 'Não entendi a odd. Responda só com o número, ex.: 2,10' }); return true; }
+  const p = ((await sb(`channel_posts?id=eq.${id}&band=eq.gab&select=id,legs,kind,owner_chat`).catch(() => [])) ?? [])[0];
+  if (!p || String(p.owner_chat) !== String(chatId)) return false;
+  const legs = (p.legs ?? []).map((l: any) => p.kind === 'simples' ? { ...l, odd: o } : l);
+  await sb(`channel_posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ odd: o, legs }) });
+  await TG('sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: `✅ Odd <b>${n2(o)}</b> gravada na entrada #G${id}.`, reply_markup: { inline_keyboard: [[BTN('📊 Resultados do canal', '/resultadoscanal')]] } });
+  return true;
+}
+async function gabCmd(chatId: number, rest: string[]): Promise<Out> {
+  const [op, ids, v] = rest, id = +ids;
+  const p = ((await sb(`channel_posts?id=eq.${id}&band=eq.gab&select=*`).catch(() => [])) ?? [])[0];
+  if (!p || (String(p.owner_chat) !== String(chatId) && !(await isAdmin(chatId)))) return { text: 'Não achei essa entrada do canal.', kb: { inline_keyboard: [HOME] } };
+  if (op === 'del') { await sb(`channel_posts?id=eq.${id}`, { method: 'DELETE' }); return { text: `🗑️ Entrada #G${id} fora do gabarito.`, kb: { inline_keyboard: [[BTN('📊 Resultados do canal', '/resultadoscanal')], HOME] } }; }
+  if (op === 'r') {
+    if (!(+p.odd > 1) && v === 'g') return { text: `Antes do green preciso da odd da entrada #G${id}.`, kb: { inline_keyboard: [[BTN('✍️ Informar a odd', `/gab odd ${id}`)], HOME] } };
+    const st = v === 'g' ? 'green' : v === 'r' ? 'red' : 'void', stk = +p.stake || 1;
+    const profit = st === 'green' ? Math.round(stk * (+p.odd - 1) * 100) / 100 : st === 'red' ? -stk : 0;
+    await sb(`channel_posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ status: st, profit, settled_at: new Date().toISOString() }) });
+    return { text: `${st === 'green' ? '✅ Green' : st === 'red' ? '❌ Red' : '↩️ Devolvida'} na entrada #G${id} (${profit >= 0 ? '+' : ''}${n2(profit)}u).`, kb: { inline_keyboard: [[BTN('📊 Resultados do canal', '/resultadoscanal'), BTN('⏳ Pendentes', '/resultadoscanal pendentes')], HOME] } };
+  }
+  return { text: 'Opção inválida.', kb: { inline_keyboard: [HOME] } };
+}
+async function gabResultados(chatId: number, rest: string[]): Promise<Out> {
+  const ks: any[] = (await sb(`canais?select=id,title,cfg,owner&order=id`).catch(() => [])) ?? [];
+  const k = ks.find(c => c.cfg?.gabarito && (String(c.owner) === String(chatId))) ?? ks.find(c => c.cfg?.gabarito);
+  if (!k) return { text: '📋 Nenhum canal com gabarito ainda. Adicione o bot como administrador do seu canal com <b>todas as permissões desligadas</b> (inclusive "Publicar mensagens"): ele só lê e corrige, e o resultado sai aqui.', kb: { inline_keyboard: [HOME] } };
+  const rows: any[] = (await sb(`channel_posts?canal_id=eq.${k.id}&band=eq.gab&select=id,date,kind,legs,odd,stake,status,profit,cap&order=id.desc&limit=2000`).catch(() => [])) ?? [];
+  const pend = rows.filter(r => r.status === 'postada' && (() => { try { return JSON.parse(r.cap ?? '{}').manual; } catch { return false; } })());
+  const semOdd = rows.filter(r => !['green', 'red', 'void'].includes(r.status) && !(+r.odd > 1));
+  if (rest[0] === 'pendentes') {
+    const list = [...new Map([...pend, ...semOdd].map(r => [r.id, r])).values()].slice(0, 8);
+    if (!list.length) return { text: '✅ Nada pendente no gabarito do canal.', kb: { inline_keyboard: [[BTN('📊 Resultados', '/resultadoscanal')], HOME] } };
+    const lb = (r: any) => (r.legs ?? []).length ? r.legs.map((l: any) => `${l.name} ${l.side === 'o' ? '+' : '−'}${n1(l.line)} ${MKS[l.mk] ?? l.mk}`).join(' / ') : (() => { try { const c = JSON.parse(r.cap); return `${c.esporte ?? 'Entrada'}: ${String(c.ocr || c.t || '').replace(/\s+/g, ' ').slice(0, 60)}`; } catch { return 'Entrada'; } })();
+    return { text: `<b>⏳ PENDENTES DO GABARITO</b>\n${list.map(r => `#G${r.id} · ${esc(r.date.slice(8, 10) + '/' + r.date.slice(5, 7))} · ${esc(lb(r))}${+r.odd > 1 ? ` @${n2(+r.odd)}` : ' · <b>sem odd</b>'}`).join('\n')}`,
+      kb: { inline_keyboard: [...list.map(r => [BTN(`#G${r.id} ✅`, `/gab r ${r.id} g`), BTN('❌', `/gab r ${r.id} r`), BTN('↩️', `/gab r ${r.id} v`), BTN('✍️ odd', `/gab odd ${r.id}`)]), [BTN('📊 Resultados', '/resultadoscanal')], HOME] } };
+  }
+  const today = brDate(Date.now() / 1000), d7 = brDate(Date.now() / 1000 - 6 * 86400), d30 = brDate(Date.now() / 1000 - 29 * 86400);
+  const S = (f: (r: any) => boolean) => { const L = rows.filter(r => f(r) && ['green', 'red', 'void'].includes(r.status)); const st = L.reduce((a, r) => a + (r.status === 'void' ? 0 : +r.stake || 1), 0), pr = L.reduce((a, r) => a + (+r.profit || 0), 0);
+    return { n: L.length, g: L.filter(r => r.status === 'green').length, r: L.filter(r => r.status === 'red').length, pr: Math.round(pr * 100) / 100, roi: st ? pr / st : null }; };
+  const ln = (lb: string, x: any) => `${lb}: <b>${x.pr >= 0 ? '+' : ''}${n2(x.pr)}u</b> · ${x.g}G ${x.r}R${x.roi != null ? ` · ROI ${x.roi >= 0 ? '+' : ''}${Math.round(x.roi * 100)}%` : ''}`;
+  const esporte = (r: any) => { try { return JSON.parse(r.cap ?? '{}').esporte ?? 'NBA'; } catch { return 'NBA'; } };
+  const mkOf = (r: any) => r.kind === 'multipla' ? 'Múltiplas / Criar Aposta' : esporte(r) !== 'NBA' ? esporte(r) : (MK[r.legs?.[0]?.mk] ?? r.legs?.[0]?.mk ?? 'Outros');
+  const by = new Map<string, any[]>(); for (const r of rows) if (['green', 'red', 'void'].includes(r.status)) (by.get(mkOf(r)) ?? by.set(mkOf(r), []).get(mkOf(r))!).push(r);
+  const porMk = [...by].map(([k2, L]) => ({ k: k2, ...S(r => L.includes(r)) })).sort((a, b) => b.n - a.n).slice(0, 8);
+  const abertas = rows.filter(r => r.status === 'postada' || r.status === 'aguardando').length;
+  const text = `<b>📊 RESULTADOS · ${esc(k.title ?? 'Canal')}</b>\n${ln('Hoje', S(r => r.date === today))}\n${ln('7 dias', S(r => r.date >= d7))}\n${ln('30 dias', S(r => r.date >= d30))}\n${ln('Tudo', S(() => true))}\n\n<b>Por mercado</b>\n${porMk.map(x => ln(esc(x.k), x)).join('\n') || '<i>Ainda nenhuma corrigida.</i>'}\n\n⏳ ${abertas} em aberto${pend.length || semOdd.length ? ` · <b>${new Set([...pend, ...semOdd].map(r => r.id)).size} precisam de você</b> (sem odd ou para marcar)` : ''}\n<i>Unidades da legenda (SUPER ODD = 1u). NBA corrijo sozinho pelo boxscore; o resto você marca em Pendentes.</i>`;
+  const dg = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${(await cfg()).secret}:resultados:${k.id}`));
+  const tk = [...new Uint8Array(dg)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+  const csv = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/canal?resultados=${k.id}&t=${tk}&fmt=csv&dias=400`;
+  return { text: fitHTML(text), kb: { inline_keyboard: [[BTN('⏳ Pendentes', '/resultadoscanal pendentes'), BTN('🔄 Atualizar', '/resultadoscanal')], [{ text: '📈 Painel', url: `${APP_URL}resultados.html?c=${k.id}&t=${tk}` }, { text: '📄 Planilha (CSV)', url: csv }], HOME] } };
+}
+
 // ---------- rodar os números na hora (20/11) ----------
 // Dispara o pipeline do GitHub com o token guardado em bot_config.GH_DISPATCH (o administrador manda com /github).
 async function cfgV(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
@@ -1201,6 +1325,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
 /veredito · Veredito pelo fechamento (CLV) de cada método, lado e faixa de valor
 /rodar · Rodar os números agora · /ler · pedir leitura da 99play ao PC
+/resultadoscanal · Gabarito do seu canal principal: resultado das entradas que você posta lá
 /correl · Props correlacionadas: como os companheiros vão quando um jogador bate um patamar (ex.: /correl wagner 8 ast)
 /combo · Combo Finta × 99play de um jogador: ast + reb (e duplo/triplo-duplo) 15+ na Finta (ex.: /combo lebron)
 /finta · overs da Finta com valor (linha principal e escada)
@@ -1228,7 +1353,8 @@ const MENU = { inline_keyboard: [
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')], [BTN('🎯 Odd mínima', '/odd'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
-  [BTN('🎯 Pauta do Tipster', '/pauta'), BTN('⏱️ Método Minutos', '/minutos'), BTN('🟣 Finta', '/finta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar'), BTN('⚖️ Veredito', '/veredito')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('🎯 Pauta do Tipster', '/pauta'), BTN('⏱️ Método Minutos', '/minutos'), BTN('🟣 Finta', '/finta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar'), BTN('⚖️ Veredito', '/veredito')],
+  [BTN('📊 Resultados do canal Black House', '/resultadoscanal')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
@@ -1332,6 +1458,8 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   }
   if (cmd === 'combo' || cmd === 'combos') return comboCmd(chatId, rest);
   if (cmd === 'correl' || cmd === 'correlacao' || cmd === 'correlação') return correlCmd(rest);
+  if (cmd === 'resultadoscanal' || cmd === 'rc' || (cmd === 'resultados' && /canal/i.test(rest.join(' ')))) return gabResultados(chatId, rest.filter(x => !/canal|black|house/i.test(x)));
+  if (cmd === 'gab') return gabCmd(chatId, rest);
   if (cmd === 'rodar') return rodarCmd(chatId);
   if (cmd === 'ler') return rodarCmd(chatId, true);
   if (cmd === 'jogador') {
@@ -1581,6 +1709,8 @@ async function canalSeen(cm: any, cp: any) {
     return;
   }
   if (cm && !(st === 'administrator' || (GRP(ch.type) && st === 'member'))) return;
+  // 21/11: canal onde o bot entrou SEM poder postar = modo gabarito (só lê as entradas e corrige no privado)
+  if (cm && ch.type === 'channel' && c.allowed.includes(String(cm.from?.id)) && !cm.new_chat_member?.can_post_messages) { await gabAdd(ch.id, ch.title, cm.from.id); return; }
   if (cm && c.allowed.includes(String(cm.from?.id))) await canalAdd(ch.id, ch.title, cm.from.id);
   else if (adm) await TG('sendMessage', { chat_id: adm, parse_mode: 'HTML', text: `📢 Vi o canal <b>${esc(ch.title ?? String(ch.id))}</b>. Conectar ao hub de postagem automática (você como dono)?`,
     reply_markup: { inline_keyboard: [[BTN('✅ Conectar este canal', `/canais add ${ch.id}`)]] } });
@@ -1911,7 +2041,9 @@ async function pendingText(chatId: number, text: string, m: any = null): Promise
 
 async function handle(update: any) {
   const cm = update.my_chat_member, cpost = update.channel_post;
-  if (cpost?.chat?.type === 'channel') { const k = await canalByChat(cpost.chat.id); if (k) await canalPost(cpost, k); else await canalSeen(null, cpost); return; }
+  const epost = update.edited_channel_post;
+  if (epost?.chat?.type === 'channel') { const k = await canalByChat(epost.chat.id); if (k?.cfg?.gabarito) await gabPost(epost, k, true); return; }
+  if (cpost?.chat?.type === 'channel') { const k = await canalByChat(cpost.chat.id); if (k?.cfg?.gabarito) await gabPost(cpost, k); else if (k) await canalPost(cpost, k); else await canalSeen(null, cpost); return; }
   if (cm && (cm.chat?.type === 'channel' || GRP(cm.chat?.type))) { await canalSeen(cm, null); return; }
   // grupos do hub: só o dono mexe (link de bilhete); nada de responder "bot privado" dentro de grupo
   const gm = update.message && GRP(update.message.chat?.type) ? update.message : null;
@@ -1936,6 +2068,8 @@ async function handle(update: any) {
   // ignore-duplicates: quem já tem inscrição (inclusive desligada) não muda
   await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
     body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
+  // gabarito do canal: resposta à pergunta "qual a odd?" (#G<id> no texto da pergunta)
+  if (!cq && update.message?.reply_to_message?.text && /#G\d+/.test(update.message.reply_to_message.text) && await gabOddReply(chatId, update.message.reply_to_message.text, update.message.text ?? '')) return;
   // resposta a um pedido do /canais (ex.: "mande o seu link de indicação")
   if (!cq && (update.message?.text || update.message?.caption) && await pendingText(chatId, update.message.text ?? update.message.caption, update.message)) return;
   // link de bilhete da 99play ou da BR365 (mesmo shareCode nas duas) compartilhado no privado do bot
@@ -2023,6 +2157,9 @@ async function handle(update: any) {
   if (im) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCard(chatId, im[1]); return; }
   // /cards: as melhores do dia em imagem (sempre mensagens novas)
   if (/^\/(pdf|relatorio)(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Enviando o PDF…' }); await sendPdf(chatId); return; }
+  // gabarito: pergunta da odd (resposta com o número; mensagem nova com campo de resposta)
+  const go = /^\/gab odd (\d+)/.exec(text);
+  if (go) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await TG('sendMessage', { chat_id: chatId, text: `Qual a odd da entrada #G${go[1]}? Responda esta mensagem só com o número (ex.: 2,10).`, reply_markup: { force_reply: true, input_field_placeholder: 'ex.: 2,10' } }); return; }
   if (/^\/(pauta|tipster)(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id, text: 'Montando a pauta…' }); await sendPauta(chatId, /exemplo|teste/i.test(text)); return; }
   if (/^\/cards(@\S+)?(\s|$)/i.test(text)) { if (cq) await TG('answerCallbackQuery', { callback_query_id: cq.id }); await sendCards(chatId, text.split(/\s+/)[1]); return; }
   // página (p:2:/top 20) e atualizar (repete o comando que gerou a mensagem)
@@ -2045,6 +2182,7 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const { token: TOKEN, secret: SECRET } = await cfg();
   if (!TOKEN || !SECRET) return new Response('Falta configurar TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET (tabela bot_config ou segredos da função).', { status: 500 });
+  if (url.searchParams.get('gab')) return gabHttp(req, url, TOKEN);
   if (req.method === 'GET') {
     if (url.searchParams.get('push') && url.searchParams.get('push') === SECRET) {
       const r = await pushDaily(url.searchParams.get('force') === '1', +(url.searchParams.get('min') || 0), +(url.searchParams.get('lead') || 0)).catch(e => ({ ok: false, erro: String(e) }));
@@ -2081,7 +2219,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos, erros e faltas'], ['faltas', 'Faltas cometidas'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['correl', 'Props correlacionadas entre companheiros (ex.: /correl wagner 8 ast)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['correl', 'Props correlacionadas entre companheiros (ex.: /correl wagner 8 ast)'], ['resultadoscanal', 'Resultados do canal Black House (gabarito)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

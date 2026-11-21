@@ -20,7 +20,9 @@
 import { updateClosing, postClv, legVerdict, fintaIdx, updateFinta } from '../../public/clv.js';
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
-const IDX: Record<string, (a: number[]) => number> = { pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
+// duplo/triplo-duplo (gabarito do canal, 21/11): 1 quando pts/reb/ast/roubos/tocos têm 2 (3) categorias com 10+
+const dez = (a: number[]) => [a[1], a[2], a[3], a[4], a[5]].filter(x => x >= 10).length;
+const IDX: Record<string, (a: number[]) => number> = { dd: a => dez(a) >= 2 ? 1 : 0, td: a => dez(a) >= 3 ? 1 : 0, pf: a => a[7], pts: a => a[1], reb: a => a[2], ast: a => a[3], stl: a => a[4], blk: a => a[5], tov: a => a[6], fgm: a => a[8], fga: a => a[9], tpm: a => a[10], tpa: a => a[11], ftm: a => a[12], fta: a => a[13], twoa: a => a[9] - a[11], twom: a => a[8] - a[10] };
 const MKS: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assist.', '3PM': 'de 3 conv.', PRA: 'PRA', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'arr. conv.', FGA: 'arr. tentados', '2PM': 'de 2 conv.', '2PA': 'de 2 tentados', '3PA': 'de 3 tentadas', FTM: 'LL conv.', FTA: 'LL tentados', STL: 'roubos', BLK: 'tocos', SB: 'roub+tocos', TOV: 'erros', PF: 'faltas' };
 // horário (Brasília) a partir do qual cada múltipla sai: under 12h/15h/17h, over uma hora depois
 const SLOT: Record<string, number> = { '10': 12, '15': 15, '25': 17 };
@@ -248,6 +250,7 @@ async function run() {
   const order = ks.map((_, i) => ks[(i + turn) % ks.length]);
   const res: Record<string, unknown> = {};
   for (const k of order) {
+    if (k.cfg.gabarito) { res[k.title ?? k.id] = 'gabarito (só lê)'; continue; } // 21/11: canal principal do usuário: o bot nunca posta lá
     const pauta = P.v === 2 ? P.canais?.[k.id] : (k.id === ks[0].id ? P : null); // pauta antiga (um canal só)
     if (h < +(k.cfg.inicio ?? 10)) { res[k.title ?? k.id] = `antes de ${k.cfg.inicio}h`; continue; }
     if (!pauta?.singles?.length && !pauta?.multis?.length) { await emptyWarn(k, date); res[k.title ?? k.id] = 'pauta vazia'; continue; }
@@ -391,6 +394,8 @@ async function settle() {
   let n = 0; const days = new Set<string>();
   for (const p of open) {
     const legs = p.legs ?? [];
+    if (!legs.length) continue; // gabarito sem pernas lidas (outro esporte / não leu): o dono marca no privado
+    if (p.band === 'gab' && !(+p.odd > 1) && !legs.every((l: any) => +l.odd > 1)) continue; // gabarito sem odd: espera o dono informar
     if (!res.dates?.includes(p.date) || legs.some((l: any) => !done(p.date, l.team))) continue;
     const st = legs.map((l: any) => {
       const a = res.stats[p.date]?.[l.pid]; if (!a || !(a[0] > 0)) return 'void';
