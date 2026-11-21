@@ -101,7 +101,7 @@ const GROUPS: Record<string, { mk: string[]; title: string }> = {
   tres: { mk: ['3PM'], title: 'Bolas de 3' }, triplos: { mk: ['3PM'], title: 'Bolas de 3' },
   pra: { mk: ['PRA'], title: 'Pts+Reb+Ast' }, pr: { mk: ['PR'], title: 'Pts+Reb' }, pa: { mk: ['PA'], title: 'Pts+Ast' }, ra: { mk: ['RA'], title: 'Reb+Ast' },
   combinados: { mk: ['PRA', 'PR', 'PA', 'RA'], title: 'Combinados' },
-  tentativas: { mk: ['3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'Tentativas e convertidos' },
+  tentativas: { mk: ['3PA', 'FTA', 'FTM', '2PA', '2PM', 'FGM'], title: 'Tentativas e convertidos' },
   convertidos: { mk: ['FGM', '2PM', 'FTM'], title: 'Arremessos convertidos' },
   defesa: { mk: ['STL', 'BLK', 'SB', 'TOV', 'PF'], title: 'Roubos, tocos, erros e faltas' },
   roubos: { mk: ['STL'], title: 'Roubos' }, tocos: { mk: ['BLK'], title: 'Tocos' }, erros: { mk: ['TOV'], title: 'Erros' }, faltas: { mk: ['PF'], title: 'Faltas' },
