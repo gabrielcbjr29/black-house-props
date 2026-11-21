@@ -396,7 +396,10 @@ async function settle() {
     const legs = p.legs ?? [];
     if (!legs.length) continue; // gabarito sem pernas lidas (outro esporte / não leu): o dono marca no privado
     if (p.band === 'gab' && !(+p.odd > 1) && !legs.every((l: any) => +l.odd > 1)) continue; // gabarito sem odd: espera o dono informar
-    if (!res.dates?.includes(p.date) || legs.some((l: any) => !done(p.date, l.team))) continue;
+    // gabarito: o time pode não estar no slate (post de outro dia); vale o jogador com estatística no dia, ou o dia já fechado
+    const pronto = p.band === 'gab' ? res.dates?.includes(p.date) && (legs.every((l: any) => res.stats[p.date]?.[l.pid]) || (res.dates.at(-1) > p.date))
+      : res.dates?.includes(p.date) && !legs.some((l: any) => !done(p.date, l.team));
+    if (!pronto) continue;
     const st = legs.map((l: any) => {
       const a = res.stats[p.date]?.[l.pid]; if (!a || !(a[0] > 0)) return 'void';
       const v = String(l.stat).split('+').reduce((s: number, k: string) => s + (IDX[k]?.(a) ?? 0), 0);

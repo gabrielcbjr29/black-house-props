@@ -742,32 +742,40 @@ async function gabAdd(chatId: number | string, title: string | undefined, owner:
 async function gabPost(cp: any, k: Canal, edit = false) {
   const photo = cp.photo?.at?.(-1)?.file_id ?? (cp.document?.mime_type?.startsWith('image/') ? cp.document.file_id : null);
   const cap = String(cp.caption ?? cp.text ?? '');
-  if (!photo && !cap.trim()) return;
+  if (!photo && !cap.trim()) return 'ignorado';
   // só o que tem cara de entrada (unidade, SUPER ODD, bilhete, esporte); aviso, promoção e enquete ficam de fora
-  if (!/unidade|super\s*odd|bilhete|\bnba\b|futebol|\bnfl\b|\bnhl\b|t[eê]nis|\d+(?:[.,]\d+)?\s*u\b/i.test(cap)) return;
+  if (!/unidade|super\s*odd|bilhete|\bnba\b|futebol|\bnfl\b|\bnhl\b|t[eê]nis|\d+(?:[.,]\d+)?\s*u\b/i.test(cap)) return 'ignorado';
   const urls = [...(cp.caption_entities ?? cp.entities ?? [])].filter((e: any) => e.url).map((e: any) => e.url);
   const C = readCaption(cap, urls);
   const pkey = `gab:${cp.chat.id}:${cp.message_id}`;
   const old = ((await sb(`channel_posts?pkey=eq.${encodeURIComponent(pkey)}&select=id,status`).catch(() => [])) ?? [])[0];
-  if (old && ['green', 'red', 'void'].includes(old.status)) return; // já corrigida: edição não mexe
+  if (old && ['green', 'red', 'void'].includes(old.status)) return 'corrigida'; // já corrigida: edição não mexe
   const row = { date: brDate(cp.date), kind: 'simples', legs: [], odd: null, band: 'gab', status: 'aguardando', channel_msg_id: cp.message_id, canal_id: k.id, owner_chat: k.owner,
     pkey, cap: JSON.stringify({ t: cap.slice(0, 1500), esporte: C.esporte, superOdd: C.superOdd }), img: photo, casa: GAB_HOUSES[C.casa ?? ''] ?? '99', stake: C.stake, posted_at: new Date(cp.date * 1000).toISOString() };
   const saved = old ? (await sb(`channel_posts?id=eq.${old.id}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(row) }))?.[0]
     : (await sb('channel_posts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(row) }))?.[0];
   // sem imagem: a legenda já é a entrada (lê na hora); com imagem: o pipeline lê a imagem na próxima rodada
   if (saved && !photo) await gabProcess(saved.id, '');
+  return 'ok';
 }
 /* lê a entrada (texto da imagem + legenda) e grava as pernas; avisa o dono no privado */
 async function gabProcess(id: number, ocr: string) {
   const p = ((await sb(`channel_posts?id=eq.${id}&select=*`).catch(() => [])) ?? [])[0]; if (!p) return { ok: false, erro: 'não achei' };
   const capj = (() => { try { return JSON.parse(p.cap ?? '{}'); } catch { return { t: p.cap ?? '' }; } })();
   const d = await data();
-  const players = [...new Map(d.rows.map(r => [r.id, { id: r.id, name: r.n, team: r.t, opp: r.o, game: r.g, tip: GUTC.get(r.g) ?? null }])).values()];
+  const today = [...new Map(d.rows.map(r => [r.id, { id: r.id, name: r.n, team: r.t, opp: r.o, game: r.g, tip: GUTC.get(r.g) ?? null }])).values()];
+  // post de outro dia (encaminhado depois): os jogadores que jogaram naquele dia, pelo results.json (nome + estatística)
+  let players = today, dia = d.date;
+  if (p.date < d.date) {
+    const R: any = await fetch(APP_URL + 'data/results.json?t=' + Math.floor(Date.now() / 6e5)).then(r => r.ok ? r.json() : null).catch(() => null);
+    const st = R?.stats?.[p.date];
+    if (st) { const team = new Map(today.map(x => [x.id, x.team])); players = Object.keys(st).filter(id => R.names?.[id]).map(id => ({ id, name: R.names[id], team: team.get(id) ?? 'NBA', opp: '', game: '', tip: null })); dia = p.date; }
+  }
   const nba = capj.esporte === 'NBA' || (!capj.esporte && true);
   const E = nba ? parseEntry(ocr, capj.t, players) : { kind: 'simples', legs: [], odd: null, faltando: ['outro esporte'] };
   const legs = E.legs.map((l: any) => ({ ...l, odd: l.odd ?? (E.legs.length === 1 ? E.odd : null) ?? null }));
   const ok = legs.length > 0;
-  const patch: any = { legs, kind: E.kind, odd: E.odd, status: 'postada', date: ok ? d.date : p.date,
+  const patch: any = { legs, kind: E.kind, odd: E.odd, status: 'postada', date: ok ? dia : p.date,
     cap: JSON.stringify({ ...capj, ocr: String(ocr ?? '').slice(0, 1500), falta: E.faltando, manual: !ok }) };
   await sb(`channel_posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   const desc = ok ? legs.map((l: any) => `${esc(l.name)} · ${l.side === 'o' ? 'mais' : 'menos'} de ${n1(l.line)} ${MK[l.mk] ?? l.mk}`).join('\n') : `<i>${esc(String(capj.esporte ?? 'Entrada'))}: ${E.faltando.includes('outro esporte') ? 'outro esporte, você marca o resultado aqui' : 'não consegui ler jogador/mercado'}</i>`;
@@ -2068,6 +2076,20 @@ async function handle(update: any) {
   // ignore-duplicates: quem já tem inscrição (inclusive desligada) não muda
   await sb('bot_subs?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
     body: JSON.stringify({ chat_id: chatId, tent: true, ra: true, est: true, updated_at: new Date().toISOString() }) }).catch(() => null);
+  // gabarito: post do canal encaminhado para o bot no privado (o bot não lê mensagens antigas de canal; assim entram
+  // as entradas de antes de ele entrar, com a data original do post)
+  {
+    const m = update.message, fo = m?.forward_origin, fchat = fo?.type === 'channel' ? fo.chat : m?.forward_from_chat;
+    if (!cq && fchat?.id) {
+      const k = await canalByChat(fchat.id);
+      if (k?.cfg?.gabarito && (String(k.owner) === String(chatId) || await isAdmin(chatId))) {
+        const r = await gabPost({ ...m, chat: { id: fchat.id, type: 'channel' }, message_id: fo?.message_id ?? m.forward_from_message_id ?? m.message_id, date: fo?.date ?? m.forward_date ?? m.date }, k);
+        await TG('sendMessage', { chat_id: chatId, disable_notification: true, parse_mode: 'HTML', reply_parameters: { message_id: m.message_id, allow_sending_without_reply: true },
+          text: r === 'ignorado' ? '↪️ Esse post não parece uma entrada (sem unidade/esporte/bilhete na legenda); não contei.' : r === 'corrigida' ? '✔️ Essa entrada já estava corrigida.' : `📥 Entrada recebida (${new Date((fo?.date ?? m.forward_date ?? m.date) * 1000 - 3 * 36e5).toISOString().slice(8, 10)}/${new Date((fo?.date ?? m.forward_date ?? m.date) * 1000 - 3 * 36e5).toISOString().slice(5, 7)}). ${m.photo ? 'Leio a imagem na próxima rodada e te confirmo.' : ''}` });
+        return;
+      }
+    }
+  }
   // gabarito do canal: resposta à pergunta "qual a odd?" (#G<id> no texto da pergunta)
   if (!cq && update.message?.reply_to_message?.text && /#G\d+/.test(update.message.reply_to_message.text) && await gabOddReply(chatId, update.message.reply_to_message.text, update.message.text ?? '')) return;
   // resposta a um pedido do /canais (ex.: "mande o seu link de indicação")
