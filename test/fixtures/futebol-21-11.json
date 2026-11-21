@@ -1,0 +1,31 @@
+{"events":[
+ {"id":"401879232","status":{"type":{"name":"STATUS_FULL_TIME","state":"post","completed":true}},"competitions":[{"competitors":[
+  {"homeAway":"home","score":"2","team":{"displayName":"Newcastle United","shortDisplayName":"Newcastle","name":"Newcastle United","location":"Newcastle United","abbreviation":"NEW"}},
+  {"homeAway":"away","score":"2","team":{"displayName":"Arsenal","shortDisplayName":"Arsenal","name":"Arsenal","location":"Arsenal","abbreviation":"ARS"}}]}]},
+ {"id":"401882798","status":{"type":{"name":"STATUS_FULL_TIME","state":"post","completed":true}},"competitions":[{"competitors":[
+  {"homeAway":"home","score":"2","team":{"displayName":"Real Madrid","shortDisplayName":"Real Madrid","name":"Real Madrid","location":"Real Madrid","abbreviation":"RMA"}},
+  {"homeAway":"away","score":"1","team":{"displayName":"Celta Vigo","shortDisplayName":"Celta Vigo","name":"Celta Vigo","location":"Celta Vigo","abbreviation":"CEL"}}]}]},
+ {"id":"401882797","status":{"type":{"name":"STATUS_FULL_TIME","state":"post","completed":true}},"competitions":[{"competitors":[
+  {"homeAway":"home","score":"1","team":{"displayName":"Sevilla","shortDisplayName":"Sevilla","name":"Sevilla","location":"Sevilla","abbreviation":"SEV"}},
+  {"homeAway":"away","score":"1","team":{"displayName":"Real Betis","shortDisplayName":"Betis","name":"Real Betis","location":"Real Betis","abbreviation":"BET"}}]}]},
+ {"id":"401913229","status":{"type":{"name":"STATUS_POSTPONED","state":"post","completed":false}},"competitions":[{"competitors":[
+  {"homeAway":"home","score":"0","team":{"displayName":"Newcastle Jets ","shortDisplayName":"Newcastle Jets ","name":"Newcastle Jets ","location":"Newcastle Jets ","abbreviation":"NEW"}},
+  {"homeAway":"away","score":"0","team":{"displayName":"Adelaide United ","shortDisplayName":"Adelaide Utd","name":"Adelaide United ","location":"Adelaide United ","abbreviation":"ADE"}}]}]},
+ {"id":"401878606","status":{"type":{"name":"STATUS_FIRST_HALF","state":"in","completed":false}},"competitions":[{"competitors":[
+  {"homeAway":"home","score":"0","team":{"displayName":"Sporting Jax","shortDisplayName":"Sporting Jax","name":"Sporting Jax","location":"Sporting Jax","abbreviation":"JAX"}},
+  {"homeAway":"away","score":"0","team":{"displayName":"Carolina Ascent FC","shortDisplayName":"Carolina","name":"Carolina Ascent FC","location":"Carolina Ascent FC","abbreviation":"CAR"}}]}]}
+],
+"summaries":{
+ "401879232":{"boxscore":{"teams":[
+  {"team":{"displayName":"Newcastle United"},"statistics":[{"name":"foulsCommitted","displayValue":"19"},{"name":"yellowCards","displayValue":"3"},{"name":"redCards","displayValue":"0"},{"name":"wonCorners","displayValue":"6"},{"name":"totalShots","displayValue":"12"},{"name":"shotsOnTarget","displayValue":"3"},{"name":"saves","displayValue":"2"}]},
+  {"team":{"displayName":"Arsenal"},"statistics":[{"name":"foulsCommitted","displayValue":"7"},{"name":"yellowCards","displayValue":"3"},{"name":"redCards","displayValue":"0"},{"name":"wonCorners","displayValue":"3"},{"name":"totalShots","displayValue":"13"},{"name":"shotsOnTarget","displayValue":"4"},{"name":"saves","displayValue":"1"}]}]},
+  "rosters":[{"team":{"displayName":"Arsenal"},"roster":[
+   {"athlete":{"displayName":"Noni Madueke"},"starter":true,"subbedIn":false,"stats":[{"abbreviation":"APP","value":1},{"abbreviation":"G","value":1},{"abbreviation":"SOG","value":2},{"abbreviation":"SHOT","value":6}]},
+   {"athlete":{"displayName":"William Saliba"},"starter":false,"subbedIn":false,"stats":null}]}]},
+ "401882798":{"boxscore":{"teams":[
+  {"team":{"displayName":"Real Madrid"},"statistics":[{"name":"yellowCards","displayValue":"1"},{"name":"redCards","displayValue":"0"},{"name":"wonCorners","displayValue":"8"},{"name":"totalShots","displayValue":"24"},{"name":"shotsOnTarget","displayValue":"7"}]},
+  {"team":{"displayName":"Celta Vigo"},"statistics":[{"name":"yellowCards","displayValue":"2"},{"name":"redCards","displayValue":"0"},{"name":"wonCorners","displayValue":"3"},{"name":"totalShots","displayValue":"8"},{"name":"shotsOnTarget","displayValue":"4"}]}]},
+  "rosters":[{"team":{"displayName":"Real Madrid"},"roster":[
+   {"athlete":{"displayName":"Thibaut Courtois"},"starter":true,"subbedIn":false,"stats":[{"abbreviation":"APP","value":1},{"abbreviation":"SV","value":3}]},
+   {"athlete":{"displayName":"Kylian Mbappé"},"starter":true,"subbedIn":false,"stats":[{"abbreviation":"APP","value":1},{"abbreviation":"A","value":1},{"abbreviation":"SHOT","value":4}]}]}]}
+}}

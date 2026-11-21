@@ -800,13 +800,7 @@ async function gabProcess(id: number, ocr: string) {
   const patch: any = { legs, kind: E.kind, odd: E.odd, status: 'postada', date: ok ? dia : p.date,
     cap: JSON.stringify({ ...capj, ocr: String(ocr ?? '').slice(0, 1500), falta: E.faltando, manual: !ok }) };
   await sb(`channel_posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
-  const desc = ok ? legs.map((l: any) => `${esc(l.name)} · ${l.side === 'o' ? 'mais' : 'menos'} de ${n1(l.line)} ${MK[l.mk] ?? l.mk}`).join('\n') : `<i>${esc(String(capj.esporte ?? 'Entrada'))}: ${E.faltando.includes('outro esporte') ? 'outro esporte, você marca o resultado aqui' : 'não consegui ler jogador/mercado'}</i>`;
-  const owner = p.owner_chat ?? (await cfg()).allowed[0];
-  const kb: any[] = [];
-  if (!E.odd) kb.push([BTN('✍️ Informar a odd', `/gab odd ${id}`)]);
-  if (!ok) kb.push([BTN('✅ Green', `/gab r ${id} g`), BTN('❌ Red', `/gab r ${id} r`), BTN('↩️ Devolvida', `/gab r ${id} v`)]);
-  kb.push([BTN('🗑️ Não contar esta', `/gab del ${id}`), BTN('📊 Resultados', '/resultadoscanal')]);
-  await TG('sendMessage', { chat_id: owner, parse_mode: 'HTML', disable_notification: true, text: `📋 <b>Entrada do canal registrada</b> #G${id}\n${desc}\n💰 ${n1(+p.stake)}u${capj.superOdd ? ' (SUPER ODD)' : ''}${E.odd ? ` · odd <b>${n2(E.odd)}</b>` : ' · <b>falta a odd</b>'} · ${p.casa === 'finta' ? 'Finta' : p.casa === '365' ? 'BR365' : '99play'}${ok ? '\n<i>Confiro sozinho depois do jogo.</i>' : ''}`, reply_markup: { inline_keyboard: kb } });
+  // 21/11: o dono pediu sem notificação no registro; tudo aparece em /resultadoscanal (a correção é automática)
   return { ok: true, legs: legs.length, odd: E.odd, falta: E.faltando };
 }
 async function gabHttp(req: Request, url: URL, token: string) {
@@ -859,13 +853,21 @@ async function gabResultados(chatId: number, rest: string[]): Promise<Out> {
   const k = ks.find(c => c.cfg?.gabarito && (String(c.owner) === String(chatId))) ?? ks.find(c => c.cfg?.gabarito);
   if (!k) return { text: '📋 Nenhum canal com gabarito ainda. Adicione o bot como administrador do seu canal com <b>todas as permissões desligadas</b> (inclusive "Publicar mensagens"): ele só lê e corrige, e o resultado sai aqui.', kb: { inline_keyboard: [HOME] } };
   const rows: any[] = (await sb(`channel_posts?canal_id=eq.${k.id}&band=eq.gab&select=id,date,kind,legs,odd,stake,status,profit,cap&order=id.desc&limit=2000`).catch(() => [])) ?? [];
-  const pend = rows.filter(r => r.status === 'postada' && (() => { try { return JSON.parse(r.cap ?? '{}').manual; } catch { return false; } })());
-  const semOdd = rows.filter(r => !['green', 'red', 'void'].includes(r.status) && !(+r.odd > 1));
+  const capOf = (r: any) => { try { return JSON.parse(r.cap ?? '{}'); } catch { return {}; } };
+  // descrição curta: NBA pelas pernas; futebol pelo que a correção leu (jogo, mercado, seleção e o número da ESPN)
+  const descOf = (r: any) => {
+    if ((r.legs ?? []).length) return r.legs.map((l: any) => `${l.name} ${l.side === 'o' ? '+' : '−'}${n1(l.line)} ${MKS[l.mk] ?? l.mk}`).join(' / ');
+    const c = capOf(r), F = c.fut?.legs ?? [];
+    if (F.length && F.some((l: any) => l.mercado)) return F.map((l: any) => [l.quem && l.quem !== 'jogo' ? l.quem : l.jogo, l.mercado, l.sel, l.valor != null ? `(${l.valor})` : ''].filter(Boolean).join(' ')).join(' / ');
+    return `${c.esporte ?? 'Entrada'}: ${String(c.ocr || c.t || '').replace(/\s+/g, ' ').slice(0, 60)}`;
+  };
+  const motivo = (r: any) => r.status === 'aguardando' ? 'lendo a imagem' : capOf(r).fut?.why ?? (capOf(r).manual ? 'não li jogador/mercado' : 'jogo não terminou');
+  const pend = rows.filter(r => r.status === 'postada' || r.status === 'aguardando');
   if (rest[0] === 'pendentes') {
-    const list = [...new Map([...pend, ...semOdd].map(r => [r.id, r])).values()].slice(0, 8);
+    const list = pend.slice(0, 8);
     if (!list.length) return { text: '✅ Nada pendente no gabarito do canal.', kb: { inline_keyboard: [[BTN('📊 Resultados', '/resultadoscanal')], HOME] } };
-    const lb = (r: any) => (r.legs ?? []).length ? r.legs.map((l: any) => `${l.name} ${l.side === 'o' ? '+' : '−'}${n1(l.line)} ${MKS[l.mk] ?? l.mk}`).join(' / ') : (() => { try { const c = JSON.parse(r.cap); return `${c.esporte ?? 'Entrada'}: ${String(c.ocr || c.t || '').replace(/\s+/g, ' ').slice(0, 60)}`; } catch { return 'Entrada'; } })();
-    return { text: `<b>⏳ PENDENTES DO GABARITO</b>\n${list.map(r => `#G${r.id} · ${esc(r.date.slice(8, 10) + '/' + r.date.slice(5, 7))} · ${esc(lb(r))}${+r.odd > 1 ? ` @${n2(+r.odd)}` : ' · <b>sem odd</b>'}`).join('\n')}`,
+    const lb = descOf;
+    return { text: `<b>⏳ AINDA SEM RESULTADO</b>\n<i>Corrijo sozinho assim que o jogo acaba. Os botões são só para o caso de eu não conseguir ler.</i>\n\n${list.map(r => `#G${r.id} · ${esc(r.date.slice(8, 10) + '/' + r.date.slice(5, 7))} · ${esc(lb(r))}${+r.odd > 1 ? ` @${n2(+r.odd)}` : ''} · <i>${esc(motivo(r))}</i>`).join('\n')}`,
       kb: { inline_keyboard: [...list.map(r => [BTN(`#G${r.id} ✅`, `/gab r ${r.id} g`), BTN('❌', `/gab r ${r.id} r`), BTN('↩️', `/gab r ${r.id} v`), BTN('✍️ odd', `/gab odd ${r.id}`)]), [BTN('📊 Resultados', '/resultadoscanal')], HOME] } };
   }
   const today = brDate(Date.now() / 1000), d7 = brDate(Date.now() / 1000 - 6 * 86400), d30 = brDate(Date.now() / 1000 - 29 * 86400);
@@ -873,11 +875,15 @@ async function gabResultados(chatId: number, rest: string[]): Promise<Out> {
     return { n: L.length, g: L.filter(r => r.status === 'green').length, r: L.filter(r => r.status === 'red').length, pr: Math.round(pr * 100) / 100, roi: st ? pr / st : null }; };
   const ln = (lb: string, x: any) => `${lb}: <b>${x.pr >= 0 ? '+' : ''}${n2(x.pr)}u</b> · ${x.g}G ${x.r}R${x.roi != null ? ` · ROI ${x.roi >= 0 ? '+' : ''}${Math.round(x.roi * 100)}%` : ''}`;
   const esporte = (r: any) => { try { return JSON.parse(r.cap ?? '{}').esporte ?? 'NBA'; } catch { return 'NBA'; } };
-  const mkOf = (r: any) => r.kind === 'multipla' ? 'Múltiplas / Criar Aposta' : esporte(r) !== 'NBA' ? esporte(r) : (MK[r.legs?.[0]?.mk] ?? r.legs?.[0]?.mk ?? 'Outros');
+  const mkOf = (r: any) => { const F = capOf(r).fut?.legs ?? [];
+    return r.kind === 'multipla' || F.length > 1 ? 'Múltiplas / Criar Aposta' : esporte(r) !== 'NBA' ? `${esporte(r)}${F[0]?.mercado ? ' · ' + F[0].mercado : ''}` : (MK[r.legs?.[0]?.mk] ?? r.legs?.[0]?.mk ?? 'Outros'); };
   const by = new Map<string, any[]>(); for (const r of rows) if (['green', 'red', 'void'].includes(r.status)) (by.get(mkOf(r)) ?? by.set(mkOf(r), []).get(mkOf(r))!).push(r);
   const porMk = [...by].map(([k2, L]) => ({ k: k2, ...S(r => L.includes(r)) })).sort((a, b) => b.n - a.n).slice(0, 8);
-  const abertas = rows.filter(r => r.status === 'postada' || r.status === 'aguardando').length;
-  const text = `<b>📊 RESULTADOS · ${esc(k.title ?? 'Canal')}</b>\n${ln('Hoje', S(r => r.date === today))}\n${ln('7 dias', S(r => r.date >= d7))}\n${ln('30 dias', S(r => r.date >= d30))}\n${ln('Tudo', S(() => true))}\n\n<b>Por mercado</b>\n${porMk.map(x => ln(esc(x.k), x)).join('\n') || '<i>Ainda nenhuma corrigida.</i>'}\n\n⏳ ${abertas} em aberto${pend.length || semOdd.length ? ` · <b>${new Set([...pend, ...semOdd].map(r => r.id)).size} precisam de você</b> (sem odd ou para marcar)` : ''}\n<i>Unidades da legenda (SUPER ODD = 1u). NBA corrijo sozinho pelo boxscore; o resto você marca em Pendentes.</i>`;
+  const abertas = pend.length;
+  const ic: Record<string, string> = { green: '✅', red: '❌', void: '↩️' };
+  const ult = rows.filter(r => ic[r.status]).slice(0, 6).map(r => `${ic[r.status]} ${esc(descOf(r)).slice(0, 90)}${+r.odd > 1 ? ` @${n2(+r.odd)}` : ''} · <b>${(+r.profit || 0) >= 0 ? '+' : ''}${n2(+r.profit || 0)}u</b>`).join('\n');
+  const semOddG = rows.filter(r => r.status === 'green' && !(+r.odd > 1)).length;
+  const text = `<b>📊 RESULTADOS · ${esc(k.title ?? 'Canal')}</b>\n${ln('Hoje', S(r => r.date === today))}\n${ln('7 dias', S(r => r.date >= d7))}\n${ln('30 dias', S(r => r.date >= d30))}\n${ln('Tudo', S(() => true))}\n\n<b>Por mercado</b>\n${porMk.map(x => ln(esc(x.k), x)).join('\n') || '<i>Ainda nenhuma corrigida.</i>'}\n\n<b>Últimas corrigidas</b>\n${ult || '<i>Nenhuma ainda.</i>'}\n\n⏳ ${abertas} em aberto (corrijo quando o jogo acabar)\n<i>Unidades da legenda (SUPER ODD = 1u). Correção automática: NBA pelo boxscore oficial, futebol pela ESPN (placar e estatísticas).${semOddG ? ` ${semOddG} green sem odd lida contam 0u.` : ''}</i>`;
   const dg = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${(await cfg()).secret}:resultados:${k.id}`));
   const tk = [...new Uint8Array(dg)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
   const csv = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/canal?resultados=${k.id}&t=${tk}&fmt=csv&dias=400`;

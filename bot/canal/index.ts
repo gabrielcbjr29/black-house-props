@@ -18,6 +18,7 @@
 //   ?resultados=<canal>&t=<token>[&fmt=csv][&dias=N]  (painel e planilha do canal) entradas com resultado e fechamento/CLV;
 //                              token por canal (o dono vê os links em /canais → canal → 📊 Resultados)
 import { updateClosing, postClv, legVerdict, fintaIdx, updateFinta } from '../../public/clv.js';
+import { gradeFut, findEvents } from '../../public/futebol.js';
 const APP = 'https://gabrielcbjr29.github.io/black-house-props/data/';
 const MK2STAT: Record<string, string> = { PTS: 'pts', REB: 'reb', AST: 'ast', '3PM': 'tpm', PRA: 'pts+reb+ast', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', FGM: 'fgm', FGA: 'fga', '2PM': 'twom', '2PA': 'twoa', '3PA': 'tpa', FTM: 'ftm', FTA: 'fta', STL: 'stl', BLK: 'blk', SB: 'stl+blk', TOV: 'tov', PF: 'pf' };
 // duplo/triplo-duplo (gabarito do canal, 21/11): 1 quando pts/reb/ast/roubos/tocos têm 2 (3) categorias com 10+
@@ -387,15 +388,16 @@ async function setCasa(id: string, c: string) {
 
 // ---------- conferir: green/red respondendo o próprio post; resumo do dia só para o dono ----------
 async function settle() {
-  const open: any[] = await sb('channel_posts?status=eq.postada&select=id,canal_id,date,kind,legs,odd,band,channel_msg_id,stake,espelho_chat,espelho_msg') ?? [];
+  const open: any[] = await sb('channel_posts?status=eq.postada&select=id,canal_id,date,kind,legs,odd,band,channel_msg_id,stake,espelho_chat,espelho_msg,cap') ?? [];
   if (!open.length) return 0;
-  const res = await getJ('results.json'); if (!res?.stats) return 0;
+  // gabarito · futebol (21/11): corrige pela ESPN, sem mandar nada no canal nem no privado
+  const fut = await settleFut(open.filter(p => p.band === 'gab' && !(p.legs ?? []).length)).catch(e => { console.error('futebol', e); return 0; });
+  const res = await getJ('results.json'); if (!res?.stats) return fut;
   const done = (date: string, team: string) => !!res.games?.[date]?.some((g: any[]) => g[1] === team || g[2] === team);
   let n = 0; const days = new Set<string>();
   for (const p of open) {
     const legs = p.legs ?? [];
-    if (!legs.length) continue; // gabarito sem pernas lidas (outro esporte / não leu): o dono marca no privado
-    if (p.band === 'gab' && !(+p.odd > 1) && !legs.every((l: any) => +l.odd > 1)) continue; // gabarito sem odd: espera o dono informar
+    if (!legs.length) continue; // gabarito sem pernas de NBA (futebol: settleFut acima; não leu: fica pendente)
     // gabarito: o time pode não estar no slate (post de outro dia); vale o jogador com estatística no dia, ou o dia já fechado
     const pronto = p.band === 'gab' ? res.dates?.includes(p.date) && (legs.every((l: any) => res.stats[p.date]?.[l.pid]) || (res.dates.at(-1) > p.date))
       : res.dates?.includes(p.date) && !legs.some((l: any) => !done(p.date, l.team));
@@ -409,7 +411,8 @@ async function settle() {
     const status = st.includes('red') ? 'red' : !live.length ? 'void' : 'green';
     // todas as pernas valendo: a odd do post (no Criar Aposta é a odd estimada da casa, não o produto das pernas)
     const odd = live.length === legs.length && +p.odd > 1 ? +p.odd : live.reduce((o: number, l: any) => o * +l.odd, 1);
-    const stk = +p.stake || 1, profit = status === 'green' ? Math.round(stk * (odd - 1) * 100) / 100 : status === 'red' ? -stk : 0;
+    // gabarito sem odd lida: o red perde a stake mesmo assim; o green fica com lucro 0 (sem odd não há como calcular)
+    const stk = +p.stake || 1, profit = status === 'green' ? (odd > 1 ? Math.round(stk * (odd - 1) * 100) / 100 : 0) : status === 'red' ? -stk : 0;
     await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ status, profit, settled_at: new Date().toISOString() }) });
     const k = await canalById(p.canal_id), chat = k?.chat_id;
     if (k?.cfg.resultado !== false && chat && p.channel_msg_id) {
@@ -420,8 +423,42 @@ async function settle() {
     days.add(`${p.date}|${p.canal_id}`); n++;
   }
   for (const d of days) { const [date, cid] = d.split('|'); await dayReport(date, cid).catch(e => console.error('resumo', e)); }
+  return n + fut;
+}
+// ---------- gabarito · futebol: placar do dia (soccer/all) + resumo da partida da ESPN ----------
+const ESPN_FUT = 'https://site.api.espn.com/apis/site/v2/sports/soccer/all/';
+const ymd = (d: string, plus = 0) => new Date(Date.parse(d + 'T12:00:00Z') + plus * 864e5).toISOString().slice(0, 10).replace(/-/g, '');
+async function settleFut(posts: any[]) {
+  const today = etDate();
+  const P = posts.map(p => ({ p, c: (() => { try { return JSON.parse(p.cap ?? '{}'); } catch { return {}; } })() }))
+    // futebol, e também entrada sem esporte na legenda que não virou perna de NBA (se não for futebol, não acha o jogo)
+    .filter(x => (x.c.esporte === 'Futebol' || !x.c.esporte || x.c.manual) && x.c.esporte !== 'Tênis' && x.p.date >= ymdIso(today, -4)); // até 4 dias para trás
+  if (!P.length) return 0;
+  const boards = new Map<string, any[]>(), sums = new Map<string, any>();
+  const board = async (d: string) => { if (!boards.has(d)) boards.set(d, (await fetch(ESPN_FUT + 'scoreboard?dates=' + d).then(r => r.ok ? r.json() : null).catch(() => null))?.events ?? []); return boards.get(d)!; };
+  let n = 0;
+  for (const { p, c } of P) {
+    const text = `${c.ocr ?? ''}\n${c.t ?? ''}`;
+    // o jogo pode ser no dia do post ou no seguinte (post da véspera / jogo de madrugada em UTC)
+    const events = [...await board(ymd(p.date)), ...await board(ymd(p.date, 1))];
+    // resumo só dos jogos desta entrada que já terminaram
+    const S: Record<string, any> = {};
+    for (const { ev } of findEvents(text, events)) {
+      if (ev?.status?.type?.state !== 'post') continue;
+      if (!sums.has(ev.id)) sums.set(ev.id, await fetch(ESPN_FUT + 'summary?event=' + ev.id).then(r => r.ok ? r.json() : null).catch(() => null));
+      if (sums.get(ev.id)) S[ev.id] = sums.get(ev.id);
+    }
+    const g = gradeFut(text, events, S);
+    const cap = JSON.stringify({ ...c, fut: { legs: g.legs, why: g.why ?? null, em: new Date().toISOString() } });
+    if (!g.status) { if (JSON.stringify(c.fut?.legs ?? null) !== JSON.stringify(g.legs) || c.fut?.why !== (g.why ?? null)) await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ cap }) }); continue; }
+    const stk = +p.stake || 1, odd = +p.odd;
+    const profit = g.status === 'green' ? (odd > 1 ? Math.round(stk * (odd - 1) * 100) / 100 : 0) : g.status === 'red' ? -stk : 0;
+    await sb(`channel_posts?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ status: g.status, profit, settled_at: new Date().toISOString(), cap }) });
+    n++;
+  }
   return n;
 }
+const ymdIso = (d: string, plus = 0) => new Date(Date.parse(d + 'T12:00:00Z') + plus * 864e5).toISOString().slice(0, 10);
 // linha do fechamento no resumo do dono: quantas simples pegaram odd/linha melhor que a de fechamento e como foram
 function fech(all: any[]) {
   const S = all.filter(p => p.kind === 'simples' && p.status !== 'void').map(p => ({ p, c: postClv({ odd: +p.odd, legs: p.legs }) })).map(x => ({ ...x, b: x.c.bateu }));
@@ -434,6 +471,7 @@ async function dayReport(date: string, cid: string) {
   const key = `CANAL_RESUMO_${cid}_${date}`;
   if (!all.length || all.some(p => p.status === 'postada') || (await cfg(key))) return;
   const k = await canalById(cid), own = await owner(k); if (!own) return;
+  if (k?.cfg?.gabarito) return; // gabarito: nada no privado; o dono pede o resultado em /resultadoscanal
   const part = (k: string) => { const xs = all.filter(p => p.kind === k), g = xs.filter(p => p.status === 'green').length, r = xs.filter(p => p.status === 'red').length;
     const u = xs.reduce((s, p) => s + (+p.profit || 0), 0); return { n: xs.length, g, r, u }; };
   const S = part('simples'), M = part('multipla'), CA = (() => { const xs = all.filter(p => /^ca-/.test(p.band ?? '')); // Método Criar Aposta (dentro das múltiplas)
