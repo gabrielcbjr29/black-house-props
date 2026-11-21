@@ -1443,12 +1443,15 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'tentativas') {
     // primeiro escolhe o mercado (com a quantidade de entradas de hoje); "Todos" mantém a lista antiga
     const g = GROUPS.tentativas, code = (rest[0] ?? '').toUpperCase();
-    const TN: Record<string, string> = { '2PA': '🎯 Tentativas de 2', '2PM': '✅ De 2 convertidos', '3PA': '🏹 Tentativas de 3', FTA: '🆓 Lances livres tentados', FGM: '🏀 Arremessos convertidos' };
+    const TN: Record<string, string> = { '2PA': '🎯 Tentativas de 2', '2PM': '✅ De 2 convertidos', '3PA': '🏹 Tentativas de 3', FTA: '🆓 Lances livres tentados', FTM: '🆓✅ Lances livres convertidos', FGM: '🏀 Arremessos convertidos' };
+    // rótulo curto no botão (o Telegram corta texto longo em duas colunas)
+    const TB: Record<string, string> = { '2PA': '🎯 Tent. de 2', '2PM': '✅ Conv. de 2', '3PA': '🏹 Tent. de 3', FGM: '🏀 Arremessos conv.', FTA: '🆓 LL tentados', FTM: '✅ LL convertidos' };
     const back = (o: Out) => { const kb = (o.kb as any)?.inline_keyboard; if (kb) kb.splice(Math.max(0, kb.length - 1), 0, [BTN('⬅️ Outros mercados de tentativas', '/tentativas')]); return o; };
     if (g.mk.includes(code)) return back(list(d, d.rows.filter(r => r.m === code && inRange(r)), TN[code].toUpperCase(), clampN(rest[1]), raw, page, true, '', RANGE_TXT));
     if (code === 'TODOS' || /^\d+$/.test(code)) return list(d, d.rows.filter(r => g.mk.includes(r.m) && inRange(r)), '🏀 ' + g.title.toUpperCase(), clampN(code === 'TODOS' ? rest[1] : rest[0]), raw, page, false, '', RANGE_TXT);
     const n = (mk: string) => d.rows.filter(r => r.m === mk && inRange(r)).length;
-    const btns = ['2PA', '2PM', '3PA', 'FTA', 'FGM'].map(mk => BTN(`${TN[mk]} (${n(mk)})`, `/tentativas ${mk.toLowerCase()}`));
+    // em pares tentados × convertidos: 2 pontos, lance livre, 3 pontos × arremessos
+    const btns = ['2PA', '2PM', 'FTA', 'FTM', '3PA', 'FGM'].map(mk => BTN(`${TB[mk]} (${n(mk)})`, `/tentativas ${mk.toLowerCase()}`));
     return { text: header(d, '🏹 TENTATIVAS E CONVERTIDOS') + '\nEscolha o mercado:', kb: { inline_keyboard: [...chunk(btns, 2), [BTN(`📋 Todos os mercados (${g.mk.reduce((s, mk) => s + n(mk), 0)})`, '/tentativas todos')], HOME] } };
   }
   if (GROUPS[cmd]) { const g = GROUPS[cmd]; return list(d, d.rows.filter(r => g.mk.includes(r.m) && inRange(r)), '🏀 ' + g.title.toUpperCase(), clampN(rest[0]), raw, page, g.mk.length === 1, '', RANGE_TXT); }
