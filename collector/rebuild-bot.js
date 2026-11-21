@@ -8,6 +8,7 @@ import { loadState, saveState } from './oddsplan.js';
 import { fetch99, merge99 } from './casa99.js';
 import { pickStrategies } from './strategies.js';
 import { buildCombo } from './combo.js';
+import { aberturaDoDia, marcaMovimento, buildCorrel } from './leitura.js';
 const dir = new URL('../public/data/', import.meta.url);
 const STATE = new URL('../data/odds-state.json', import.meta.url).pathname;
 const slate = JSON.parse(readFileSync(new URL('slate.json', dir), 'utf8'));
@@ -32,6 +33,12 @@ let kalshi = null; try { kalshi = JSON.parse(readFileSync(new URL('kalshi.json',
 // Finta (19/11): leitura gravada pela coleta; só vale a do mesmo dia
 let finta = null; try { const f = JSON.parse(readFileSync(new URL('finta.json', dir), 'utf8')); if (f.date === slate.meta?.date) finta = f; } catch { }
 const bot = buildBotData({ ...slate, prev }, { w: +(process.env.BOT_W || .4), kalshi, finta });
+// leitura do mercado (21/11): abertura do dia (99play e Finta) e movimento em cada linha do bot
+try { const A = aberturaDoDia(new URL('../data/abertura.json', import.meta.url).pathname, slate, finta); console.log(`movimento de linha: ${marcaMovimento(bot.rows, A)} linhas mexeram desde a abertura`); }
+catch (e) { console.log('movimento de linha: falhou (' + e.message + ')'); }
+// props correlacionadas (21/11): histórico por time do dia + linhas de hoje
+try { const H = ['2025-26', '2026-27'].map(s => new URL(`../data/history/${s}.json`, import.meta.url).pathname); console.log(`correl: ${buildCorrel(slate, finta, H, new URL('correl', dir).pathname)} times`); }
+catch (e) { console.log('correl: falhou (' + e.message + ')'); }
 writeFileSync(new URL('bot.json', dir), JSON.stringify(bot));
 // fábrica de estratégias: entradas do dia de cada estratégia (registradas em papel pela função estrategias)
 try {

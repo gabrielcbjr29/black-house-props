@@ -11,6 +11,7 @@
 // Instalação (uma vez): abra  <url-da-função>?setup=<WEBHOOK_SECRET>  no navegador.
 
 import { parseLadder99, combosOf, normName as nName } from '../../public/ladder99.js';
+import { correlOf } from '../../public/correl.js';
 const APP_URL = 'https://gabrielcbjr29.github.io/black-house-props/';
 type Cfg = { token: string; secret: string; allowed: string[]; dataUrl: string; report: string; affRef: string; affRef365: string; dom99: string; dom365: string; at: number };
 let CFG: Cfg | null = null;
@@ -65,7 +66,7 @@ const TG = async (m: string, body: any) => {
   return r;
 };
 
-type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number; sq?: number[]; kp?: number; fo?: number };
+type Row = { id: string; n: string; t: string; o: string; home: boolean; g: string; h: string; m: string; s: 'o' | 'u'; l: number; p: number; q: number | null; d: number | null; b: string | null; k: number; e: number | null; gr: string; l10: [number, number] | null; l20: [number, number] | null; ss?: [number, number] | null; hh?: [number, number] | null; dv?: { r: number; of: number; ps: string; k: string } | null; pj: number; st: string; rl: string | null; nt?: number; sc: number; wy?: string[]; wn?: string[]; cd?: number; mb?: number; mn?: number; l5?: [number, number] | null; sk?: number; ed?: number; tp?: [number, number] | null; wo?: { q: string; h: [number, number]; a: number; x: number } | null; c9?: number; rf?: number; sq?: number[]; kp?: number; fo?: number; mv?: [number, number, string]; fmv?: number };
 type MStat = [number, number, number[], number | null];
 type MPlayer = { n: string; t: string; o: string; home: boolean; h: string; g: string; st: string; gp: number; s: Record<string, MStat>; h2h: Record<string, number>[] };
 type Fin = { id: string; n: string; t: string; o: string; g: string; h: string; m: string; l: number; fo: number; alt: number; p: number; fe: number; st: string; mn: number; h10: [number, number] | null; l9?: number; o9?: number | null };
@@ -672,6 +673,54 @@ async function vereditoCmd(arg = ''): Promise<Out> {
   const text = `<b>⚖️ VEREDITO PELO FECHAMENTO · ${tit}</b>\n<i>O papel julgado pelo CLV: quanto a odd da 99play andou a nosso favor até o jogo, em pontos de chance. Com poucas centenas de entradas o green/red ainda é sorte; o CLV mostra antes se o método pega valor.</i>\n\n${body}\n\n<i>🟢 bate o fechamento (t ≥ 2) · 🟡 sem prova ainda · 🔴 atrás do fechamento (t ≤ −2) · ⚪ cedo demais (menos de 30 leituras). ROI ± = faixa de sorte: se cruza o zero, o lucro ainda não prova nada.</i>`;
   return { text: fitHTML(text), kb: { inline_keyboard: [[BTN(mode === 'metodo' ? '• Métodos' : 'Métodos', '/veredito'), BTN(mode === 'faixa' ? '• Faixa de valor' : 'Faixa de valor', '/veredito faixa'), BTN(mode === 'mercado' ? '• Estratégias' : 'Estratégias', '/veredito mercado')], [BTN('🧪 Placar', '/estrategias'), { text: '📈 No app', url: APP_URL + '#placar' }], [HOME[0]]] } };
 }
+// ---------- /correl (21/11, ideia do MC Analytics): props correlacionadas entre companheiros ----------
+// Escolha um jogador e um patamar (ex.: Wagner 8+ assistências): nos jogos em que ele bateu, como cada companheiro foi na
+// linha de HOJE, contra o acerto geral dele. Acerto "encolhido" para a média (peso de 6 jogos) para a sorte de amostra
+// pequena não subir na lista. Dados: public/data/correl/<TIME>.json (coleta; histórico 2025-26 e 2026-27, só no time).
+const CR_MK: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assistências', '3PM': 'cestas de 3', PRA: 'pts+reb+ast' };
+const CR_ALIAS: Record<string, string> = { pts: 'PTS', pontos: 'PTS', ponto: 'PTS', reb: 'REB', rebote: 'REB', rebotes: 'REB', ast: 'AST', assist: 'AST', assistencia: 'AST', assistencias: 'AST', '3pm': '3PM', '3': '3PM', triplos: '3PM', bolas: '3PM' };
+async function correlCmd(rest: string[]): Promise<Out> {
+  const help = { text: '<b>🔗 PROPS CORRELACIONADAS</b>\nEscolha um jogador e um patamar e veja como os companheiros foram nos jogos em que ele bateu.\n\nEx.: <code>/correl wagner</code> (escolho o patamar com você) ou <code>/correl wagner 8 ast</code>', kb: { inline_keyboard: [HOME] } };
+  if (!rest.length) return help;
+  const d = await data();
+  let a = rest.map(x => x.toLowerCase()), mk: string | null = null, thr: number | null = null;
+  const sem = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  for (const x of [...a]) { const k = CR_ALIAS[sem(x)]; if (k && a.length > 1) { mk = k; a = a.filter(y => y !== x); } }
+  for (const x of [...a]) if (/^\d+\+?$/.test(x) && a.length > 1) { thr = parseInt(x); a = a.filter(y => y !== x); }
+  const q = a.join(' ');
+  const pool = new Map<string, { id: string; n: string; t: string; o: string; h: string; home: boolean }>();
+  for (const r of d.rows) if (!pool.has(r.id)) pool.set(r.id, { id: r.id, n: r.n, t: r.t, o: r.o, h: r.h, home: r.home });
+  const nq = nName(q), found = [...pool.values()].filter(p => p.id === q || nName(p.n).includes(nq));
+  if (!found.length) return { text: `Não achei <b>${esc(q)}</b> nos jogos de hoje.`, kb: { inline_keyboard: [HOME] } };
+  if (found.length > 1 && !found.some(p => nName(p.n) === nq)) return { text: `Achei ${found.length} jogadores. Qual?`, kb: { inline_keyboard: [...chunk(found.slice(0, 10).map(p => BTN(`${p.n} (${p.t})`, `/correl ${p.id}${mk ? ' ' + mk : ''}${thr ? ' ' + thr : ''}`.slice(0, 60))), 2), HOME] } };
+  const P = found.find(p => nName(p.n) === nq) ?? found[0];
+  const T: any = await fetch(APP_URL + `data/correl/${P.t}.json?t=` + Math.floor(Date.now() / 3e5)).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!T?.games?.length) return { text: `Ainda não tenho o histórico do ${esc(P.t)} para a correlação (entra com a próxima coleta).`, kb: { inline_keyboard: [HOME] } };
+  const mine = T.games.filter(([, s]: any) => s[P.id]).map(([, s]: any) => s[P.id]);
+  if (mine.length < 8) return { text: `${esc(P.n)} tem poucos jogos no ${esc(P.t)} (${mine.length}) para medir correlação.`, kb: { inline_keyboard: [HOME] } };
+  const IDX: Record<string, number> = { PTS: 1, REB: 2, AST: 3, '3PM': 4 };
+  const med = (k: string) => { const v = mine.slice(0, 20).map((g: number[]) => g[IDX[k]]).sort((x: number, y: number) => x - y); return v[Math.floor(v.length / 2)]; };
+  if (!mk || !thr) {
+    // escolher o patamar: mediana dos últimos 20, +2 e +4 (cestas de 3: +1 e +2)
+    const rows = ['PTS', 'REB', 'AST', '3PM'].map(k => { const m = Math.max(1, med(k)), st = k === '3PM' ? 1 : k === 'PTS' ? 4 : 2;
+      return [0, 1, 2].map(i => m + i * st).map(t => BTN(`${CR_MK[k].replace('assistências', 'ast').replace('cestas de 3', '3pts')} ${t}+`, `/correl ${P.id} ${k} ${t}`)); });
+    return { text: `<b>🔗 CORRELAÇÃO · ${esc(P.n)}</b>  <i>${P.t} · ${P.h}</i>\nEscolha o patamar dele. Mostro como os companheiros foram nos jogos em que ele bateu, na linha de hoje.\n<i>Mediana nos últimos 20: ${med('PTS')} pts · ${med('REB')} reb · ${med('AST')} ast · ${med('3PM')} de 3</i>`, kb: { inline_keyboard: [...rows, HOME] } };
+  }
+  const R = correlOf(T, P.id, mk, thr);
+  const ok = R.list.filter((x: any) => x.st !== 'out');
+  const up = ok.filter((x: any) => x.ls >= .08).slice(0, 6), down = ok.filter((x: any) => x.ls <= -.08).slice(0, 3);
+  const pct0 = (x: number) => Math.round(x * 100) + '%';
+  const odds = (x: any, side: 'o' | 'u') => { const o = side === 'o' ? x.o : x.u, parts = [o ? `🔵 99play @${n2(o)}` : '', side === 'o' && x.fo ? `🟣 Finta @${n2(x.fo)}` : ''].filter(Boolean); return parts.length ? `\n   ${parts.join(' · ')}` : ''; };
+  const it = (x: any, side: 'o' | 'u') => `${side === 'o' ? '⬆️' : '⬇️'} <b>${esc(x.n)}</b> · ${side === 'o' ? 'mais' : 'menos'} de ${n1(x.line)} ${CR_MK[x.mk]}${x.st === 'questionable' ? ' 🟡' : ''}\n   ${side === 'o' ? `${x.hH}/${x.nH}` : `${x.nH - x.hH}/${x.nH}`} (${pct0(side === 'o' ? x.rH : 1 - x.rH)}) contra ${pct0(side === 'o' ? x.rA : 1 - x.rA)} no geral · média ${n1(x.aH)} vs ${n1(x.aA)}${odds(x, side)}`;
+  const small = R.nH < 10 ? `\n⚠️ <i>Amostra pequena (${R.nH} jogos): use como ideia, não como prova.</i>` : '';
+  const body = R.nH < 4 ? `\nEle bateu ${thr}+ ${CR_MK[mk]} só ${R.nH} vezes em ${R.nG} jogos: pouco para medir. Tente um patamar menor.`
+    : `\n${up.length ? '<b>Sobem quando ele bate</b>\n' + up.map(x => it(x, 'o')).join('\n') : 'Nenhum companheiro sobe de forma clara.'}${down.length ? '\n\n<b>Caem quando ele bate</b> <i>(ideia de under)</i>\n' + down.map(x => it(x, 'u')).join('\n') : ''}`;
+  const head = `<b>🔗 CORRELAÇÃO · ${esc(P.n)} com ${thr}+ ${CR_MK[mk]}</b>\n<i>${P.home ? `${P.t} x ${P.o}` : `${P.t} @ ${P.o}`} · ${P.h} · bateu em ${R.nH} de ${R.nG} jogos no ${P.t} (esta temporada e a passada)</i>`;
+  const nota = `\n<i>Acerto na linha de hoje de cada companheiro, nos jogos em que ele bateu, contra o acerto geral. A lista ordena pelo acerto encolhido para a média, para a sorte de poucos jogos não pesar. Se a casa monta combo com os dois, essa correlação quase nunca é descontada.</i>`;
+  const ths = [thr - (mk === '3PM' ? 1 : 2), thr + (mk === '3PM' ? 1 : 2)].filter(t => t > 0).map(t => BTN(`${t}+`, `/correl ${P.id} ${mk} ${t}`));
+  return { text: fitHTML(head + body + small + nota), kb: { inline_keyboard: [[...ths, BTN('Outro patamar', `/correl ${P.id}`)], [BTN('🟣 Combo Finta', `/combo ${P.id}`), BTN('👤 Jogador', `/jogador ${P.id}`)], HOME] } };
+}
+
 // ---------- rodar os números na hora (20/11) ----------
 // Dispara o pipeline do GitHub com o token guardado em bot_config.GH_DISPATCH (o administrador manda com /github).
 async function cfgV(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
@@ -1023,8 +1072,19 @@ ${seq(r) ? `${sqLine(r.sq, r.l, r.s)}\n🔢 <code>${seq(r)}</code>\n` : ''}${r.s
   return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${hora(r)}</i>
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${need(r.d)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
-${odd}${ev}${selo(r)}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
+${odd}${ev}${selo(r)}${mvTxt(r)}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${wo ? '\n' + wo : ''}${def}</blockquote>${why.length ? `\n<blockquote expandable><b>Por que sim / por que não</b>\n${why.join('\n')}</blockquote>` : ''}`;
+}
+// movimento de linha (21/11): abertura do dia × agora na 99play (mesmo lado) e na Finta (mesmo over)
+function mvTxt(r: Row) {
+  const out: string[] = [];
+  if (r.mv && r.d) {
+    const [l0, o0] = r.mv, dl = r.s === 'o' ? r.l - l0 : l0 - r.l;
+    const fav = dl > 0 || (dl === 0 && 1 / r.d > 1 / o0), lnTxt = (x: number) => l0 !== r.l ? `<b>${n1(x)}</b> ` : '';
+    out.push(`${fav ? '📈' : '📉'} 99play abriu ${lnTxt(l0)}@${n2(o0)} → agora ${lnTxt(r.l)}@${n2(r.d)} <i>(${fav ? `mercado indo para o ${r.s === 'o' ? 'over' : 'under'}` : 'mercado indo contra'})</i>`);
+  }
+  if (r.s === 'o' && r.fmv && r.fo) out.push(`🟣 Finta abriu @${n2(r.fmv)} → agora @${n2(r.fo)}`);
+  return out.length ? '\n' + out.join('\n') : '';
 }
 // cartão das listas (visual de antes)
 function listCard(r: Row, i: number) {
@@ -1051,7 +1111,7 @@ function listCard(r: Row, i: number) {
   return `<blockquote><b>${i}. ${esc(r.n)}</b>  <i>${vs} · ${hora(r)}</i>
 ${side} ${MK[r.m] ?? r.m}
 ${GRADE[r.gr] ?? r.gr}${nota}  ${bar(r.p)} <b>${pc(r.p)}</b>${need(r.d)}${r.q != null ? ` <i>(mercado ${pc(r.q)})</i>` : ''}
-${odd}${ev}${selo(r, AUD, true)}${r.fo && r.s === 'o' ? `\n🟣 Finta paga <code>@${n2(r.fo)}</code> nesse over` : ''}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
+${odd}${ev}${selo(r, AUD, true)}${r.fo && r.s === 'o' ? `\n🟣 Finta paga <code>@${n2(r.fo)}</code> nesse over` : ''}${mvTxt(r)}${r.rf != null && r.c9 ? `\n📏 Linha de referência <b>${n1(r.rf)}</b> <i>(mediana dos últimos 15)</i>` : ''}
 ${hits}${def}${duvida(r)}${why.length ? '\n' + why.join('\n') : ''}</blockquote>`;
 }
 function header(d: Data, title: string, extra = '') {
@@ -1141,6 +1201,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /minutos · Método Minutos: titular fora, minutos sobem → over (placar e entradas do dia)
 /veredito · Veredito pelo fechamento (CLV) de cada método, lado e faixa de valor
 /rodar · Rodar os números agora · /ler · pedir leitura da 99play ao PC
+/correl · Props correlacionadas: como os companheiros vão quando um jogador bate um patamar (ex.: /correl wagner 8 ast)
 /combo · Combo Finta × 99play de um jogador: ast + reb (e duplo/triplo-duplo) 15+ na Finta (ex.: /combo lebron)
 /finta · overs da Finta com valor (linha principal e escada)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
@@ -1270,13 +1331,14 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
     return list(d, d.rows.filter(r => r.g === g.id), `🏟️ ${g.a} @ ${g.h} · ${g.t}`, 16, raw, page);
   }
   if (cmd === 'combo' || cmd === 'combos') return comboCmd(chatId, rest);
+  if (cmd === 'correl' || cmd === 'correlacao' || cmd === 'correlação') return correlCmd(rest);
   if (cmd === 'rodar') return rodarCmd(chatId);
   if (cmd === 'ler') return rodarCmd(chatId, true);
   if (cmd === 'jogador') {
     const q = norm(arg); if (q.length < 3) return { text: 'Digite o nome assim: <code>/jogador brunson</code>', kb: { inline_keyboard: [HOME] } };
     const rows = d.rows.filter(r => norm(r.n).includes(q)); if (!rows.length) return { text: `Nenhuma linha boa hoje para <b>${esc(arg)}</b>.`, kb: { inline_keyboard: [HOME] } };
     const o = list(d, rows, '👤 ' + rows[0].n.toUpperCase(), 12, raw, page, false);
-    o.kb.inline_keyboard.unshift([BTN('🟣 Combo Finta 15+ (Ast · Reb · DD)', ('/combo ' + rows[0].id).slice(0, 60))]);
+    o.kb.inline_keyboard.unshift([BTN('🟣 Combo Finta 15+', ('/combo ' + rows[0].id).slice(0, 60)), BTN('🔗 Correlação', ('/correl ' + rows[0].id).slice(0, 60))]);
     return o;
   }
   if (cmd === 'multipla') return multipla(d, rest[0], om);
@@ -2019,7 +2081,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos, erros e faltas'], ['faltas', 'Faltas cometidas'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['correl', 'Props correlacionadas entre companheiros (ex.: /correl wagner 8 ast)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });
