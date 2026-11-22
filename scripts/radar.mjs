@@ -69,7 +69,8 @@ export function scan({ slate, finta, kalshi, novig, now = Date.now(), cfg = CFG,
     const b9 = pr.book?.books?.['99play'];
     if (b9?.o > 1 && b9?.u > 1) {
       let e; try { e = evaluate(pr, { line: pr.book.line, oOver: b9.o, oUnder: b9.u, book: '99play' }, { w }); } catch { }
-      if (e) { cands.push({ casa: '99play', side: 'o', line: pr.book.line, odd: b9.o, p: e.over.p }); cands.push({ casa: '99play', side: 'u', line: pr.book.line, odd: b9.u, p: e.under.p }); }
+      const dv = devig(b9.o, b9.u); // chance da própria 99play sem margem (q): mostra quanto o modelo discorda do mercado
+      if (e) { cands.push({ casa: '99play', side: 'o', line: pr.book.line, odd: b9.o, p: e.over.p, q: dv?.pO }); cands.push({ casa: '99play', side: 'u', line: pr.book.line, odd: b9.u, p: e.under.p, q: dv?.pU }); }
     }
     const v10 = (pr.vals ?? []).slice(0, 10);
     for (const f of FIN.get(pr.p.id + '|' + pr.mk) ?? []) {
@@ -91,7 +92,7 @@ export function scan({ slate, finta, kalshi, novig, now = Date.now(), cfg = CFG,
         : (tip - now) / 6e4 < cfg.leadMin ? 'jogo começando'
         : '';
       const sharp = why ? '' : pNv != null && pNv * c.odd - 1 < cfg.nvMin ? 'Novig contra' : pk != null && pk * c.odd - 1 < cfg.kMin ? 'Kalshi contra' : '';
-      out.push({ ...base, ...c, p: r3(c.p), ev: r3(ev), pNv: r3(pNv), pk: r3(pk), boa: !why, ok: !why && !sharp, why: why || sharp });
+      out.push({ ...base, ...c, p: r3(c.p), q: r3(c.q), ev: r3(ev), pNv: r3(pNv), pk: r3(pk), boa: !why, ok: !why && !sharp, why: why || sharp });
     }
   }
   return { at: new Date(now).toISOString(), date, lidas, quadro: out.length, cands: out };
@@ -109,7 +110,7 @@ export function choose(S, carteira, cfg = CFG) {
     if (have.has(keyOf(c)) || perPlayer.has(c.pid + '|' + c.game) || (perGame[c.game] ?? 0) >= cfg.perGame) continue;
     const stake = stakeOf(c.p, c.odd, cfg); if (!stake) continue;
     buys.push({ id: `${S.date}|${keyOf(c)}`, date: S.date, at: S.at, pid: c.pid, name: c.name, team: c.team, opp: c.opp, game: c.game, tip: c.tip,
-      mk: c.mk, side: c.side, line: c.line, odd: c.odd, casa: c.casa, p: c.p, ev: c.ev, pNv: c.pNv, pk: c.pk, stake, status: 'aberta' });
+      mk: c.mk, side: c.side, line: c.line, odd: c.odd, casa: c.casa, p: c.p, q: c.q ?? null, ev: c.ev, pNv: c.pNv, pk: c.pk, stake, status: 'aberta' });
     have.add(keyOf(c)); perPlayer.add(c.pid + '|' + c.game); perGame[c.game] = (perGame[c.game] ?? 0) + 1; n++;
   }
   return buys;
