@@ -897,7 +897,7 @@ async function radarCmd(rest: string[]): Promise<Out> {
   const kb = (per: string) => ({ inline_keyboard: [
     [BTN(per === 'hoje' ? '• Hoje' : 'Hoje', '/radar'), BTN(per === 'd7' ? '• 7 dias' : '7 dias', '/radar 7d'), BTN(per === 'tudo' ? '• Tudo' : 'Tudo', '/radar tudo')],
     [BTN('🔄 Atualizar', per === 'hoje' ? '/radar' : `/radar ${per === 'd7' ? '7d' : 'tudo'}`), { text: '📡 Abrir o Radar', url: APP_URL + 'radar.html' }], HOME] });
-  if (!R?.agora) return { text: '📡 <b>RADAR +EV</b>\nO radar ainda não rodou. Ele varre a cada coleta (aos :50 e quando alguém pede a pauta).', kb: kb('hoje') };
+  if (!R?.agora) return { text: '📡 <b>RADAR +EV</b>\nO radar ainda não rodou. Ele analisa as linhas a cada coleta (aos :50 de cada hora e quando alguém pede a pauta).', kb: kb('hoje') };
   const per = /^7/.test(rest[0] ?? '') ? 'd7' : /^tud|^all/.test(rest[0] ?? '') ? 'tudo' : 'hoje';
   const A = R.agora, mins = Math.round((Date.now() - Date.parse(A.at)) / 6e4), on = mins <= 80;
   const pc = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')}%`;
@@ -909,22 +909,22 @@ async function radarCmd(rest: string[]): Promise<Out> {
   const lista = (R.carteira ?? []).filter((x: any) => per === 'hoje' ? x.date === R.date : per === 'd7' ? Date.parse(x.date) >= Date.now() - 7 * 864e5 : true).slice(0, 10);
   const L: string[] = [];
   L.push(`📡 <b>RADAR +EV</b> · <i>carteira de teste</i>`);
-  L.push(`${on ? '🟢 online' : '🔴 parado'} · última varredura ${hourBR(A.at)} (há ${mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h'})`);
+  L.push(`${on ? '🟢 no ar' : '🔴 parado'} · última varredura ${hourBR(A.at)} (há ${mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h'})`);
   L.push('', `<b>${esc(A.titulo)}</b>`, `<i>${esc(A.sub)}</i>`);
-  L.push(`<blockquote>${A.lidas} linhas lidas · ${A.quadro} preços no quadro (99play + Finta)\nRegras: 🧠 EV ${Math.round((R.cfg?.min ?? .06) * 100)}%+ pelo Modelo BH (peso 0,2) · 🅺 EV 4%+ pela Kalshi até 2h30 antes · Kelly 1/4</blockquote>`);
-  if (per === 'hoje') L.push(`<b>Hoje</b>: ${R.hoje.varreduras} varreduras · ${R.hoje.boas} pareceram boas · <b>${R.hoje.compradas} compradas</b> · ${n2(R.hoje.stake ?? 0)}u`);
+  L.push(`<blockquote>${A.lidas} linhas analisadas · ${A.quadro} odds lidas (99play e Finta)\nRegras: 🧠 EV de ${Math.round((R.cfg?.min ?? .06) * 100)}% ou mais pelo Modelo BH (peso 0,2) · 🅺 EV de 4% ou mais pela Kalshi, até 2h30 antes do jogo · stake por Kelly 1/4</blockquote>`);
+  if (per === 'hoje') L.push(`<b>Hoje</b>: ${R.hoje.varreduras} varreduras · ${R.hoje.boas} passaram na regra · <b>${R.hoje.compradas} entradas</b> · ${n2(R.hoje.stake ?? 0)}u`);
   L.push(`<b>${per === 'hoje' ? 'Resultado de hoje' : per === 'd7' ? '7 dias' : 'Desde o início'}</b>: Kelly <b>${uu(P.lucro)}</b> (ROI ${pc(P.roi)}) · 1u fixa ${uu(P.lucro1)} · ${P.green ?? 0}G ${P.red ?? 0}R${P.abertas ? ` · ${P.abertas} em aberto` : ''}`);
-  if (P.nClv) L.push(`No fechamento: CLV médio <b>${pp(P.clv)}</b> · ${Math.round((P.bate ?? 0) * 100)}% bateram o fechamento (${P.nClv})`);
+  if (P.nClv) L.push(`CLV médio <b>${pp(P.clv)}</b> · ${Math.round((P.bate ?? 0) * 100)}% pegaram odd melhor que a de fechamento (${P.nClv})`);
   for (const [k, nm] of [['bh', '🧠 Modelo BH (peso 0,2)'], ['k', '🅺 Kalshi perto do jogo']] as const) {
     const T = R.trilhas?.[k]?.[per]; if (!T) continue;
     L.push(`${nm}: ${T.n} entradas · ${T.green}G ${T.red}R · Kelly ${T.liquidadas ? uu(T.lucro) : '—'} · 1u ${T.liquidadas ? uu(T.lucro1) : '—'}${T.nClv ? ` · CLV ${pp(T.clv)}` : ''}`);
   }
   if (per === 'hoje') {
     if (A.mira?.length) L.push('', '🎯 <b>Na mira agora</b>', ...A.mira.slice(0, 6).map(ln));
-    else if (A.perto?.length) L.push('', '🔎 <b>Mais perto da regra</b>', ...A.perto.slice(0, 3).map((c: any) => `${ln(c)} · <i>${esc(c.why)}</i>`));
+    else if (A.perto?.length) L.push('', '🔎 <b>Quase entraram</b>', ...A.perto.slice(0, 3).map((c: any) => `${ln(c)} · <i>${esc(c.why)}</i>`));
   }
   if (lista.length) L.push('', `🧾 <b>Carteira${per === 'hoje' ? ' de hoje' : ''}</b>`, ...lista.map((x: any) => `${IC[x.status] ?? '⏳'} ${x.tr === 'k' ? '🅺 ' : ''}${esc(x.name)} · ${x.side === 'o' ? 'mais' : 'menos'} de ${n1(x.line)} ${RADAR_MK[x.mk] ?? x.mk} <code>@${n2(x.odd)}</code> ${x.casa === 'Finta' ? '🟣' : '🔵'} · <b>${n2(x.stake)}u</b>${x.status === 'aberta' ? '' : ` · ${uu(x.lucro)}`}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}`));
-  L.push('', '<i>Teste: nada é apostado de verdade. 🔵 99play · 🟣 Finta · 🅺 trilha Kalshi. Comparamos Kelly × 1u fixa e o CLV na revisão.</i>');
+  L.push('', '<i>Carteira de teste: nada é apostado de verdade. 🔵 99play · 🟣 Finta · 🅺 trilha Kalshi. Na revisão comparamos Kelly × 1u fixa e o CLV.</i>');
   return { text: fitHTML(L.join('\n')), kb: kb(per) };
 }
 

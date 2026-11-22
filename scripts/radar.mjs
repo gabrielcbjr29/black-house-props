@@ -201,9 +201,9 @@ export function report({ S, carteira, scans, cfg = CFG, now = Date.now() }) {
   return {
     v: 1, gen: new Date(now).toISOString(), date: S.date, cfg,
     agora: { at: S.at, lidas: S.lidas, quadro: S.quadro, boas: boas.length + boasK.length, comprou: scans.at(-1)?.compradas?.length ?? 0,
-      titulo: boas.length + boasK.length ? `${boas.length + boasK.length} ${boas.length + boasK.length > 1 ? 'entradas' : 'entrada'} na mira` : 'Nada que valha apostar',
-      sub: boas.length || boasK.length ? [boas.length && `${boas.length} pelo Modelo BH (EV ${Math.round(boas.at(-1).ev * 100)}–${Math.round(boas[0].ev * 100)}%)`, boasK.length && `${boasK.length} pela Kalshi`].filter(Boolean).join(' · ')
-        : S.quadro ? `Nenhum preço passou da regra (EV ${Math.round(cfg.min * 100)}%+) agora` : 'Sem linhas da 99play ou da Finta para ler agora',
+      titulo: boas.length + boasK.length ? `${boas.length + boasK.length} ${boas.length + boasK.length > 1 ? 'entradas' : 'entrada'} na mira` : 'Nada que valha a pena agora',
+      sub: boas.length || boasK.length ? [boas.length && `${boas.length} pelo Modelo BH, com EV de ${Math.round(boas.at(-1).ev * 100)}% a ${Math.round(boas[0].ev * 100)}%`, boasK.length && `${boasK.length} pela Kalshi`].filter(Boolean).join(' · ')
+        : S.quadro ? `Nenhuma odd passou na regra (EV de ${Math.round(cfg.min * 100)}% ou mais)` : 'Ainda não há linhas da 99play ou da Finta para analisar',
       mira: [...boas.slice(0, 10).map(c => ({ ...slim(c), tr: 'bh' })), ...boasK.slice(0, 6).map(c => ({ ...slim(c), tr: 'k' }))], perto: perto.map(slim) },
     trilhas: { bh: trilha('bh'), k: trilha('k') },
     hoje: { varreduras: sc.length, boas: boasHoje.size, compradas: CH.length, ...stats(CH) },
@@ -224,7 +224,7 @@ function main() {
   const fech = updateClose(carteira, S, now);
   const buys = chooseAll(S, carteira); carteira.push(...buys);
   const liq = settle(carteira, J(join(pub, 'data', 'results.json')));
-  const top = S.cands.slice().sort((a, b) => b.ev - a.ev)[0];
+  const top = S.cands.filter(c => c.ev <= CFG.max && ['', 'EV abaixo da regra', 'Novig contra', 'Kalshi contra'].includes(c.why)).sort((a, b) => b.ev - a.ev)[0];
   scans.push({ at: S.at, date: S.date, lidas: S.lidas, quadro: S.quadro, boas: S.cands.filter(c => c.ok).length, boasK: S.cands.filter(c => c.ok).map(c => keyOf(c) + '|' + c.casa + '|' + c.line),
     compradas: buys.map(b => ({ n: b.name, mk: b.mk, s: b.side, l: b.line, o: b.odd, c: b.casa, ev: b.ev, st: b.stake, tr: b.tr })), stake: r2(buys.reduce((s, b) => s + b.stake, 0)),
     melhor: top ? { n: top.name, mk: top.mk, s: top.side, l: top.line, o: top.odd, c: top.casa, ev: top.ev, why: top.why } : null });

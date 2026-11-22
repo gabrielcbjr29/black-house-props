@@ -126,9 +126,9 @@
       <div id="blips"></div>
     </div>
     <div>
-      <div class="rd-pills"><span class="pill">Teste</span><span class="live" id="live"><i></i><span>Online</span></span></div>
+      <div class="rd-pills"><span class="pill">Teste</span><span class="live" id="live"><i></i><span>No ar</span></span></div>
       <h1 class="rd-title" id="title">Varrendo…</h1>
-      <p class="rd-sub" id="sub">Lendo as linhas da 99play e da Finta</p>
+      <p class="rd-sub" id="sub">Analisando as linhas da 99play e da Finta</p>
       <div class="rd-bar"><b id="bar" style="width:0"></b></div>
       <div class="rd-meta" id="meta"></div>
     </div>
@@ -153,9 +153,9 @@
   </div>
 
   <p class="note"><b>Como funciona.</b> A cada coleta o radar lê todas as linhas da 99play (mais e menos) e da Finta (só mais) e calcula o EV pela chance do Modelo BH.
-    São duas trilhas. <b>Modelo BH</b>: chance com peso 0,2 no modelo (o backtest e o Placar da verdade mostraram que a 99play erra menos que o modelo puro) e <b>EV de 6% a 30%</b>. <b>Kalshi perto do jogo</b>: o preço justo é o da Kalshi, só até 2h30 antes (longe do jogo o preço dela fica velho), com <b>EV de 4%+</b>. Odd entre 1,40 e 4,50 e jogador confirmado. A Novig e a Kalshi são a segunda opinião: se uma delas diz que a odd não vale, o radar não compra.
+    São duas trilhas. <b>Modelo BH</b>: chance com peso 0,2 no modelo (o backtest e o Placar da verdade mostraram que a 99play erra menos que o modelo puro) e <b>EV de 6% a 30%</b>. <b>Kalshi perto do jogo</b>: o preço justo é o da Kalshi, só até 2h30 antes (longe do jogo o preço dela fica velho), com <b>EV de 4%+</b>. Odd entre 1,40 e 4,50 e jogador confirmado. A Novig e a Kalshi são a segunda opinião: se uma delas diz que a odd não vale, o radar não entra.
     Travas: 1 entrada por jogador, 3 por jogo, 12 por dia. Stake por <b>Kelly 1/4</b> numa banca de 100u (teto 2u; 1u com odd acima de 3,00).
-    Em paralelo, o radar conta o resultado como se cada entrada fosse de 1u fixa e mede o fechamento (CLV). <b>É uma carteira de teste: nada é apostado de verdade.</b></p>
+    Em paralelo, o radar calcula o resultado como se cada entrada fosse de 1u fixa e compara a odd pega com a de fechamento (CLV). <b>É uma carteira de teste: nada é apostado de verdade.</b></p>
 </main>
 
 <nav class="botnav" aria-label="Seções" style="grid-template-columns:repeat(5,1fr)">
@@ -177,7 +177,7 @@ const uu = x => x == null ? '—' : `${x >= 0 ? '+' : ''}${n2(x)}u`;
 const pp = x => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')} pp`;
 const sg = x => x == null || x === 0 ? '' : x > 0 ? 'pos' : 'neg';
 const hh = iso => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-const dd = iso => new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit' });
+const dd = iso => new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit' }).replace(/\./g, '');
 const ago = iso => { const m = Math.round((Date.now() - Date.parse(iso)) / 6e4); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : `há ${Math.round(m / 60)}h`; };
 const casa = c => c === 'Finta' ? '<span class="cs cfi" title="Finta">F</span>' : '<span class="cs c99" title="99play">99</span>';
 const side = (s, l, mk) => `${s === 'o' ? 'Mais' : 'Menos'} de ${n1(l)} ${MK[mk] ?? mk}`;
@@ -201,21 +201,21 @@ function render() {
   if (!R?.agora) { $('#title').textContent = 'O radar ainda não rodou'; $('#sub').textContent = 'Ele varre a cada coleta (aos :50 de cada hora e quando alguém pede a pauta).'; $('#pill').textContent = 'Sem dados'; return; }
   const A = R.agora, mins = (Date.now() - Date.parse(A.at)) / 6e4, on = mins <= 80;
   $('#pill').textContent = on ? 'Radar ligado' : 'Radar parado';
-  $('#live').classList.toggle('off', !on); $('#live span').textContent = on ? 'Online' : 'Parado';
+  $('#live').classList.toggle('off', !on); $('#live span').textContent = on ? 'No ar' : 'Parado';
   $('#scope').classList.toggle('off', !on);
   $('#title').textContent = A.titulo; $('#sub').textContent = A.sub;
   $('#bar').style.width = Math.max(4, Math.min(100, 100 - (mins / 60) * 100)) + '%';
   const next = new Date(); next.setMinutes(50, 0, 0); if (next < new Date()) next.setHours(next.getHours() + 1);
-  $('#meta').innerHTML = `<span>Última varredura <b>${ago(A.at)}</b> (${hh(A.at)})</span><span><b>${A.lidas}</b> linhas lidas</span><span><b>${A.quadro}</b> preços no quadro</span><span>Próxima ~<b>${hh(next.toISOString())}</b></span>`;
+  $('#meta').innerHTML = `<span>Última varredura <b>${ago(A.at)}</b> (${hh(A.at)})</span><span><b>${A.lidas}</b> linhas analisadas</span><span><b>${A.quadro}</b> odds lidas (99play e Finta)</span><span>Próxima por volta das <b>${hh(next.toISOString())}</b></span>`;
   blips(A);
   const P = R.periodos?.[per] ?? {}, H = R.hoje ?? {};
   $('#kpis').innerHTML = [
     kpi('Varreduras', H.varreduras ?? 0, 'hoje'),
-    kpi('Pareceram boas', H.boas ?? 0, 'hoje, sem repetir'),
-    kpi('Compradas', P.n ?? 0, `${P.green ?? 0} green · ${P.red ?? 0} red${P.abertas ? ` · ${P.abertas} abertas` : ''}`),
+    kpi('Passaram na regra', H.boas ?? 0, 'hoje, sem contar repetidas'),
+    kpi('Entradas', P.n ?? 0, `${P.green ?? 0} green · ${P.red ?? 0} red${P.abertas ? ` · ${P.abertas} em aberto` : ''}`),
     kpi('Stake', `${n2(P.stake ?? 0)}u`, P.ev != null ? `EV médio ${pc(P.ev)}` : ''),
-    kpi('P/L (Kelly)', P.liquidadas ? uu(P.lucro) : '—', P.liquidadas ? `ROI ${pc(P.roi)} · 1u fixa ${uu(P.lucro1)}` : 'nada liquidado ainda', sg(P.lucro)),
-    kpi('No fechamento', P.nClv ? pp(P.clv) : '—', P.nClv ? `${Math.round(P.bate * 100)}% bateram (${P.nClv})` : 'CLV aparece perto do jogo', sg(P.clv)),
+    kpi('Lucro (Kelly)', P.liquidadas ? uu(P.lucro) : '—', P.liquidadas ? `ROI ${pc(P.roi)} · com 1u fixa ${uu(P.lucro1)}` : 'nenhuma resolvida ainda', sg(P.lucro)),
+    kpi('CLV', P.nClv ? pp(P.clv) : '—', P.nClv ? `${Math.round(P.bate * 100)}% pegaram odd melhor que a de fechamento` : 'aparece perto do jogo', sg(P.clv)),
   ].join('');
   const list = (R.carteira ?? []).filter(x => per === 'hoje' ? x.date === R.date : per === 'd7' ? Date.parse(x.date) >= Date.now() - 7 * 864e5 : true);
   const cs = {}; for (const x of list) cs[x.casa] = (cs[x.casa] ?? 0) + 1;
@@ -227,8 +227,8 @@ function render() {
   $('#trilhas').hidden = !R.trilhas;
   // na mira (ou o que ficou mais perto)
   const mira = A.mira?.length ? A.mira : A.perto ?? [];
-  $('#miraT').textContent = A.mira?.length ? 'Na mira agora' : 'Mais perto da regra';
-  $('#miraS').textContent = A.mira?.length ? `${A.mira.length} passaram na regra` : 'nada passou; estas ficaram abaixo';
+  $('#miraT').textContent = A.mira?.length ? 'Na mira agora' : 'Quase entraram';
+  $('#miraS').textContent = A.mira?.length ? `${A.mira.length} passaram na regra` : 'nenhuma passou na regra; estas ficaram perto';
   $('#miraBox').hidden = !mira.length;
   $('#mira').innerHTML = mira.map(c => `<div class="bet">${casa(c.c)}<div style="min-width:0"><div class="nm">${c.tr === 'k' ? '<span class="trk k">Kalshi</span> ' : ''}${esc(c.n)} <small style="color:var(--muted);font-weight:600">${esc(c.t)}</small></div><div class="mk">${side(c.s, c.l, c.mk)}${c.why ? ` · ${esc(c.why)}` : ''}${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}</div></div><div class="od"><b>@${n2(c.o)}</b><small>chance ${Math.round(c.p * 100)}%</small></div><span class="st ${c.why ? '' : 'g'}">EV ${pc(c.ev)}</span></div>`).join('');
   // atividade: varreduras sem compra seguidas viram um grupo, como no radar
@@ -237,12 +237,12 @@ function render() {
   $('#actS').textContent = `última varredura ${ago(A.at)}`;
   $('#act').innerHTML = groups.slice(0, 30).map(g => {
     const v = g.list[0];
-    if (!g.buy) { const last = g.list.at(-1); return `<div class="ev"><time>${hh(v.at)}</time><span class="ic">–</span><p>Nada que valha apostar<small>${g.list.length > 1 ? `${g.list.length} varreduras, ${hh(last.at)} a ${hh(v.at)}` : `${v.quadro} preços no quadro`}${v.melhor ? ` · melhor EV ${pc(v.melhor.ev)}` : ''}</small></p></div>`; }
-    return `<div class="ev"><time>${hh(v.at)}</time><span class="ic ok">✓</span><div><p>Comprou ${v.compradas.length} de ${v.boas} ${v.boas === 1 ? 'boa' : 'boas'} · ${n2(v.stake)}u<small>de ${v.quadro} preços no quadro</small></p>${v.compradas.map(b => `<div class="buy"><div class="buy-top">${casa(b.c)}<b>${esc(b.n)}</b> ${side(b.s, b.l, b.mk)} <span>@${n2(b.o)}</span></div><div class="buy-top"><span class="tag ev">EV ${pc(b.ev)}</span>${b.tr === 'k' ? '<span class="trk k">Kalshi</span>' : ''}<span class="tag paper">Comprada (teste)</span></div><small style="color:var(--muted)">Stake ${n2(b.st)}u por Kelly 1/4.</small></div>`).join('')}</div></div>`;
+    if (!g.buy) { const last = g.list.at(-1); return `<div class="ev"><time>${hh(v.at)}</time><span class="ic">–</span><p>Nada que valha a pena<small>${g.list.length > 1 ? `${g.list.length} varreduras, das ${hh(last.at)} às ${hh(v.at)}` : `${v.quadro} odds lidas`}${v.melhor ? ` · maior EV: ${pc(v.melhor.ev)}` : ''}</small></p></div>`; }
+    return `<div class="ev"><time>${hh(v.at)}</time><span class="ic ok">✓</span><div><p>${v.compradas.length} ${v.compradas.length > 1 ? 'entradas de teste' : 'entrada de teste'} · ${n2(v.stake)}u<small>${v.boas} ${v.boas === 1 ? 'passou' : 'passaram'} na regra, entre ${v.quadro} odds lidas</small></p>${v.compradas.map(b => `<div class="buy"><div class="buy-top">${casa(b.c)}<b>${esc(b.n)}</b> ${side(b.s, b.l, b.mk)} <span>@${n2(b.o)}</span></div><div class="buy-top"><span class="tag ev">EV ${pc(b.ev)}</span>${b.tr === 'k' ? '<span class="trk k">Kalshi</span>' : ''}<span class="tag paper">Entrada de teste</span></div><small style="color:var(--muted)">Stake de ${n2(b.st)}u (Kelly 1/4).</small></div>`).join('')}</div></div>`;
   }).join('') || '<div class="empty">Nenhuma varredura neste período.</div>';
   $('#betS').textContent = `${list.length} · ${n2(list.reduce((s, x) => s + x.stake, 0))}u`;
   $('#bets').innerHTML = list.map(x => { const [c, t] = stCls(x);
-    return `<div class="bet">${casa(x.casa)}<div style="min-width:0"><div class="nm">${x.tr === 'k' ? '<span class="trk k">Kalshi</span> ' : ''}${esc(x.name)}</div><div class="mk">${side(x.side, x.line, x.mk)} · ${esc(x.team)} x ${esc(x.opp)} · ${dd(x.tip)} ${hh(x.tip)}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}</div></div><div class="od"><b>@${n2(x.odd)}</b><small>${n2(x.stake)}u${x.status !== 'aberta' ? ` · <span class="${sg(x.lucro)}">${uu(x.lucro)}</span>` : ` · EV ${pc(x.ev)}`}</small></div><span class="st ${c}">${t}</span></div>`; }).join('') || '<div class="empty">Nenhuma entrada neste período.</div>';
+    return `<div class="bet">${casa(x.casa)}<div style="min-width:0"><div class="nm">${x.tr === 'k' ? '<span class="trk k">Kalshi</span> ' : ''}${esc(x.name)}</div><div class="mk">${side(x.side, x.line, x.mk)} · ${esc(x.team)} x ${esc(x.opp)} · ${dd(x.tip)}, ${hh(x.tip)}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}</div></div><div class="od"><b>@${n2(x.odd)}</b><small>${n2(x.stake)}u${x.status !== 'aberta' ? ` · <span class="${sg(x.lucro)}">${uu(x.lucro)}</span>` : ` · EV ${pc(x.ev)}`}</small></div><span class="st ${c}">${t}</span></div>`; }).join('') || '<div class="empty">Nenhuma entrada neste período.</div>';
 }
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => { per = b.dataset.p; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); render(); }));
 async function load() { try { R = await fetch('data/radar.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null); } catch { } render(); }
