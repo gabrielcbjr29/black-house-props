@@ -207,7 +207,7 @@ export const normCfg = c => ({ ...DEFAULT_CFG, ...(c ?? {}) });
 /* especificação da múltipla: faixa de odd (min–max), nº de pernas (ou livre: 2 a 6) e lado (u, o ou m = misto).
    "odd 10 com 4 jogadores" vira { odd: 10, pernas: 4 } → faixa 8,5–11,5. band = nome único no dia ("10x4-under"). */
 export function specsOf(cfg) {
-  const raw = cfg.multis?.length ? cfg.multis : DEFAULT_SPECS, seen = {};
+  const raw = cfg.multis == null ? DEFAULT_SPECS : cfg.multis, seen = {}; // null = padrão; [] = sem múltiplas (só simples)
   return raw.map((sp, i) => {
     const odd = +sp.odd || null, min = +sp.min || (odd ? Math.round(odd * .85 * 100) / 100 : 7), max = +sp.max || (odd ? Math.round(odd * 1.15 * 100) / 100 : 10);
     const pernas = +sp.pernas || null, lado = ['u', 'o', 'm'].includes(sp.lado) ? sp.lado : 'u';

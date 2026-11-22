@@ -1889,7 +1889,7 @@ const DEF_SPECS = [{ nome: '10', min: 7, max: 10, lado: 'u' }, { nome: '10', min
   { nome: '15', min: 12, max: 17, lado: 'o' }, { nome: '25', min: 20, max: 25, lado: 'u' }, { nome: '25', min: 20, max: 25, lado: 'o' }];
 // o mesmo nome de faixa que o pipeline (scripts/canal.mjs specsOf) usa, para saber o que já saiu hoje
 function specBands(k: Canal) {
-  const raw = k.cfg.multis?.length ? k.cfg.multis : DEF_SPECS, seen: Record<string, number> = {};
+  const raw = k.cfg.multis == null ? DEF_SPECS : k.cfg.multis, seen: Record<string, number> = {}; // null = padrão; [] = sem múltiplas
   return raw.map((sp: any) => {
     const odd = +sp.odd || null, max = +sp.max || (odd ? Math.round(odd * 1.15 * 100) / 100 : 10), pernas = +sp.pernas || null, lado = ['u', 'o', 'm'].includes(sp.lado) ? sp.lado : 'u';
     let band = `${sp.nome ?? (odd ?? max)}${pernas ? 'x' + pernas : ''}-${LADO_TXT[lado]}`;
@@ -2007,8 +2007,8 @@ Planilha: numa Google Sheet nova, cole na célula A1:</blockquote>
     const P = await fetch(APP_URL + 'data/canal.json?t=' + Math.floor(Date.now() / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
     const plan = new Set((P?.canais?.[k.id]?.multis ?? []).map((m: any) => m.band)), done = new Set(rows.map(r => /-/.test(r.band) ? r.band : r.band + '-under'));
     const st = (b: string) => done.has(b) ? '✅ saiu' : plan.has(b) ? '🕒 na pauta' : '⚠️ não fechou hoje';
-    return { text: `🧩 <b>Múltiplas</b> · ${esc(k.title)}${c.multis?.length ? '' : ' <i>(padrão)</i>'}\n<blockquote>${sp.map((x: any, i: number) => `${i + 1}. ${x.label} — ${st(x.band)}`).join('\n')}</blockquote>\n<i>Cada múltipla repete no máximo 30% das pernas com múltiplas de outros canais. "Não fechou" = hoje não há pernas boas que cheguem nessa odd com esse número de jogadores.</i>`,
-      kb: { inline_keyboard: [...chunk(sp.map((_: any, i: number) => BTN(`❌ ${i + 1}`, `/cf ${k.id} mdel ${i}`)), 4), [BTN('➕ Adicionar múltipla', `/cn ${k.id} madd`)], [BTN('↩️ Voltar ao padrão', `/cf ${k.id} mreset`)], back] } };
+    return { text: `🧩 <b>Múltiplas</b> · ${esc(k.title)}${c.multis == null ? ' <i>(padrão)</i>' : ''}\n<blockquote>${sp.length ? sp.map((x: any, i: number) => `${i + 1}. ${x.label} — ${st(x.band)}`).join('\n') : '🚫 Sem múltiplas: este canal manda só simples.'}</blockquote>\n<i>Cada múltipla repete no máximo 30% das pernas com múltiplas de outros canais. "Não fechou" = hoje não há pernas boas que cheguem nessa odd com esse número de jogadores.</i>`,
+      kb: { inline_keyboard: [...chunk(sp.map((_: any, i: number) => BTN(`❌ ${i + 1}`, `/cf ${k.id} mdel ${i}`)), 4), [BTN('➕ Adicionar múltipla', `/cn ${k.id} madd`)], [BTN('🚫 Sem múltiplas (só simples)', `/cf ${k.id} mnone`), BTN('↩️ Voltar ao padrão', `/cf ${k.id} mreset`)], back] } };
   }
   if (scr === 'madd') {
     const [pernas, odd] = xs;
@@ -2028,7 +2028,7 @@ Planilha: numa Google Sheet nova, cole na célula A1:</blockquote>
   const text = `📢 <b>${esc(k.title ?? String(k.chat_id))}</b> · ${c.on ? '🟢 postando' : '⏸️ pausado'}
 <blockquote>Simples: até <b>${c.max}</b>/dia · odd <b>${n2(+c.oddMin)}–${n2(+c.oddMax)}</b> · EV ${pct(+c.evMin)}+ · ${LADO_TXT[c.lado] ?? c.lado}
 Mercados: ${esc(mk)}
-Múltiplas: ${specBands(k).length}${c.multis?.length ? '' : ' (padrão 10/15/25 over e under)'}
+Múltiplas: ${c.multis == null ? `${specBands(k).length} (padrão 10/15/25 over e under)` : c.multis.length ? specBands(k).length : 'nenhuma (só simples)'}
 Casa: <b>${c.casa === '365' ? 'BR365' : '99play'}</b> · começa às ${c.inicio}h · mensagem: ${c.tpl?.text ? 'padrão do canal' : 'padrão do bot'}
 Unidade: ${String(+c.unBase || 1).replace('.', ',')}u ${c.unVar ? 'variável' : 'fixa'}${c.espelho ? ' · 🪞 com canal oficial' : ''}${c.semanal ? ' · resumo semanal' : ''}
 Hoje: ${rows.filter(r => r.kind === 'simples').length} simples · ${rows.filter(r => r.kind === 'multipla').length} múltiplas · ${rows.filter(r => r.status === 'green').length} ✅ ${rows.filter(r => r.status === 'red').length} ❌</blockquote>${c.metodo === 'alavanca' ? '\n⚡ <b>Método Alavanca ligado</b>: a pauta vem da comparação com a Kalshi (os filtros acima não valem).' : ''}`;
@@ -2063,9 +2063,10 @@ async function cfCmd(chatId: number, rest: string[]): Promise<Out> {
     await saveCfg(k, { mercados: cur.length === MK_ORDER.length ? null : cur }); return cnCmd(chatId, [id, 'mk']);
   }
   if (field === 'mreset') { await saveCfg(k, { multis: null }); return cnCmd(chatId, [id, 'mul']); }
-  if (field === 'mdel') { const cur = [...(k.cfg.multis?.length ? k.cfg.multis : DEF_SPECS)]; cur.splice(+v, 1); await saveCfg(k, { multis: cur.length ? cur : [] }); return cnCmd(chatId, [id, 'mul']); }
+  if (field === 'mnone') { await saveCfg(k, { multis: [] }); return cnCmd(chatId, [id, 'mul']); }
+  if (field === 'mdel') { const cur = [...(k.cfg.multis == null ? DEF_SPECS : k.cfg.multis)]; cur.splice(+v, 1); await saveCfg(k, { multis: cur.length ? cur : [] }); return cnCmd(chatId, [id, 'mul']); }
   if (field === 'madd') {
-    const [pernas, odd, lado] = vs, cur = [...(k.cfg.multis?.length ? k.cfg.multis : DEF_SPECS)];
+    const [pernas, odd, lado] = vs, cur = [...(k.cfg.multis == null ? DEF_SPECS : k.cfg.multis)];
     if (cur.length >= 8) return { text: 'Máximo de 8 múltiplas por canal. Remova uma antes.', kb: { inline_keyboard: [[BTN('⬅️ Múltiplas', `/cn ${id} mul`)]] } };
     cur.push({ odd: +odd, pernas: +pernas || null, lado: ['u', 'o', 'm'].includes(lado) ? lado : 'u' });
     await saveCfg(k, { multis: cur }); return cnCmd(chatId, [id, 'mul']);

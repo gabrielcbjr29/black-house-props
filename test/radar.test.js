@@ -50,3 +50,10 @@ test('radar: trilha Kalshi só perto do jogo, com chance e EV da Kalshi', async 
   assert.deepEqual(B.map(b => b.tr + b.pid), ['bh2', 'bh3', 'k1']);
   assert.ok(B.find(b => b.tr === 'k').id.startsWith('k|'));
 });
+
+test('canal: multis null = padrão (6 múltiplas); [] = sem múltiplas (só simples)', async () => {
+  const { specsOf, normCfg } = await import('../scripts/canal.mjs');
+  assert.equal(specsOf(normCfg({})).length, 6);
+  assert.equal(specsOf(normCfg({ multis: [] })).length, 0);
+  assert.equal(specsOf(normCfg({ multis: [{ odd: 10, pernas: 4, lado: 'o' }] })).length, 1);
+});
