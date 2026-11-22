@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Radar +EV · Black House</title>
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* Radar +EV (21/11): lê data/radar.json (scripts/radar.mjs, a cada coleta). Carteira de TESTE: nada é apostado. */
+.rd { padding-top: 22px; padding-bottom: 96px; display: flex; flex-direction: column; gap: 18px; }
+.rd-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center;
+  padding: 26px 28px; border-radius: 18px; border: 1px solid #1F5A3A;
+  background: radial-gradient(120% 140% at 0% 0%, #0C2417 0%, #050A07 55%, #000 100%); }
+.rd-hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(45,180,110,.035) 0 1px, transparent 1px 4px); }
+.scope { position: relative; width: 232px; aspect-ratio: 1; border-radius: 50%; flex: none;
+  background: radial-gradient(circle, #0E2A1A 0%, #06140C 62%, #030805 100%); border: 1px solid #1F5A3A;
+  box-shadow: 0 0 0 6px rgba(45,180,110,.05), inset 0 0 40px rgba(45,180,110,.12); }
+.scope svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sweep { position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(69,207,136,.55) 0deg, rgba(45,180,110,.18) 26deg, transparent 70deg);
+  animation: spin 3.2s linear infinite; mix-blend-mode: screen; }
+.scope.off .sweep { animation-duration: 14s; opacity: .35; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.blip { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #45CF88; box-shadow: 0 0 10px #45CF88; }
+.blip.hot { width: 14px; height: 14px; margin: -7px 0 0 -7px; animation: ping 1.8s ease-out infinite; }
+.blip.dim { background: #2D3B32; box-shadow: none; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(69,207,136,.7), 0 0 12px #45CF88; } 100% { box-shadow: 0 0 0 16px rgba(69,207,136,0), 0 0 12px #45CF88; } }
+@media (prefers-reduced-motion: reduce) { .sweep, .blip.hot { animation: none; } }
+.rd-pills { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pill { font: 700 12px/1 var(--f); letter-spacing: .14em; text-transform: uppercase; padding: 7px 11px; border-radius: 99px; border: 1px solid #1F5A3A; color: #6FE0A4; background: #082014; }
+.live { font: 700 12px/1 var(--f); letter-spacing: .14em; text-transform: uppercase; color: #C3CDC6; display: inline-flex; align-items: center; gap: 7px; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: #2DB46E; box-shadow: 0 0 0 0 rgba(45,180,110,.6); animation: ping 2s infinite; }
+.live.off i { background: #FF6A5C; animation: none; }
+.rd-title { margin: 12px 0 4px; font: 800 clamp(28px, 4.6vw, 46px)/1.02 var(--f); font-stretch: 78%; letter-spacing: -.005em; color: #F0F4F1; text-wrap: balance; }
+.rd-sub { margin: 0; color: #C3CDC6; font-size: 16px; }
+.rd-bar { height: 3px; border-radius: 3px; background: #1D2721; margin: 18px 0 12px; overflow: hidden; }
+.rd-bar b { display: block; height: 100%; background: linear-gradient(90deg, #12844F, #45CF88); border-radius: 3px; transition: width .6s; }
+.rd-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: #84928A; font-size: 13.5px; }
+.rd-meta b { color: #F0F4F1; font-stretch: 80%; font-weight: 700; }
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.kpi { padding: 14px 16px; border-left: 1px solid var(--line); min-width: 0; }
+.kpi:first-child { border-left: 0; }
+.kpi span { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.kpi b { display: block; margin-top: 4px; font: 800 28px/1.05 var(--f); font-stretch: 72%; color: var(--ink); white-space: nowrap; }
+.kpi small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pos { color: var(--green-2) !important; } .neg { color: var(--bad) !important; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.seg { display: inline-flex; padding: 4px; gap: 2px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); }
+.seg button { border: 0; background: transparent; color: var(--ink-2); font-weight: 600; font-size: 14px; padding: 7px 16px; border-radius: 99px; }
+.seg button[aria-pressed="true"] { background: var(--green); color: var(--green-ink); }
+.casa { display: inline-flex; align-items: center; gap: 9px; padding: 8px 13px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); font-size: 14px; color: var(--ink-2); }
+.casa b { color: var(--ink); font-stretch: 80%; font-size: 15px; }
+.cs { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; font: 800 11px/1 var(--f); flex: none; color: #fff; }
+.cs.c99 { background: #1F6FEB; } .cs.cfi { background: #7C3AED; }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+.panel { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.panel h2 { margin: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line);
+  font-size: 12.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); }
+.panel h2 small { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); font-size: 12.5px; }
+.panel h2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 8px; vertical-align: 1px; }
+.ev { display: grid; grid-template-columns: 58px 26px minmax(0, 1fr); gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.ev:last-child { border-bottom: 0; }
+.ev time { color: var(--muted); font-size: 13px; font-stretch: 85%; padding-top: 2px; }
+.ev .ic { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); font-weight: 800; }
+.ev .ic.ok { background: var(--green-soft); color: var(--green-2); }
+.ev p { margin: 0; color: var(--ink); } .ev p small { display: block; color: var(--muted); font-size: 13px; }
+.buy { margin-top: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--green-line); background: color-mix(in srgb, var(--green-soft) 60%, transparent); display: grid; gap: 4px; }
+.buy-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .buy-top b { font-weight: 700; }
+.tag { font: 700 11px/1 var(--f); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; border-radius: 6px; }
+.tag.ev { display: inline; background: #0E2340; color: #8CB8FF; letter-spacing: 0; padding: 4px 7px; border: 0; }
+.tag.paper { background: var(--green-soft); color: var(--green-2); margin-left: auto; }
+.bet { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.bet:last-child { border-bottom: 0; }
+.bet .nm { font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bet .mk { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-stretch: 88%; }
+.bet .od { text-align: right; } .bet .od b { display: block; font: 800 17px/1.1 var(--f); font-stretch: 75%; color: var(--ink); } .bet .od small { color: var(--muted); font-size: 12.5px; }
+.st { font: 700 12px/1 var(--f); padding: 7px 10px; border-radius: 99px; border: 1px solid var(--line-2); color: var(--ink-2); white-space: nowrap; }
+.st.live { border-color: var(--green-line); color: var(--green-2); } .st.g { background: var(--green-soft); border-color: var(--green-line); color: var(--green-2); }
+.st.r { background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+.mira { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: 0; }
+.mira .bet { border-right: 1px solid var(--line); }
+.empty { padding: 22px 16px; color: var(--muted); font-size: 14px; }
+.note { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; }
+.note b { color: var(--ink-2); }
+@media (max-width: 980px) { .cols { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } .kpi:nth-child(4) { border-left: 0; } .kpi:nth-child(n+4) { border-top: 1px solid var(--line); } }
+@media (max-width: 640px) {
+  .rd-hero { grid-template-columns: 1fr; justify-items: center; text-align: center; padding: 22px 18px; gap: 16px; }
+  .scope { width: 190px; } .rd-pills, .rd-meta { justify-content: center; } .top-meta { display: none; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi:nth-child(odd) { border-left: 0; } .kpi:nth-child(4) { border-left: 1px solid var(--line); } .kpi:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .bet { grid-template-columns: 26px minmax(0, 1fr) auto; } .bet .st { grid-column: 2 / -1; justify-self: start; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./#props" aria-label="Início">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="8" fill="#2DB46E"/><path d="M17 5.5 28 13.5V28H6V13.5Z" fill="#000"/><path d="M12.6 28v-7.6h8.8V28M12.6 20.4a4.4 4.4 0 0 1 8.8 0" fill="none" stroke="#fff" stroke-width="2"/></svg>
+      <div><b>Black House</b><small>props NBA</small></div>
+    </a>
+    <nav class="topnav" aria-label="Seções">
+      <a href="./#props" title="Props"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg><span>Props</span></a><a href="./#tendencias" title="Tendências"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span>Tendências</span></a><a href="./#jogos" title="Jogos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18M5.6 5.6c3.5 3 3.5 9.8 0 12.8M18.4 5.6c-3.5 3-3.5 9.8 0 12.8"/></svg><span>Jogos</span></a><a href="./#defesa" title="Defesa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/></svg><span>Defesa</span></a><a href="./#multipla" title="Múltipla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>Múltipla</span></a><a href="./#placar" title="Placar do método"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M6 16l4-5 4 3 5-7"/><circle cx="19" cy="7" r="1.6"/></svg><span>Placar</span></a><a href="radar.html" title="Radar +EV" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6-6"/></svg><span>Radar</span></a><a href="./#banca" title="Banca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18v12H3zM3 7l3-4h12l3 4M16 13h2"/></svg><span>Banca</span></a><a href="./#guia" title="Guia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.2-2.5 3.8M12 17.2v.3"/></svg><span>Guia</span></a>
+    </nav>
+    <div class="top-meta"><span class="data-pill live" id="pill">Carregando…</span></div>
+  </div>
+</header>
+
+<main class="wrap rd">
+  <section class="rd-hero" aria-live="polite">
+    <div class="scope" id="scope" aria-hidden="true">
+      <svg viewBox="0 0 100 100"><g fill="none" stroke="#1F5A3A" stroke-width=".5"><circle cx="50" cy="50" r="16"/><circle cx="50" cy="50" r="32"/><circle cx="50" cy="50" r="48"/><path d="M50 2v96M2 50h96"/></g></svg>
+      <div class="sweep"></div>
+      <div id="blips"></div>
+    </div>
+    <div>
+      <div class="rd-pills"><span class="pill">Teste</span><span class="live" id="live"><i></i><span>Online</span></span></div>
+      <h1 class="rd-title" id="title">Varrendo…</h1>
+      <p class="rd-sub" id="sub">Lendo as linhas da 99play e da Finta</p>
+      <div class="rd-bar"><b id="bar" style="width:0"></b></div>
+      <div class="rd-meta" id="meta"></div>
+    </div>
+  </section>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="row">
+    <div class="seg" role="group" aria-label="Período">
+      <button type="button" data-p="hoje" aria-pressed="true">Hoje</button><button type="button" data-p="d7" aria-pressed="false">7 dias</button><button type="button" data-p="tudo" aria-pressed="false">Tudo</button>
+    </div>
+    <div class="row" id="casas"></div>
+  </div>
+
+  <section class="panel" id="miraBox"><h2><span><span class="dot"></span><span id="miraT">Na mira agora</span></span><small id="miraS"></small></h2><div class="mira" id="mira"></div></section>
+
+  <div class="cols">
+    <section class="panel"><h2><span><span class="dot"></span>Atividade</span><small id="actS"></small></h2><div id="act"></div></section>
+    <section class="panel"><h2><span>Entradas da carteira</span><small id="betS"></small></h2><div id="bets"></div></section>
+  </div>
+
+  <p class="note"><b>Como funciona.</b> A cada coleta o radar lê todas as linhas da 99play (mais e menos) e da Finta (só mais) e calcula o EV pela chance do Modelo BH.
+    Entra na mira o que tem <b>EV de 6% a 30%</b>, odd entre 1,40 e 4,50 e jogador confirmado. A Novig e a Kalshi são a segunda opinião: se uma delas diz que a odd não vale, o radar não compra.
+    Travas: 1 entrada por jogador, 3 por jogo, 12 por dia. Stake por <b>Kelly 1/4</b> numa banca de 100u (teto 2u; 1u com odd acima de 3,00).
+    Em paralelo, o radar conta o resultado como se cada entrada fosse de 1u fixa e mede o fechamento (CLV). <b>É uma carteira de teste: nada é apostado de verdade.</b></p>
+</main>
+
+<nav class="botnav" aria-label="Seções" style="grid-template-columns:repeat(5,1fr)">
+  <a href="./#props"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Props</a>
+  <a href="./#jogos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18"/></svg>Jogos</a>
+  <a href="./#placar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h16M6 16l4-5 4 3 5-7"/></svg>Placar</a>
+  <a href="radar.html" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6-6"/></svg>Radar</a>
+  <a href="./#banca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h18v12H3zM3 7l3-4h12l3 4M16 13h2"/></svg>Banca</a>
+</nav>
+
+<script>
+const MK = { PTS: 'pontos', REB: 'rebotes', AST: 'assistências', '3PM': 'bolas de 3', PRA: 'PRA', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', STL: 'roubos', BLK: 'tocos', SB: 'roubos+tocos', TOV: 'erros', FGM: 'arremessos conv.', FGA: 'arremessos tent.', FTA: 'LL tentados', FTM: 'LL convertidos', '2PM': 'de 2 conv.', '2PA': 'de 2 tent.', '3PA': 'de 3 tent.', PF: 'faltas' };
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const n2 = x => (+x).toFixed(2).replace('.', ',');
+const n1 = x => (Number.isInteger(+x) ? String(x) : (+x).toFixed(1)).replace('.', ',');
+const pc = x => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')}%`;
+const uu = x => x == null ? '—' : `${x >= 0 ? '+' : ''}${n2(x)}u`;
+const pp = x => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')} pp`;
+const sg = x => x == null || x === 0 ? '' : x > 0 ? 'pos' : 'neg';
+const hh = iso => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+const dd = iso => new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit' });
+const ago = iso => { const m = Math.round((Date.now() - Date.parse(iso)) / 6e4); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : `há ${Math.round(m / 60)}h`; };
+const casa = c => c === 'Finta' ? '<span class="cs cfi" title="Finta">F</span>' : '<span class="cs c99" title="99play">99</span>';
+const side = (s, l, mk) => `${s === 'o' ? 'Mais' : 'Menos'} de ${n1(l)} ${MK[mk] ?? mk}`;
+let R = null, per = 'hoje';
+
+function blips(A) {
+  // mais perto do centro = mais valor (EV 30% no centro); o ângulo vem do nome
+  const ang = s => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7) * Math.PI / 180;
+  const dot = (c, cls) => { const r = Math.max(8, Math.min(44, 46 - (c.ev / .30) * 38)), a = ang(c.n + c.mk + c.l);
+    return `<span class="blip ${cls}" style="left:${50 + r * Math.cos(a)}%;top:${50 + r * Math.sin(a)}%" title="${esc(c.n)}"></span>`; };
+  $('#blips').innerHTML = (A.perto ?? []).map(c => dot(c, 'dim')).join('') + (A.mira ?? []).map((c, i) => dot(c, i < 3 ? 'hot' : '')).join('');
+}
+function kpi(label, val, small = '', cls = '') { return `<div class="kpi"><span>${label}</span><b class="${cls}">${val}</b>${small ? `<small>${small}</small>` : ''}</div>`; }
+function stCls(x) {
+  if (x.status === 'green') return ['g', 'Green'];
+  if (x.status === 'red') return ['r', 'Red'];
+  if (x.status === 'devolvida') return ['', 'Devolvida'];
+  return Date.parse(x.tip) < Date.now() ? ['live', '● Em jogo'] : ['', 'Aguardando'];
+}
+function render() {
+  if (!R?.agora) { $('#title').textContent = 'O radar ainda não rodou'; $('#sub').textContent = 'Ele varre a cada coleta (aos :50 de cada hora e quando alguém pede a pauta).'; $('#pill').textContent = 'Sem dados'; return; }
+  const A = R.agora, mins = (Date.now() - Date.parse(A.at)) / 6e4, on = mins <= 80;
+  $('#pill').textContent = on ? 'Radar ligado' : 'Radar parado';
+  $('#live').classList.toggle('off', !on); $('#live span').textContent = on ? 'Online' : 'Parado';
+  $('#scope').classList.toggle('off', !on);
+  $('#title').textContent = A.titulo; $('#sub').textContent = A.sub;
+  $('#bar').style.width = Math.max(4, Math.min(100, 100 - (mins / 60) * 100)) + '%';
+  const next = new Date(); next.setMinutes(50, 0, 0); if (next < new Date()) next.setHours(next.getHours() + 1);
+  $('#meta').innerHTML = `<span>Última varredura <b>${ago(A.at)}</b> (${hh(A.at)})</span><span><b>${A.lidas}</b> linhas lidas</span><span><b>${A.quadro}</b> preços no quadro</span><span>Próxima ~<b>${hh(next.toISOString())}</b></span>`;
+  blips(A);
+  const P = R.periodos?.[per] ?? {}, H = R.hoje ?? {};
+  $('#kpis').innerHTML = [
+    kpi('Varreduras', H.varreduras ?? 0, 'hoje'),
+    kpi('Pareceram boas', H.boas ?? 0, 'hoje, sem repetir'),
+    kpi('Compradas', P.n ?? 0, `${P.green ?? 0} green · ${P.red ?? 0} red${P.abertas ? ` · ${P.abertas} abertas` : ''}`),
+    kpi('Stake', `${n2(P.stake ?? 0)}u`, P.ev != null ? `EV médio ${pc(P.ev)}` : ''),
+    kpi('P/L (Kelly)', P.liquidadas ? uu(P.lucro) : '—', P.liquidadas ? `ROI ${pc(P.roi)} · 1u fixa ${uu(P.lucro1)}` : 'nada liquidado ainda', sg(P.lucro)),
+    kpi('No fechamento', P.nClv ? pp(P.clv) : '—', P.nClv ? `${Math.round(P.bate * 100)}% bateram (${P.nClv})` : 'CLV aparece perto do jogo', sg(P.clv)),
+  ].join('');
+  const list = (R.carteira ?? []).filter(x => per === 'hoje' ? x.date === R.date : per === 'd7' ? Date.parse(x.date) >= Date.now() - 7 * 864e5 : true);
+  const cs = {}; for (const x of list) cs[x.casa] = (cs[x.casa] ?? 0) + 1;
+  $('#casas').innerHTML = ['99play', 'Finta'].map(c => `<span class="casa">${casa(c)}${c} <b>${cs[c] ?? 0}</b> ${cs[c] === 1 ? 'entrada' : 'entradas'}</span>`).join('');
+  // na mira (ou o que ficou mais perto)
+  const mira = A.mira?.length ? A.mira : A.perto ?? [];
+  $('#miraT').textContent = A.mira?.length ? 'Na mira agora' : 'Mais perto da regra';
+  $('#miraS').textContent = A.mira?.length ? `${A.mira.length} passaram na regra` : 'nada passou; estas ficaram abaixo';
+  $('#miraBox').hidden = !mira.length;
+  $('#mira').innerHTML = mira.map(c => `<div class="bet">${casa(c.c)}<div style="min-width:0"><div class="nm">${esc(c.n)} <small style="color:var(--muted);font-weight:600">${esc(c.t)}</small></div><div class="mk">${side(c.s, c.l, c.mk)}${c.why ? ` · ${esc(c.why)}` : ''}${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}</div></div><div class="od"><b>@${n2(c.o)}</b><small>chance ${Math.round(c.p * 100)}%</small></div><span class="st ${c.why ? '' : 'g'}">EV ${pc(c.ev)}</span></div>`).join('');
+  // atividade: varreduras sem compra seguidas viram um grupo, como no radar
+  const V = (R.varreduras ?? []).filter(v => per === 'hoje' ? new Date(v.at).toDateString() === new Date(A.at).toDateString() || Date.parse(v.at) > Date.now() - 18 * 36e5 : true);
+  const groups = []; for (const v of V) { const g = groups.at(-1); if (!v.compradas?.length && g && !g.buy) { g.list.push(v); } else groups.push({ buy: !!v.compradas?.length, list: [v] }); }
+  $('#actS').textContent = `última varredura ${ago(A.at)}`;
+  $('#act').innerHTML = groups.slice(0, 30).map(g => {
+    const v = g.list[0];
+    if (!g.buy) { const last = g.list.at(-1); return `<div class="ev"><time>${hh(v.at)}</time><span class="ic">–</span><p>Nada que valha apostar<small>${g.list.length > 1 ? `${g.list.length} varreduras, ${hh(last.at)} a ${hh(v.at)}` : `${v.quadro} preços no quadro`}${v.melhor ? ` · melhor EV ${pc(v.melhor.ev)}` : ''}</small></p></div>`; }
+    return `<div class="ev"><time>${hh(v.at)}</time><span class="ic ok">✓</span><div><p>Comprou ${v.compradas.length} de ${v.boas} ${v.boas === 1 ? 'boa' : 'boas'} · ${n2(v.stake)}u<small>de ${v.quadro} preços no quadro</small></p>${v.compradas.map(b => `<div class="buy"><div class="buy-top">${casa(b.c)}<b>${esc(b.n)}</b> ${side(b.s, b.l, b.mk)} <span>@${n2(b.o)}</span></div><div class="buy-top"><span class="tag ev">EV ${pc(b.ev)}</span><span class="tag paper">Comprada (teste)</span></div><small style="color:var(--muted)">Stake ${n2(b.st)}u por Kelly 1/4.</small></div>`).join('')}</div></div>`;
+  }).join('') || '<div class="empty">Nenhuma varredura neste período.</div>';
+  $('#betS').textContent = `${list.length} · ${n2(list.reduce((s, x) => s + x.stake, 0))}u`;
+  $('#bets').innerHTML = list.map(x => { const [c, t] = stCls(x);
+    return `<div class="bet">${casa(x.casa)}<div style="min-width:0"><div class="nm">${esc(x.name)}</div><div class="mk">${side(x.side, x.line, x.mk)} · ${esc(x.team)} x ${esc(x.opp)} · ${dd(x.tip)} ${hh(x.tip)}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}</div></div><div class="od"><b>@${n2(x.odd)}</b><small>${n2(x.stake)}u${x.status !== 'aberta' ? ` · <span class="${sg(x.lucro)}">${uu(x.lucro)}</span>` : ` · EV ${pc(x.ev)}`}</small></div><span class="st ${c}">${t}</span></div>`; }).join('') || '<div class="empty">Nenhuma entrada neste período.</div>';
+}
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => { per = b.dataset.p; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); render(); }));
+async function load() { try { R = await fetch('data/radar.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null); } catch { } render(); }
+load(); setInterval(load, 60_000); setInterval(render, 30_000);
+</script>
+</body>
+</html>

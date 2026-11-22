@@ -14,7 +14,7 @@ import { fetchLines } from './oddsapi.js';
 import { fetchSGO } from './sgo.js';
 import { fetchKalshi, DEFAULT_SERIES } from './kalshi.js';
 import { fetchFinta } from './finta.js';
-import { MODES, DEFAULT_BOOKS, loadState, saveState, mergeLines } from './oddsplan.js';
+import { MODES, DEFAULT_BOOKS, loadState, saveState, mergeLines, novigLines } from './oddsplan.js';
 import { USAGE } from './http.js';
 import { dailySummary, sendTelegram, radarAlerts } from './notify.js';
 import { buildSlate, buildResults, buildPrevSeason } from './slate.js';
@@ -249,6 +249,8 @@ async function main() {
     if (kalshi.length) try { await writeFile(join(dirname(OUT), 'kalshi.json'), JSON.stringify({ date, gen: new Date().toISOString(), list: kalshi })); } catch (e) { warnings.push('kalshi.json falhou: ' + e.message); }
   }
   const oddsLines = mergeLines(lists, kalshi);
+  // Novig (21/11): preço de bolsa sem margem, separado do consenso; segunda opinião do Radar
+  try { const nv = novigLines(lists); await writeFile(join(dirname(OUT), 'novig.json'), JSON.stringify({ date, gen: new Date().toISOString(), lines: nv })); if (nv.length) log(`  Novig: ${nv.length} linhas`); } catch (e) { warnings.push('novig.json falhou: ' + e.message); }
   const srcs = [env.ODDS_API_KEY && 'The Odds API', env.SGO_API_KEY && 'SportsGameOdds', kalshi.length && 'Kalshi'].filter(Boolean);
   sources.odds = oddsLines.length ? `${srcs.join(' + ')} (${oddsLines.length} linhas)` : srcs.length ? `${srcs.join(' + ')}: nenhuma linha ainda` : 'sem fonte de odds: linhas de referência e linha digitada por você';
   await saveState(STATE, state);

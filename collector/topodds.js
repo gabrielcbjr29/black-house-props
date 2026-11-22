@@ -32,7 +32,7 @@ export function toSlateLines(stored, players) {
   const best = {};
   for (const l of stored) {
     const pid = byName.get(normName(l.name)); if (!pid) continue;
-    const books = Object.values(l.books).filter(b => b.o > 1 && b.u > 1);
+    const books = Object.entries(l.books).filter(([k, b]) => k !== 'Novig' && b.o > 1 && b.u > 1).map(([, b]) => b); // Novig fica fora (só o Radar usa)
     if (!books.length) continue;
     const o = median(books.map(b => b.o)), u = median(books.map(b => b.u));
     const cand = { pid, mk: l.mk, line: l.line, n: books.length, o, u, bal: Math.abs(1 / o - 1 / u) };

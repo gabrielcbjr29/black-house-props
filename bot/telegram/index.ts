@@ -890,6 +890,40 @@ async function gabResultados(chatId: number, rest: string[]): Promise<Out> {
   return { text: fitHTML(text), kb: { inline_keyboard: [[BTN('⏳ Pendentes', '/resultadoscanal pendentes'), BTN('🔄 Atualizar', '/resultadoscanal')], [{ text: '📈 Painel', url: `${APP_URL}resultados.html?c=${k.id}&t=${tk}` }, { text: '📄 Planilha (CSV)', url: csv }], HOME] } };
 }
 
+// ---------- Radar +EV (21/11): carteira de TESTE, lida de data/radar.json (scripts/radar.mjs no pipeline) ----------
+const RADAR_MK: Record<string, string> = { PTS: 'pontos', REB: 'rebotes', AST: 'assist.', '3PM': 'bolas de 3', PRA: 'PRA', PR: 'pts+reb', PA: 'pts+ast', RA: 'reb+ast', STL: 'roubos', BLK: 'tocos', SB: 'roub+tocos', TOV: 'erros', FGM: 'arr. conv.', FTA: 'LL tent.', FTM: 'LL conv.', '2PM': 'de 2 conv.', '2PA': 'de 2 tent.', '3PA': 'de 3 tent.', PF: 'faltas', FGA: 'arr. tent.' };
+async function radarCmd(rest: string[]): Promise<Out> {
+  const R: any = await fetch(APP_URL + 'data/radar.json?t=' + Math.floor(Date.now() / 6e4)).then(r => r.ok ? r.json() : null).catch(() => null);
+  const kb = (per: string) => ({ inline_keyboard: [
+    [BTN(per === 'hoje' ? '• Hoje' : 'Hoje', '/radar'), BTN(per === 'd7' ? '• 7 dias' : '7 dias', '/radar 7d'), BTN(per === 'tudo' ? '• Tudo' : 'Tudo', '/radar tudo')],
+    [BTN('🔄 Atualizar', per === 'hoje' ? '/radar' : `/radar ${per === 'd7' ? '7d' : 'tudo'}`), { text: '📡 Abrir o Radar', url: APP_URL + 'radar.html' }], HOME] });
+  if (!R?.agora) return { text: '📡 <b>RADAR +EV</b>\nO radar ainda não rodou. Ele varre a cada coleta (aos :50 e quando alguém pede a pauta).', kb: kb('hoje') };
+  const per = /^7/.test(rest[0] ?? '') ? 'd7' : /^tud|^all/.test(rest[0] ?? '') ? 'tudo' : 'hoje';
+  const A = R.agora, mins = Math.round((Date.now() - Date.parse(A.at)) / 6e4), on = mins <= 80;
+  const pc = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')}%`;
+  const uu = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${n2(x)}u`;
+  const pp = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')} pp`;
+  const ln = (c: any) => `${esc(c.n)} · ${c.s === 'o' ? 'mais' : 'menos'} de ${n1(c.l)} ${RADAR_MK[c.mk] ?? c.mk} <code>@${n2(c.o)}</code> ${c.c === 'Finta' ? '🟣' : '🔵'} · EV <b>${pc(c.ev)}</b>${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}`;
+  const P = R.periodos?.[per] ?? {};
+  const IC: Record<string, string> = { aberta: '⏳', green: '✅', red: '❌', devolvida: '↩️' };
+  const lista = (R.carteira ?? []).filter((x: any) => per === 'hoje' ? x.date === R.date : per === 'd7' ? Date.parse(x.date) >= Date.now() - 7 * 864e5 : true).slice(0, 10);
+  const L: string[] = [];
+  L.push(`📡 <b>RADAR +EV</b> · <i>carteira de teste</i>`);
+  L.push(`${on ? '🟢 online' : '🔴 parado'} · última varredura ${hourBR(A.at)} (há ${mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h'})`);
+  L.push('', `<b>${esc(A.titulo)}</b>`, `<i>${esc(A.sub)}</i>`);
+  L.push(`<blockquote>${A.lidas} linhas lidas · ${A.quadro} preços no quadro (99play + Finta)\nRegra: EV ${Math.round((R.cfg?.min ?? .06) * 100)}%+ pelo Modelo BH, sem Novig/Kalshi contra · Kelly 1/4</blockquote>`);
+  if (per === 'hoje') L.push(`<b>Hoje</b>: ${R.hoje.varreduras} varreduras · ${R.hoje.boas} pareceram boas · <b>${R.hoje.compradas} compradas</b> · ${n2(R.hoje.stake ?? 0)}u`);
+  L.push(`<b>${per === 'hoje' ? 'Resultado de hoje' : per === 'd7' ? '7 dias' : 'Desde o início'}</b>: Kelly <b>${uu(P.lucro)}</b> (ROI ${pc(P.roi)}) · 1u fixa ${uu(P.lucro1)} · ${P.green ?? 0}G ${P.red ?? 0}R${P.abertas ? ` · ${P.abertas} em aberto` : ''}`);
+  if (P.nClv) L.push(`No fechamento: CLV médio <b>${pp(P.clv)}</b> · ${Math.round((P.bate ?? 0) * 100)}% bateram o fechamento (${P.nClv})`);
+  if (per === 'hoje') {
+    if (A.mira?.length) L.push('', '🎯 <b>Na mira agora</b>', ...A.mira.slice(0, 6).map(ln));
+    else if (A.perto?.length) L.push('', '🔎 <b>Mais perto da regra</b>', ...A.perto.slice(0, 3).map((c: any) => `${ln(c)} · <i>${esc(c.why)}</i>`));
+  }
+  if (lista.length) L.push('', `🧾 <b>Carteira${per === 'hoje' ? ' de hoje' : ''}</b>`, ...lista.map((x: any) => `${IC[x.status] ?? '⏳'} ${esc(x.name)} · ${x.side === 'o' ? 'mais' : 'menos'} de ${n1(x.line)} ${RADAR_MK[x.mk] ?? x.mk} <code>@${n2(x.odd)}</code> ${x.casa === 'Finta' ? '🟣' : '🔵'} · <b>${n2(x.stake)}u</b>${x.status === 'aberta' ? '' : ` · ${uu(x.lucro)}`}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}`));
+  L.push('', '<i>Teste: nada é apostado de verdade. 🔵 99play · 🟣 Finta. Comparamos Kelly × 1u fixa e o CLV na revisão.</i>');
+  return { text: fitHTML(L.join('\n')), kb: kb(per) };
+}
+
 // ---------- rodar os números na hora (20/11) ----------
 // Dispara o pipeline do GitHub com o token guardado em bot_config.GH_DISPATCH (o administrador manda com /github).
 async function cfgV(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
@@ -1375,6 +1409,7 @@ const HELP = `<b>📖 COMANDOS</b>
 /combo · Combo Finta × 99play de um jogador: ast + reb (e duplo/triplo-duplo) 15+ na Finta (ex.: /combo lebron)
 /finta · overs da Finta com valor (linha principal e escada)
 /gabarito · resultado de ontem de cada mercado (chega sozinho de manhã)
+/radar · radar +EV: o que passou na regra agora e a carteira de teste (Kelly) · /radar 7d
 /placar · placar da verdade: modelo × 99play × Kalshi no fechamento · /placar 7
 /status · saúde do sistema: coleta, leitor da 99play, papel de hoje
 /app · app completo
@@ -1399,14 +1434,14 @@ const MENU = { inline_keyboard: [
   [BTN('🧠 Modelo BH', '/modelo'), BTN('📒 Testes', '/testes'), BTN('📬 Envio diário', '/receber')], [BTN('🎯 Odd mínima', '/odd'), BTN('🎟️ Múltipla', '/multipla 3')],
   [BTN('💼 Banca e ROI', '/banca'), BTN('🧪 Estratégias', '/estrategias'), BTN('🖼️ Cards do dia', '/cards')],
   [BTN('🎯 Pauta do Tipster', '/pauta'), BTN('⏱️ Método Minutos', '/minutos'), BTN('🟣 Finta', '/finta')], [BTN('🪜 Escadas', '/escadas'), BTN('📄 PDF do dia', '/pdf'), BTN('🩺 Saúde', '/status')], [BTN('📢 Canais', '/canais'), BTN('🧾 Placar da verdade', '/placar'), BTN('⚖️ Veredito', '/veredito')],
-  [BTN('📊 Resultados do canal Black House', '/resultadoscanal')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
+  [BTN('📡 Radar +EV (teste)', '/radar'), BTN('📊 Resultados do canal', '/resultadoscanal')], [{ text: '📈 Placar no app', url: APP_URL + '#placar' }],
   [{ text: '📱 Abrir o app completo', url: APP_URL }],
 ] };
 
 // teclado fixo e menus por assunto
 const RKB = { keyboard: [[{ text: '🔥 Hoje' }, { text: '🧠 Modelo BH' }], [{ text: '💼 Banca' }, { text: '☰ Mais' }]], resize_keyboard: true, is_persistent: true };
 const KBMAP: Record<string, string> = { '🔥 Hoje': '/hoje', '🧠 Modelo BH': '/modelobh', '💼 Banca': '/banca', '☰ Mais': '/menu' };
-const HUB = { inline_keyboard: [[BTN('🔥 Hoje', '/hoje'), BTN('🧠 Modelo BH', '/modelobh')], [BTN('💼 Banca e ROI', '/banca'), BTN('☀️ Resultado de ontem', '/ontem')], [BTN('☰ Todos os mercados', '/menu')], [{ text: '📱 Abrir o app completo', url: APP_URL }]] };
+const HUB = { inline_keyboard: [[BTN('🔥 Hoje', '/hoje'), BTN('🧠 Modelo BH', '/modelobh')], [BTN('💼 Banca e ROI', '/banca'), BTN('☀️ Resultado de ontem', '/ontem')], [BTN('📡 Radar +EV', '/radar'), BTN('☰ Todos os mercados', '/menu')], [{ text: '📱 Abrir o app completo', url: APP_URL }]] };
 const HOJE = { inline_keyboard: [
   [BTN('🔥 Top do dia', '/top'), BTN('💰 Valor', '/valor'), BTN('🛡️ Seguras', '/seguras')],
   [BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')],
@@ -1509,6 +1544,7 @@ async function answer(text: string, chatId: number, page = 1): Promise<Out> {
   if (cmd === 'resultadoscanal' || cmd === 'rc' || (cmd === 'resultados' && /canal/i.test(rest.join(' ')))) return gabResultados(chatId, rest.filter(x => !/canal|black|house/i.test(x)));
   if (cmd === 'gab') return gabCmd(chatId, rest);
   if (cmd === 'rodar') return rodarCmd(chatId);
+  if (cmd === 'radar') return radarCmd(rest);
   if (cmd === 'ler') return rodarCmd(chatId, true);
   if (cmd === 'jogador') {
     const q = norm(arg); if (q.length < 3) return { text: 'Digite o nome assim: <code>/jogador brunson</code>', kb: { inline_keyboard: [HOME] } };
@@ -2281,7 +2317,7 @@ Deno.serve(async (req: Request) => {
       ['top', 'Melhores do dia (ex.: /top 20)'], ['valor', 'Valor com odd de casa'], ['seguras', 'Chance de 65% ou mais'], ['pontos', 'Melhores em pontos'], ['rebotes', 'Melhores em rebotes'],
       ['assist', 'Melhores em assistências'], ['tres', 'Bolas de 3'], ['pra', 'Pts+Reb+Ast'], ['combinados', 'PR, PA, RA e PRA'], ['tentativas', 'Arremessos tentados'], ['convertidos', 'Arremessos convertidos'],
       ['defesa', 'Roubos, tocos, erros e faltas'], ['faltas', 'Faltas cometidas'], ['mais', 'Só "mais de" (ex.: /mais pontos)'], ['menos', 'Só "menos de"'], ['jogo', 'Linhas de um jogo (ex.: /jogo LAL)'], ['jogador', 'Linhas de um jogador'],
-      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['correl', 'Props correlacionadas entre companheiros (ex.: /correl wagner 8 ast)'], ['resultadoscanal', 'Resultados do canal Black House (gabarito)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
+      ['multipla', 'Múltipla (ex.: /multipla 3 ou 4,5)'], ['jogos', 'Jogos de hoje'], ['desfalques', 'Lesões'], ['resumo', 'Resumo da rodada'], ['cards', 'Melhores do dia em imagem'], ['pdf', 'PDF com as melhores entradas do dia'], ['modelo', 'Modelo BH: chance de qualquer linha'], ['testes', 'Testes do Modelo BH'], ['toptentativas', 'Top 10 do modelo em tentativas'], ['topra', 'Top 10 do modelo em reb+ast'], ['receber', 'Receber os tops todo dia'], ['banca', 'Entradas registradas, lucro e ROI'], ['ontem', 'Resultado de ontem'], ['estrategias', 'Modelo por mercado: placar e entradas'], ['minutos', 'Método Minutos: placar e entradas do dia'], ['veredito', 'Veredito pelo fechamento (CLV) de cada método'], ['combo', 'Combo Finta × 99play: ast + reb 15+ (ex.: /combo lebron)'], ['correl', 'Props correlacionadas entre companheiros (ex.: /correl wagner 8 ast)'], ['radar', 'Radar +EV: na mira agora e carteira de teste (Kelly)'], ['resultadoscanal', 'Resultados do canal Black House (gabarito)'], ['finta', 'Finta: overs com valor'], ['gabarito', 'Gabarito de ontem por mercado'], ['status', 'Saúde do sistema: coleta, leitor e papel'], ['placar', 'Placar da verdade: modelo × 99play × Kalshi'], ['canais', 'Canais: postagem automática e configuração'], ['escadas', 'Escadas: pontos + rebotes + assistências do mesmo jogador'], ['pauta', 'Pauta do Tipster: o melhor do dia num botão'], ['hoje', 'Listas de hoje'], ['ajuda', 'Todos os comandos'], ['app', 'Abrir o app']].map(([command, description]) => ({ command, description })) });
     const me = await TG('getMe', {});
     const info = await TG('getWebhookInfo', {});
     return new Response(JSON.stringify({ ok: !!hook.ok, webhook: hook, endereco: info.result?.url, erro_recente: info.result?.last_error_message ?? null, comandos: cmds.ok, bot: me.result?.username ? '@' + me.result.username : null }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8' } });

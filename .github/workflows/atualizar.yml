@@ -86,6 +86,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: node scripts/auditoria.mjs public
+      # Radar +EV (21/11): varre 99play e Finta a cada coleta, compra numa carteira de TESTE (Kelly 1/4, nada de verdade),
+      # mede o fechamento (CLV) e liquida pelo boxscore. Estado em data/radar/, resumo em public/data/radar.json.
+      - name: Radar +EV (carteira de teste)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: node scripts/radar.mjs public
       - name: Salvar histórico e slate no repositório
         run: |
           git config user.name "garrafao-bot"

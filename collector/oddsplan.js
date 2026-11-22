@@ -13,7 +13,16 @@ export const MODES = {
   completo: { markets: 'player_points,player_rebounds,player_assists,player_threes,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists', open: true, close: true, label: 'completo: abertura e fechamento, 8 mercados' }
 };
 // casas pedidas por nome: até 10 casas custam o mesmo que 1 região
-export const DEFAULT_BOOKS = 'fanduel,draftkings,betmgm,williamhill_us,betrivers,espnbet,fanatics,betonlineag,lowvig,pinnacle';
+// 21/11: lowvig (irmã da BetOnline, já na lista) deu lugar à Novig (bolsa sem margem dos EUA) no mesmo custo. A Novig NÃO entra
+// no consenso do mercado (métodos congelados até a revisão de 24/11): vai separada para public/data/novig.json e só o Radar usa.
+export const DEFAULT_BOOKS = 'fanduel,draftkings,betmgm,williamhill_us,betrivers,espnbet,fanatics,betonlineag,novig,pinnacle';
+export const SEP_BOOKS = new Set(['Novig']);
+/* linhas da Novig (preço de bolsa sem margem) tiradas das listas brutas: [{name, mk, line, o, u}] */
+export function novigLines(lists) {
+  const out = new Map();
+  for (const list of lists) for (const l of list || []) { const b = l.books?.Novig; if (b?.o > 1 && b?.u > 1) out.set(normName(l.name) + '|' + l.mk + '|' + l.line, { name: l.name, mk: l.mk, line: +l.line, o: b.o, u: b.u }); }
+  return [...out.values()];
+}
 
 export async function loadState(file) {
   try { return JSON.parse(await readFile(file, 'utf8')); } catch { return { v: 1, events: {}, providers: {}, usage: {} }; }
@@ -51,7 +60,7 @@ export function mergeLines(lists, kalshi = []) {
   for (const list of lists) for (const l of list || []) {
     const key = normName(l.name) + '|' + l.mk + '|' + l.line;
     const cur = byLine.get(key) || { name: l.name, mk: l.mk, line: l.line, books: {} };
-    Object.assign(cur.books, l.books); byLine.set(key, cur);
+    Object.assign(cur.books, l.books); for (const b of SEP_BOOKS) delete cur.books[b]; byLine.set(key, cur);
   }
   const best = new Map();
   for (const l of byLine.values()) {

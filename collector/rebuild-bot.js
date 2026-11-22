@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { buildBotData } from './botdata.js';
 import { topOdds, mergeTopLines } from './topodds.js';
-import { loadState, saveState } from './oddsplan.js';
+import { loadState, saveState, novigLines } from './oddsplan.js';
 import { fetch99, merge99 } from './casa99.js';
 import { pickStrategies } from './strategies.js';
 import { buildCombo } from './combo.js';
@@ -27,6 +27,14 @@ if (state) try {
   n = mergeTopLines(slate, lines);
   if (n) console.log(`odds dos tops: ${n} linhas reais no slate`);
 } catch (e) { console.log('odds dos tops: falhou (' + e.message + ')'); }
+// Novig das "odds dos tops" (reb+ast, arremessos, lances): junta no novig.json da coleta (Radar)
+if (state?.providers?.tops?.date === slate.meta?.date) try {
+  const NV = new URL('novig.json', dir); let cur = { date: slate.meta.date, lines: [] };
+  try { const j = JSON.parse(readFileSync(NV, 'utf8')); if (j.date === slate.meta.date) cur = j; } catch { }
+  const add = novigLines([state.providers.tops.lines || []]), key = l => l.name + '|' + l.mk + '|' + l.line;
+  const m = new Map(cur.lines.map(l => [key(l), l])); for (const l of add) m.set(key(l), l);
+  if (add.length) { writeFileSync(NV, JSON.stringify({ ...cur, gen: new Date().toISOString(), lines: [...m.values()] })); console.log(`Novig (tops): ${add.length} linhas`); }
+} catch (e) { console.log('Novig (tops): falhou (' + e.message + ')'); }
 if (state) await saveState(STATE, state).catch(() => null);
 if (n || n99) writeFileSync(new URL('slate.json', dir), JSON.stringify(slate));
 let kalshi = null; try { kalshi = JSON.parse(readFileSync(new URL('kalshi.json', dir), 'utf8')); } catch { }

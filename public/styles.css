@@ -72,9 +72,9 @@ a { color: var(--green); }
 /* ---------- nav inferior (celular) ---------- */
 .botnav { display: none; }
 @media (max-width: 820px) {
-  .botnav { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35; background: var(--head); border-top: 1px solid var(--head-line);
+  .botnav { display: grid; grid-template-columns: repeat(8, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35; background: var(--head); border-top: 1px solid var(--head-line);
     padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
-  .botnav a { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 1px 10px; color: var(--head-muted); text-decoration: none; font-size: 11px; font-weight: 600; min-width: 0; }
+  .botnav a { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 1px 10px; color: var(--head-muted); text-decoration: none; font-size: 10.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .botnav a svg { width: 21px; height: 21px; }
   .botnav a[aria-current="page"] { color: #FFFFFF; }
   .botnav a[aria-current="page"] svg { color: #2DB46E; }
