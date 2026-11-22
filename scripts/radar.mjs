@@ -11,6 +11,8 @@
 // Liquida pelo boxscore (public/data/results.json), como o Placar da verdade.
 //
 // Estado (fora do site): data/radar/carteira.json e data/radar/varreduras.json. Resumo: public/data/radar.json.
+// Duas trilhas (21/11, depois do backtest): Modelo BH com peso 0,2 (EV 6%+) e Kalshi como preço justo perto do jogo
+// (até 150 min antes, EV 4%+). Cada trilha tem as próprias travas e o placar separado.
 // Uso: node scripts/radar.mjs [public]
 import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
@@ -21,6 +23,9 @@ import { kalshiAt, norm, ALV } from './alavanca.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const CFG = {
+  // 21/11 (backtest + Placar da verdade, 15 mil linhas): o modelo puro erra mais que a 99play; o melhor peso dele na
+  // mistura com o mercado é 0,1–0,2. O radar usa 0,2 (o bot segue em 0,4 até a revisão de 24/11).
+  w: .2,
   min: .06, max: .30,          // regra: EV de 6% a 30% (acima de 30% quase sempre é linha errada)
   oddMin: 1.40, oddMax: 4.50, pMin: .30, expMin: 18,
   leadMin: 10,                 // não compra a menos de 10 min do jogo
@@ -28,7 +33,10 @@ export const CFG = {
   banca: 100, frac: .25, maxStake: 2, minStake: .1,
   longOdd: 3, longMax: 1,      // odd acima de 3,00: no máximo 1u (a cauda é onde o modelo mais erra)
   nvMin: 0, kMin: -.02,        // segunda opinião: EV pela Novig ≥ 0, pela Kalshi ≥ −2%
+  // trilha Kalshi (21/11): preço justo = Kalshi, só perto do jogo (o preço dela longe do jogo fica velho/sem liquidez)
+  k: { min: .04, max: .30, window: 150 },
 };
+export const TRILHAS = { bh: 'Modelo BH (peso 0,2)', k: 'Kalshi perto do jogo' };
 const r3 = x => x == null || !Number.isFinite(x) ? null : Math.round(x * 1e3) / 1e3;
 const r2 = x => Math.round(x * 100) / 100;
 const nn = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
@@ -51,7 +59,7 @@ export function stakeOf(p, odd, cfg = CFG) {
 }
 
 /* uma varredura: todas as linhas com preço de casa BR, com chance, EV e o motivo de entrar ou não */
-export function scan({ slate, finta, kalshi, novig, now = Date.now(), cfg = CFG, w = +(process.env.BOT_W || .4) }) {
+export function scan({ slate, finta, kalshi, novig, now = Date.now(), cfg = CFG, w = cfg.w ?? .2 }) {
   const date = slate?.meta?.date;
   let props = []; try { props = buildProps(slate, { calib: true }); } catch { }
   const FIN = new Map();
@@ -115,6 +123,22 @@ export function choose(S, carteira, cfg = CFG) {
   }
   return buys;
 }
+// motivos que não dependem do EV do modelo: quem passou neles pode entrar na trilha Kalshi
+const NON_EV = new Set(['', 'EV abaixo da regra', 'EV alto demais (linha suspeita)', 'Novig contra', 'Kalshi contra']);
+/* trilha Kalshi: candidatas com preço da Kalshi, a até `window` min do jogo; chance e EV pela Kalshi */
+export function kalshiCands(S, cfg = CFG) {
+  const now = Date.parse(S.at);
+  return S.cands.filter(c => c.pk != null && NON_EV.has(c.why)).map(c => {
+    const mins = (Date.parse(c.tip) - now) / 6e4, ev = Math.round((c.pk * c.odd - 1) * 1e3) / 1e3;
+    return { ...c, pBH: c.p, evBH: c.ev, p: c.pk, ev, ok: mins <= cfg.k.window && mins >= cfg.leadMin && ev >= cfg.k.min && ev <= cfg.k.max };
+  });
+}
+/* as compras das duas trilhas nesta varredura (cada trilha com as próprias travas) */
+export function chooseAll(S, carteira, cfg = CFG) {
+  const bh = choose(S, carteira.filter(x => (x.tr ?? 'bh') === 'bh'), cfg).map(b => ({ ...b, tr: 'bh' }));
+  const k = choose({ ...S, cands: kalshiCands(S, cfg) }, carteira.filter(x => x.tr === 'k'), cfg).map(b => ({ ...b, id: 'k|' + b.id, tr: 'k' }));
+  return [...bh, ...k];
+}
 /* fechamento: a última leitura antes do jogo, na mesma casa, lado e linha */
 export function updateClose(carteira, S, now = Date.now()) {
   const m = new Map(S.cands.map(c => [`${c.pid}|${c.mk}|${c.side}|${c.casa}|${c.line}`, c])); let n = 0;
@@ -168,14 +192,19 @@ export function report({ S, carteira, scans, cfg = CFG, now = Date.now() }) {
   const CH = carteira.filter(x => x.date === S.date), C7 = carteira.filter(x => day(x) >= d7);
   const casas = {}; for (const x of CH) casas[x.casa] = (casas[x.casa] ?? 0) + 1;
   const boas = S.cands.filter(c => c.ok).sort((a, b) => b.ev - a.ev);
+  const boasK = kalshiCands(S, cfg).filter(c => c.ok).sort((a, b) => b.ev - a.ev);
+  const tr = t => carteira.filter(x => (x.tr ?? 'bh') === t);
+  const trilha = t => ({ nome: TRILHAS[t], hoje: stats(tr(t).filter(x => x.date === S.date)), d7: stats(tr(t).filter(x => day(x) >= d7)), tudo: stats(tr(t)) });
   // mais perto da regra: EV positivo mas abaixo do mínimo, ou barrada pela segunda opinião (Novig/Kalshi)
   const perto = S.cands.filter(c => !c.ok && c.ev > 0 && ['EV abaixo da regra', 'Novig contra', 'Kalshi contra'].includes(c.why)).sort((a, b) => b.ev - a.ev).slice(0, 5);
   return {
     v: 1, gen: new Date(now).toISOString(), date: S.date, cfg,
-    agora: { at: S.at, lidas: S.lidas, quadro: S.quadro, boas: boas.length, comprou: scans.at(-1)?.compradas?.length ?? 0,
-      titulo: boas.length ? `${boas.length} ${boas.length > 1 ? 'entradas' : 'entrada'} na mira` : 'Nada que valha apostar',
-      sub: boas.length ? `EV de ${Math.round(boas.at(-1).ev * 100)}% a ${Math.round(boas[0].ev * 100)}% pelo Modelo BH` : S.quadro ? `Nenhum preço passou da regra (EV ${Math.round(cfg.min * 100)}%+) agora` : 'Sem linhas da 99play ou da Finta para ler agora',
-      mira: boas.slice(0, 12).map(slim), perto: perto.map(slim) },
+    agora: { at: S.at, lidas: S.lidas, quadro: S.quadro, boas: boas.length + boasK.length, comprou: scans.at(-1)?.compradas?.length ?? 0,
+      titulo: boas.length + boasK.length ? `${boas.length + boasK.length} ${boas.length + boasK.length > 1 ? 'entradas' : 'entrada'} na mira` : 'Nada que valha apostar',
+      sub: boas.length || boasK.length ? [boas.length && `${boas.length} pelo Modelo BH (EV ${Math.round(boas.at(-1).ev * 100)}–${Math.round(boas[0].ev * 100)}%)`, boasK.length && `${boasK.length} pela Kalshi`].filter(Boolean).join(' · ')
+        : S.quadro ? `Nenhum preço passou da regra (EV ${Math.round(cfg.min * 100)}%+) agora` : 'Sem linhas da 99play ou da Finta para ler agora',
+      mira: [...boas.slice(0, 10).map(c => ({ ...slim(c), tr: 'bh' })), ...boasK.slice(0, 6).map(c => ({ ...slim(c), tr: 'k' }))], perto: perto.map(slim) },
+    trilhas: { bh: trilha('bh'), k: trilha('k') },
     hoje: { varreduras: sc.length, boas: boasHoje.size, compradas: CH.length, ...stats(CH) },
     periodos: { hoje: stats(CH), d7: stats(C7), tudo: stats(carteira) }, casas,
     varreduras: scans.slice(-80).reverse().map(s => ({ at: s.at, lidas: s.lidas, quadro: s.quadro, boas: s.boas, compradas: s.compradas, stake: s.stake, melhor: s.melhor })),
@@ -192,11 +221,11 @@ function main() {
   const now = Date.now();
   const S = scan({ slate, finta: J(join(pub, 'data', 'finta.json')), kalshi: J(join(pub, 'data', 'kalshi.json')), novig: J(join(pub, 'data', 'novig.json')), now });
   const fech = updateClose(carteira, S, now);
-  const buys = choose(S, carteira); carteira.push(...buys);
+  const buys = chooseAll(S, carteira); carteira.push(...buys);
   const liq = settle(carteira, J(join(pub, 'data', 'results.json')));
   const top = S.cands.slice().sort((a, b) => b.ev - a.ev)[0];
   scans.push({ at: S.at, date: S.date, lidas: S.lidas, quadro: S.quadro, boas: S.cands.filter(c => c.ok).length, boasK: S.cands.filter(c => c.ok).map(c => keyOf(c) + '|' + c.casa + '|' + c.line),
-    compradas: buys.map(b => ({ n: b.name, mk: b.mk, s: b.side, l: b.line, o: b.odd, c: b.casa, ev: b.ev, st: b.stake })), stake: r2(buys.reduce((s, b) => s + b.stake, 0)),
+    compradas: buys.map(b => ({ n: b.name, mk: b.mk, s: b.side, l: b.line, o: b.odd, c: b.casa, ev: b.ev, st: b.stake, tr: b.tr })), stake: r2(buys.reduce((s, b) => s + b.stake, 0)),
     melhor: top ? { n: top.name, mk: top.mk, s: top.side, l: top.line, o: top.odd, c: top.casa, ev: top.ev, why: top.why } : null });
   while (scans.length > 400) scans.shift();
   writeFileSync(join(dir, 'carteira.json'), JSON.stringify(carteira));

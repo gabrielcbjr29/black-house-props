@@ -20,7 +20,7 @@ const results = JSON.parse(readFileSync(join(ROOT, 'public/data/results.json'), 
 const OPEN = { ...CFG, min: -9, max: 99, nvMin: -99, kMin: -99 };
 const commits = git(`log --reverse --since=${since} --format='%H|%cI' -- public/data/slate.json`).trim().split('\n').map(l => l.split('|'));
 // peso do modelo na mistura com o mercado: 0,4 (o do bot) e os mais leves que o Placar da verdade aponta
-const WS = [.4, .25, .15];
+const WS = [.4, .2];
 const SC = Object.fromEntries(WS.map(w => [w, []])); let t0 = Date.now();
 const has = (c, f) => { try { execSync(`git cat-file -e ${c}:public/data/${f}`, { cwd: ROOT, stdio: 'ignore' }); return true; } catch { return false; } };
 for (const [c, iso] of commits) {
@@ -29,19 +29,20 @@ for (const [c, iso] of commits) {
   for (const w of WS) {
     let S; try { S = scan({ slate, finta, kalshi, novig, now, cfg: OPEN, w }); } catch (e) { continue; }
     // guarda só o necessário (as que passam nas travas que não dependem do EV)
-    S.cands = S.cands.filter(x => !x.why && x.ev > 0);
+    S.cands = S.cands.filter(x => !x.why && (x.ev > 0 || x.pk != null));
     SC[w].push(S);
   }
 }
 let scans = SC[.4];
-console.error(`${scans.length} leituras varridas (3 pesos) em ${Math.round((Date.now() - t0) / 1000)}s`);
+console.error(`${scans.length} leituras varridas (${WS.length} pesos) em ${Math.round((Date.now() - t0) / 1000)}s`);
 
 // 2) simula uma regra em cima das leituras
 function sim(rule) {
   const cfg = { ...CFG, ...rule }, car = [];
   for (const S of SC[rule.w ?? .4]) {
     // rule.sharp = 'k': o preço justo passa a ser a Kalshi (EV e Kelly pela chance da Kalshi); 'k+bh': Kalshi e modelo concordam
-    const base = rule.sharp ? S.cands.filter(x => x.pk != null).map(x => ({ ...x, pBH: x.p, evBH: x.ev, p: x.pk, ev: Math.round((x.pk * x.odd - 1) * 1e3) / 1e3 })) : S.cands;
+    const nowS = Date.parse(S.at);
+    const base = rule.sharp ? S.cands.filter(x => x.pk != null && (!rule.near || (Date.parse(x.tip) - nowS) / 6e4 <= rule.near)).map(x => ({ ...x, pBH: x.p, evBH: x.ev, p: x.pk, ev: Math.round((x.pk * x.odd - 1) * 1e3) / 1e3 })) : S.cands;
     const cands = base.map(x => ({ ...x, ok: x.ev >= cfg.min && x.ev <= cfg.max && (rule.sharp !== 'k+bh' || x.evBH >= 0)
       && (rule.casa ? x.casa === rule.casa : true) && (rule.side ? x.side === rule.side : true)
       && !(x.pNv != null && x.pNv * x.odd - 1 < cfg.nvMin) && !(x.pk != null && x.pk * x.odd - 1 < cfg.kMin) }));
@@ -60,14 +61,15 @@ const line = (nm, L) => { const s = stats(L); const V = L.filter(x => x.status !
   return { nm, n: V.length, green: s.green, red: s.red, prev, real, mkt, stake: s.stake, kelly: s.lucro, roi: s.roi, flat: s.lucro1, roi1: s.roi1, clv: s.clv, bate: s.bate, nClv: s.nClv, ev: s.ev }; };
 const fmt = r => `${r.nm.padEnd(30)} ${String(r.n).padStart(4)}  ${String(r.green).padStart(3)}G ${String(r.red).padStart(3)}R  prev ${pct(r.prev).padStart(6)} 99 ${pct(r.mkt).padStart(6)} real ${pct(r.real).padStart(6)}  Kelly ${u(r.kelly).padStart(8)} (ROI ${pct(r.roi).padStart(6)})  1u ${u(r.flat).padStart(8)} (ROI ${pct(r.roi1).padStart(6)})  CLV ${r.clv == null ? '   —' : ((r.clv * 100).toFixed(1) + 'pp').padStart(6)} bate ${pct(r.bate)} (${r.nClv})`;
 
-const RULES = [['Radar atual (EV 6%+, 2ª opinião)', {}], ['Peso 0,25 · EV 6%+', { w: .25 }], ['Peso 0,15 · EV 6%+', { w: .15 }], ['Peso 0,15 · EV 3%+', { w: .15, min: .03 }], ['Peso 0,15 · EV 6%+ · só over', { w: .15, side: 'o' }], ['Peso 0,25 · EV 6%+ · só over', { w: .25, side: 'o' }], ['Kalshi como preço justo · EV 4%+', { sharp: 'k', min: .04 }], ['Kalshi · EV 2%+', { sharp: 'k', min: .02 }], ['Kalshi 4%+ e modelo a favor', { sharp: 'k+bh', min: .04 }], ['EV 3%+', { min: .03 }], ['EV 10%+', { min: .10 }], ['EV 15%+', { min: .15 }], ['Sem 2ª opinião', { nvMin: -99, kMin: -99 }],
+const RULES = [['Antes: peso 0,4 · EV 6%+', {}], ['Novo: peso 0,2 · EV 6%+', { w: .2 }], ['Peso 0,2 · EV 10%+', { w: .2, min: .10 }], ['Peso 0,2 · só over', { w: .2, side: 'o' }],
+  ['Novo: Kalshi ≤150 min · EV 4%+', { sharp: 'k', near: 150, min: .04 }], ['Kalshi ≤90 min · EV 4%+', { sharp: 'k', near: 90, min: .04 }], ['Kalshi como preço justo · EV 4%+', { sharp: 'k', min: .04 }], ['Kalshi · EV 2%+', { sharp: 'k', min: .02 }], ['Kalshi 4%+ e modelo a favor', { sharp: 'k+bh', min: .04 }], ['EV 3%+', { min: .03 }], ['EV 10%+', { min: .10 }], ['EV 15%+', { min: .15 }], ['Sem 2ª opinião', { nvMin: -99, kMin: -99 }],
   ['Só 99play', { casa: '99play' }], ['Só Finta', { casa: 'Finta' }], ['Só over', { side: 'o' }], ['Só under', { side: 'u' }]];
 const out = { since, leituras: scans.length, dias: [...new Set(scans.map(s => s.date))], regras: [], quebras: {} };
 console.log(`\nBACKTEST DO RADAR · leituras de ${since} em diante · liquidadas até ${results.upTo ?? results.dates.at(-1)}\n`);
 for (const [nm, r] of RULES) { const L = sim(r); const R = line(nm, L); out.regras.push(R); console.log(fmt(R)); }
 
-// 3) quebras da regra atual
-const A = sim({});
+// 3) quebras da regra nova (peso 0,2)
+const A = sim({ w: .2 });
 const group = (nm, f) => { const m = new Map(); for (const x of A) { const k = f(x); (m.get(k) ?? m.set(k, []).get(k)).push(x); }
   out.quebras[nm] = [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([k, L]) => line(String(k), L)); console.log(`\n· ${nm}`); out.quebras[nm].forEach(r => console.log(fmt(r))); };
 group('Faixa de EV', x => x.ev < .10 ? '6–10%' : x.ev < .15 ? '10–15%' : x.ev < .20 ? '15–20%' : '20–30%');

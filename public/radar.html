@@ -86,6 +86,13 @@
 .mira { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: 0; }
 .mira .bet { border-right: 1px solid var(--line); }
 .empty { padding: 22px 16px; color: var(--muted); font-size: 14px; }
+.trilhas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tri { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 14px 16px; display: grid; gap: 6px; }
+.tri h3 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: var(--ink); }
+.tri p { margin: 0; color: var(--muted); font-size: 13px; } .tri p b { color: var(--ink); font-stretch: 80%; font-size: 15px; }
+.trk { font: 800 10.5px/1 var(--f); letter-spacing: .08em; text-transform: uppercase; padding: 4px 7px; border-radius: 6px; background: var(--green-soft); color: var(--green-2); vertical-align: 1px; }
+.trk.k { background: #1E1708; color: #EBC66E; }
+@media (max-width: 640px) { .trilhas { grid-template-columns: 1fr; } }
 .note { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; }
 .note b { color: var(--ink-2); }
 @media (max-width: 980px) { .cols { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } .kpi:nth-child(4) { border-left: 0; } .kpi:nth-child(n+4) { border-top: 1px solid var(--line); } }
@@ -136,6 +143,8 @@
     <div class="row" id="casas"></div>
   </div>
 
+  <div class="trilhas" id="trilhas"></div>
+
   <section class="panel" id="miraBox"><h2><span><span class="dot"></span><span id="miraT">Na mira agora</span></span><small id="miraS"></small></h2><div class="mira" id="mira"></div></section>
 
   <div class="cols">
@@ -144,7 +153,7 @@
   </div>
 
   <p class="note"><b>Como funciona.</b> A cada coleta o radar lê todas as linhas da 99play (mais e menos) e da Finta (só mais) e calcula o EV pela chance do Modelo BH.
-    Entra na mira o que tem <b>EV de 6% a 30%</b>, odd entre 1,40 e 4,50 e jogador confirmado. A Novig e a Kalshi são a segunda opinião: se uma delas diz que a odd não vale, o radar não compra.
+    São duas trilhas. <b>Modelo BH</b>: chance com peso 0,2 no modelo (o backtest e o Placar da verdade mostraram que a 99play erra menos que o modelo puro) e <b>EV de 6% a 30%</b>. <b>Kalshi perto do jogo</b>: o preço justo é o da Kalshi, só até 2h30 antes (longe do jogo o preço dela fica velho), com <b>EV de 4%+</b>. Odd entre 1,40 e 4,50 e jogador confirmado. A Novig e a Kalshi são a segunda opinião: se uma delas diz que a odd não vale, o radar não compra.
     Travas: 1 entrada por jogador, 3 por jogo, 12 por dia. Stake por <b>Kelly 1/4</b> numa banca de 100u (teto 2u; 1u com odd acima de 3,00).
     Em paralelo, o radar conta o resultado como se cada entrada fosse de 1u fixa e mede o fechamento (CLV). <b>É uma carteira de teste: nada é apostado de verdade.</b></p>
 </main>
@@ -211,12 +220,17 @@ function render() {
   const list = (R.carteira ?? []).filter(x => per === 'hoje' ? x.date === R.date : per === 'd7' ? Date.parse(x.date) >= Date.now() - 7 * 864e5 : true);
   const cs = {}; for (const x of list) cs[x.casa] = (cs[x.casa] ?? 0) + 1;
   $('#casas').innerHTML = ['99play', 'Finta'].map(c => `<span class="casa">${casa(c)}${c} <b>${cs[c] ?? 0}</b> ${cs[c] === 1 ? 'entrada' : 'entradas'}</span>`).join('');
+  // as duas trilhas, cada uma com o próprio placar
+  const TR = R.trilhas ?? {};
+  $('#trilhas').innerHTML = [['bh', 'Modelo BH', 'peso 0,2 no modelo · EV 6%+ · 99play e Finta'], ['k', 'Kalshi perto do jogo', 'preço justo da Kalshi · até 2h30 antes · EV 4%+']].map(([k, nm, d]) => { const T = TR[k]?.[per] ?? {};
+    return `<div class="tri"><h3><span class="trk ${k}">${k === 'k' ? 'Kalshi' : 'BH'}</span>${nm}</h3><p>${d}</p><p><b>${T.n ?? 0}</b> entradas · ${T.green ?? 0}G ${T.red ?? 0}R · Kelly <b class="${sg(T.lucro)}">${T.liquidadas ? uu(T.lucro) : '—'}</b> · 1u <b class="${sg(T.lucro1)}">${T.liquidadas ? uu(T.lucro1) : '—'}</b>${T.nClv ? ` · CLV ${pp(T.clv)}` : ''}</p></div>`; }).join('');
+  $('#trilhas').hidden = !R.trilhas;
   // na mira (ou o que ficou mais perto)
   const mira = A.mira?.length ? A.mira : A.perto ?? [];
   $('#miraT').textContent = A.mira?.length ? 'Na mira agora' : 'Mais perto da regra';
   $('#miraS').textContent = A.mira?.length ? `${A.mira.length} passaram na regra` : 'nada passou; estas ficaram abaixo';
   $('#miraBox').hidden = !mira.length;
-  $('#mira').innerHTML = mira.map(c => `<div class="bet">${casa(c.c)}<div style="min-width:0"><div class="nm">${esc(c.n)} <small style="color:var(--muted);font-weight:600">${esc(c.t)}</small></div><div class="mk">${side(c.s, c.l, c.mk)}${c.why ? ` · ${esc(c.why)}` : ''}${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}</div></div><div class="od"><b>@${n2(c.o)}</b><small>chance ${Math.round(c.p * 100)}%</small></div><span class="st ${c.why ? '' : 'g'}">EV ${pc(c.ev)}</span></div>`).join('');
+  $('#mira').innerHTML = mira.map(c => `<div class="bet">${casa(c.c)}<div style="min-width:0"><div class="nm">${c.tr === 'k' ? '<span class="trk k">Kalshi</span> ' : ''}${esc(c.n)} <small style="color:var(--muted);font-weight:600">${esc(c.t)}</small></div><div class="mk">${side(c.s, c.l, c.mk)}${c.why ? ` · ${esc(c.why)}` : ''}${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}</div></div><div class="od"><b>@${n2(c.o)}</b><small>chance ${Math.round(c.p * 100)}%</small></div><span class="st ${c.why ? '' : 'g'}">EV ${pc(c.ev)}</span></div>`).join('');
   // atividade: varreduras sem compra seguidas viram um grupo, como no radar
   const V = (R.varreduras ?? []).filter(v => per === 'hoje' ? new Date(v.at).toDateString() === new Date(A.at).toDateString() || Date.parse(v.at) > Date.now() - 18 * 36e5 : true);
   const groups = []; for (const v of V) { const g = groups.at(-1); if (!v.compradas?.length && g && !g.buy) { g.list.push(v); } else groups.push({ buy: !!v.compradas?.length, list: [v] }); }
@@ -224,11 +238,11 @@ function render() {
   $('#act').innerHTML = groups.slice(0, 30).map(g => {
     const v = g.list[0];
     if (!g.buy) { const last = g.list.at(-1); return `<div class="ev"><time>${hh(v.at)}</time><span class="ic">–</span><p>Nada que valha apostar<small>${g.list.length > 1 ? `${g.list.length} varreduras, ${hh(last.at)} a ${hh(v.at)}` : `${v.quadro} preços no quadro`}${v.melhor ? ` · melhor EV ${pc(v.melhor.ev)}` : ''}</small></p></div>`; }
-    return `<div class="ev"><time>${hh(v.at)}</time><span class="ic ok">✓</span><div><p>Comprou ${v.compradas.length} de ${v.boas} ${v.boas === 1 ? 'boa' : 'boas'} · ${n2(v.stake)}u<small>de ${v.quadro} preços no quadro</small></p>${v.compradas.map(b => `<div class="buy"><div class="buy-top">${casa(b.c)}<b>${esc(b.n)}</b> ${side(b.s, b.l, b.mk)} <span>@${n2(b.o)}</span></div><div class="buy-top"><span class="tag ev">EV ${pc(b.ev)}</span><span class="tag paper">Comprada (teste)</span></div><small style="color:var(--muted)">Stake ${n2(b.st)}u por Kelly 1/4.</small></div>`).join('')}</div></div>`;
+    return `<div class="ev"><time>${hh(v.at)}</time><span class="ic ok">✓</span><div><p>Comprou ${v.compradas.length} de ${v.boas} ${v.boas === 1 ? 'boa' : 'boas'} · ${n2(v.stake)}u<small>de ${v.quadro} preços no quadro</small></p>${v.compradas.map(b => `<div class="buy"><div class="buy-top">${casa(b.c)}<b>${esc(b.n)}</b> ${side(b.s, b.l, b.mk)} <span>@${n2(b.o)}</span></div><div class="buy-top"><span class="tag ev">EV ${pc(b.ev)}</span>${b.tr === 'k' ? '<span class="trk k">Kalshi</span>' : ''}<span class="tag paper">Comprada (teste)</span></div><small style="color:var(--muted)">Stake ${n2(b.st)}u por Kelly 1/4.</small></div>`).join('')}</div></div>`;
   }).join('') || '<div class="empty">Nenhuma varredura neste período.</div>';
   $('#betS').textContent = `${list.length} · ${n2(list.reduce((s, x) => s + x.stake, 0))}u`;
   $('#bets').innerHTML = list.map(x => { const [c, t] = stCls(x);
-    return `<div class="bet">${casa(x.casa)}<div style="min-width:0"><div class="nm">${esc(x.name)}</div><div class="mk">${side(x.side, x.line, x.mk)} · ${esc(x.team)} x ${esc(x.opp)} · ${dd(x.tip)} ${hh(x.tip)}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}</div></div><div class="od"><b>@${n2(x.odd)}</b><small>${n2(x.stake)}u${x.status !== 'aberta' ? ` · <span class="${sg(x.lucro)}">${uu(x.lucro)}</span>` : ` · EV ${pc(x.ev)}`}</small></div><span class="st ${c}">${t}</span></div>`; }).join('') || '<div class="empty">Nenhuma entrada neste período.</div>';
+    return `<div class="bet">${casa(x.casa)}<div style="min-width:0"><div class="nm">${x.tr === 'k' ? '<span class="trk k">Kalshi</span> ' : ''}${esc(x.name)}</div><div class="mk">${side(x.side, x.line, x.mk)} · ${esc(x.team)} x ${esc(x.opp)} · ${dd(x.tip)} ${hh(x.tip)}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}</div></div><div class="od"><b>@${n2(x.odd)}</b><small>${n2(x.stake)}u${x.status !== 'aberta' ? ` · <span class="${sg(x.lucro)}">${uu(x.lucro)}</span>` : ` · EV ${pc(x.ev)}`}</small></div><span class="st ${c}">${t}</span></div>`; }).join('') || '<div class="empty">Nenhuma entrada neste período.</div>';
 }
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => { per = b.dataset.p; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); render(); }));
 async function load() { try { R = await fetch('data/radar.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null); } catch { } render(); }

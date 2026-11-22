@@ -34,3 +34,19 @@ test('radar: fechamento, liquidação e CLV', () => {
   const D = choose({ date: '2026-11-21', at: 'x', cands: [cand()] }, []);
   settle(D, { stats: { '2026-11-21': { 1: [0, 0] } } }); assert.equal(D[0].status, 'devolvida');
 });
+
+test('radar: trilha Kalshi só perto do jogo, com chance e EV da Kalshi', async () => {
+  const { kalshiCands, chooseAll } = await import('../scripts/radar.mjs');
+  const at = '2026-11-22T01:00:00Z';
+  const S = { date: '2026-11-21', at, cands: [
+    cand({ pid: '1', pk: .56, why: 'EV abaixo da regra', ok: false, tip: '2026-11-22T02:30:00Z' }),   // 90 min, EV_k 12%
+    cand({ pid: '2', pk: .56, why: '', tip: '2026-11-22T06:00:00Z' }),                                 // 5h antes: fora da janela
+    cand({ pid: '3', pk: .51, why: '', tip: '2026-11-22T02:00:00Z' }),                                 // EV_k 2%: abaixo de 4%
+    cand({ pid: '4', pk: .6, why: 'jogador em dúvida', ok: false, tip: '2026-11-22T02:00:00Z' })] };              // trava que não é de EV
+  const K = kalshiCands(S);
+  assert.deepEqual(K.filter(c => c.ok).map(c => c.pid), ['1']);
+  assert.equal(K.find(c => c.pid === '1').p, .56);
+  const B = chooseAll(S, []);
+  assert.deepEqual(B.map(b => b.tr + b.pid), ['bh2', 'bh3', 'k1']);
+  assert.ok(B.find(b => b.tr === 'k').id.startsWith('k|'));
+});

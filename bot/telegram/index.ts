@@ -903,7 +903,7 @@ async function radarCmd(rest: string[]): Promise<Out> {
   const pc = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')}%`;
   const uu = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${n2(x)}u`;
   const pp = (x: number | null) => x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')} pp`;
-  const ln = (c: any) => `${esc(c.n)} · ${c.s === 'o' ? 'mais' : 'menos'} de ${n1(c.l)} ${RADAR_MK[c.mk] ?? c.mk} <code>@${n2(c.o)}</code> ${c.c === 'Finta' ? '🟣' : '🔵'} · EV <b>${pc(c.ev)}</b>${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}`;
+  const ln = (c: any) => `${c.tr === 'k' ? '🅺 ' : ''}${esc(c.n)} · ${c.s === 'o' ? 'mais' : 'menos'} de ${n1(c.l)} ${RADAR_MK[c.mk] ?? c.mk} <code>@${n2(c.o)}</code> ${c.c === 'Finta' ? '🟣' : '🔵'} · EV <b>${pc(c.ev)}</b>${c.nv != null ? ' · Novig ✓' : ''}${c.k != null ? ' · Kalshi ✓' : ''}`;
   const P = R.periodos?.[per] ?? {};
   const IC: Record<string, string> = { aberta: '⏳', green: '✅', red: '❌', devolvida: '↩️' };
   const lista = (R.carteira ?? []).filter((x: any) => per === 'hoje' ? x.date === R.date : per === 'd7' ? Date.parse(x.date) >= Date.now() - 7 * 864e5 : true).slice(0, 10);
@@ -911,16 +911,20 @@ async function radarCmd(rest: string[]): Promise<Out> {
   L.push(`📡 <b>RADAR +EV</b> · <i>carteira de teste</i>`);
   L.push(`${on ? '🟢 online' : '🔴 parado'} · última varredura ${hourBR(A.at)} (há ${mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h'})`);
   L.push('', `<b>${esc(A.titulo)}</b>`, `<i>${esc(A.sub)}</i>`);
-  L.push(`<blockquote>${A.lidas} linhas lidas · ${A.quadro} preços no quadro (99play + Finta)\nRegra: EV ${Math.round((R.cfg?.min ?? .06) * 100)}%+ pelo Modelo BH, sem Novig/Kalshi contra · Kelly 1/4</blockquote>`);
+  L.push(`<blockquote>${A.lidas} linhas lidas · ${A.quadro} preços no quadro (99play + Finta)\nRegras: 🧠 EV ${Math.round((R.cfg?.min ?? .06) * 100)}%+ pelo Modelo BH (peso 0,2) · 🅺 EV 4%+ pela Kalshi até 2h30 antes · Kelly 1/4</blockquote>`);
   if (per === 'hoje') L.push(`<b>Hoje</b>: ${R.hoje.varreduras} varreduras · ${R.hoje.boas} pareceram boas · <b>${R.hoje.compradas} compradas</b> · ${n2(R.hoje.stake ?? 0)}u`);
   L.push(`<b>${per === 'hoje' ? 'Resultado de hoje' : per === 'd7' ? '7 dias' : 'Desde o início'}</b>: Kelly <b>${uu(P.lucro)}</b> (ROI ${pc(P.roi)}) · 1u fixa ${uu(P.lucro1)} · ${P.green ?? 0}G ${P.red ?? 0}R${P.abertas ? ` · ${P.abertas} em aberto` : ''}`);
   if (P.nClv) L.push(`No fechamento: CLV médio <b>${pp(P.clv)}</b> · ${Math.round((P.bate ?? 0) * 100)}% bateram o fechamento (${P.nClv})`);
+  for (const [k, nm] of [['bh', '🧠 Modelo BH (peso 0,2)'], ['k', '🅺 Kalshi perto do jogo']] as const) {
+    const T = R.trilhas?.[k]?.[per]; if (!T) continue;
+    L.push(`${nm}: ${T.n} entradas · ${T.green}G ${T.red}R · Kelly ${T.liquidadas ? uu(T.lucro) : '—'} · 1u ${T.liquidadas ? uu(T.lucro1) : '—'}${T.nClv ? ` · CLV ${pp(T.clv)}` : ''}`);
+  }
   if (per === 'hoje') {
     if (A.mira?.length) L.push('', '🎯 <b>Na mira agora</b>', ...A.mira.slice(0, 6).map(ln));
     else if (A.perto?.length) L.push('', '🔎 <b>Mais perto da regra</b>', ...A.perto.slice(0, 3).map((c: any) => `${ln(c)} · <i>${esc(c.why)}</i>`));
   }
-  if (lista.length) L.push('', `🧾 <b>Carteira${per === 'hoje' ? ' de hoje' : ''}</b>`, ...lista.map((x: any) => `${IC[x.status] ?? '⏳'} ${esc(x.name)} · ${x.side === 'o' ? 'mais' : 'menos'} de ${n1(x.line)} ${RADAR_MK[x.mk] ?? x.mk} <code>@${n2(x.odd)}</code> ${x.casa === 'Finta' ? '🟣' : '🔵'} · <b>${n2(x.stake)}u</b>${x.status === 'aberta' ? '' : ` · ${uu(x.lucro)}`}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}`));
-  L.push('', '<i>Teste: nada é apostado de verdade. 🔵 99play · 🟣 Finta. Comparamos Kelly × 1u fixa e o CLV na revisão.</i>');
+  if (lista.length) L.push('', `🧾 <b>Carteira${per === 'hoje' ? ' de hoje' : ''}</b>`, ...lista.map((x: any) => `${IC[x.status] ?? '⏳'} ${x.tr === 'k' ? '🅺 ' : ''}${esc(x.name)} · ${x.side === 'o' ? 'mais' : 'menos'} de ${n1(x.line)} ${RADAR_MK[x.mk] ?? x.mk} <code>@${n2(x.odd)}</code> ${x.casa === 'Finta' ? '🟣' : '🔵'} · <b>${n2(x.stake)}u</b>${x.status === 'aberta' ? '' : ` · ${uu(x.lucro)}`}${x.clv != null ? ` · CLV ${pp(x.clv)}` : ''}`));
+  L.push('', '<i>Teste: nada é apostado de verdade. 🔵 99play · 🟣 Finta · 🅺 trilha Kalshi. Comparamos Kelly × 1u fixa e o CLV na revisão.</i>');
   return { text: fitHTML(L.join('\n')), kb: kb(per) };
 }
 
