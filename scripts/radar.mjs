@@ -78,7 +78,8 @@ export function scan({ slate, finta, kalshi, novig, now = Date.now(), cfg = CFG,
     if (b9?.o > 1 && b9?.u > 1) {
       let e; try { e = evaluate(pr, { line: pr.book.line, oOver: b9.o, oUnder: b9.u, book: '99play' }, { w }); } catch { }
       const dv = devig(b9.o, b9.u); // chance da própria 99play sem margem (q): mostra quanto o modelo discorda do mercado
-      if (e) { cands.push({ casa: '99play', side: 'o', line: pr.book.line, odd: b9.o, p: e.over.p, q: dv?.pO }); cands.push({ casa: '99play', side: 'u', line: pr.book.line, odd: b9.u, p: e.under.p, q: dv?.pU }); }
+      // mg = margem (hold) da 99play nessa linha; n = jogos na amostra do jogador
+      if (e) { cands.push({ casa: '99play', side: 'o', line: pr.book.line, odd: b9.o, p: e.over.p, q: dv?.pO, mg: dv?.margin }); cands.push({ casa: '99play', side: 'u', line: pr.book.line, odd: b9.u, p: e.under.p, q: dv?.pU, mg: dv?.margin }); }
     }
     const v10 = (pr.vals ?? []).slice(0, 10);
     for (const f of FIN.get(pr.p.id + '|' + pr.mk) ?? []) {
@@ -100,7 +101,7 @@ export function scan({ slate, finta, kalshi, novig, now = Date.now(), cfg = CFG,
         : (tip - now) / 6e4 < cfg.leadMin ? 'jogo começando'
         : '';
       const sharp = why ? '' : pNv != null && pNv * c.odd - 1 < cfg.nvMin ? 'Novig contra' : pk != null && pk * c.odd - 1 < cfg.kMin ? 'Kalshi contra' : '';
-      out.push({ ...base, ...c, p: r3(c.p), q: r3(c.q), ev: r3(ev), pNv: r3(pNv), pk: r3(pk), boa: !why, ok: !why && !sharp, why: why || sharp });
+      out.push({ ...base, ...c, p: r3(c.p), q: r3(c.q), mg: r3(c.mg), ng: (pr.vals ?? []).length, ev: r3(ev), pNv: r3(pNv), pk: r3(pk), boa: !why, ok: !why && !sharp, why: why || sharp });
     }
   }
   return { at: new Date(now).toISOString(), date, lidas, quadro: out.length, cands: out };

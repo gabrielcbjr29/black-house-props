@@ -45,6 +45,7 @@ function sim(rule) {
     const base = rule.sharp ? S.cands.filter(x => x.pk != null && (!rule.near || (Date.parse(x.tip) - nowS) / 6e4 <= rule.near)).map(x => ({ ...x, pBH: x.p, evBH: x.ev, p: x.pk, ev: Math.round((x.pk * x.odd - 1) * 1e3) / 1e3 })) : S.cands;
     const cands = base.map(x => ({ ...x, ok: x.ev >= cfg.min && x.ev <= cfg.max && (rule.sharp !== 'k+bh' || x.evBH >= 0)
       && (rule.casa ? x.casa === rule.casa : true) && (rule.side ? x.side === rule.side : true)
+      && !(rule.maxHold != null && x.mg != null && (x.mg > rule.maxHold || x.mg < (rule.minHold ?? -1))) && !(rule.no05 && x.line === .5) && !(rule.minN && (x.ng ?? 99) < rule.minN)
       && !(x.pNv != null && x.pNv * x.odd - 1 < cfg.nvMin) && !(x.pk != null && x.pk * x.odd - 1 < cfg.kMin) }));
     const T = { ...S, cands }, now = Date.parse(S.at);
     updateClose(car, T, now);
@@ -62,6 +63,8 @@ const line = (nm, L) => { const s = stats(L); const V = L.filter(x => x.status !
 const fmt = r => `${r.nm.padEnd(30)} ${String(r.n).padStart(4)}  ${String(r.green).padStart(3)}G ${String(r.red).padStart(3)}R  prev ${pct(r.prev).padStart(6)} 99 ${pct(r.mkt).padStart(6)} real ${pct(r.real).padStart(6)}  Kelly ${u(r.kelly).padStart(8)} (ROI ${pct(r.roi).padStart(6)})  1u ${u(r.flat).padStart(8)} (ROI ${pct(r.roi1).padStart(6)})  CLV ${r.clv == null ? '   —' : ((r.clv * 100).toFixed(1) + 'pp').padStart(6)} bate ${pct(r.bate)} (${r.nClv})`;
 
 const RULES = [['Antes: peso 0,4 · EV 6%+', {}], ['Novo: peso 0,2 · EV 6%+', { w: .2 }], ['Peso 0,2 · EV 10%+', { w: .2, min: .10 }], ['Peso 0,2 · só over', { w: .2, side: 'o' }],
+  ['Peso 0,2 · hold 2–10% (Edge Engine)', { w: .2, maxHold: .10, minHold: .02 }], ['Peso 0,2 · hold até 8%', { w: .2, maxHold: .08 }], ['Peso 0,2 · sem linha 0,5', { w: .2, no05: true }], ['Peso 0,2 · amostra 10+ jogos', { w: .2, minN: 10 }],
+  ['Peso 0,2 · hold 2–10% + sem 0,5', { w: .2, maxHold: .10, minHold: .02, no05: true }],
   ['Novo: Kalshi ≤150 min · EV 4%+', { sharp: 'k', near: 150, min: .04 }], ['Kalshi ≤90 min · EV 4%+', { sharp: 'k', near: 90, min: .04 }], ['Kalshi como preço justo · EV 4%+', { sharp: 'k', min: .04 }], ['Kalshi · EV 2%+', { sharp: 'k', min: .02 }], ['Kalshi 4%+ e modelo a favor', { sharp: 'k+bh', min: .04 }], ['EV 3%+', { min: .03 }], ['EV 10%+', { min: .10 }], ['EV 15%+', { min: .15 }], ['Sem 2ª opinião', { nvMin: -99, kMin: -99 }],
   ['Só 99play', { casa: '99play' }], ['Só Finta', { casa: 'Finta' }], ['Só over', { side: 'o' }], ['Só under', { side: 'u' }]];
 const out = { since, leituras: scans.length, dias: [...new Set(scans.map(s => s.date))], regras: [], quebras: {} };
