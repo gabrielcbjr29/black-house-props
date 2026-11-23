@@ -170,16 +170,19 @@ footer.ca{gap:10px;padding:16px 20px}footer.ca span{font-size:14px;display:flex;
 .sub{text-align:center;color:#8a909c;font-size:14px;margin-top:16px;letter-spacing:1px}`;
 // ---------- card no estilo do bilhete da BR365 (pedido de 16/11): só a linha da seleção, sem moldura nem marca ----------
 const odd365 = x => (+x).toFixed(2);
-const leg365 = l => `<div class="r"><span class="xx">×</span><div class="c1"><div class="l1"><b>${esc(l.name)} — ${esc(l.name)} (${l.team}) ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)}</b><b class="od">${odd365(l.odd)}</b></div>
-<div class="l2">${MKF[l.mk] ?? l.mk} Mais de/Menos de (incluindo Prorrogação)</div><div class="l3">${esc(TEAM[l.home] ?? l.home)} x ${esc(TEAM[l.away] ?? l.away)}</div></div></div>`;
+// 22/11 (aprovado pelo dono para o GREENDOG): igual ao print dele, sem o "×" e sem a odd; nome em verde, mercado em
+// cinza escuro e o jogo embaixo, em Roboto. Combos com o nome da casa ("Pontos - Rebotes- Assistências").
+const MK365 = { PRA: 'Pontos - Rebotes- Assistências', PR: 'Pontos - Rebotes', PA: 'Pontos - Assistências', RA: 'Rebotes - Assistências' };
+const leg365 = l => `<div class="r"><div class="l1">${esc(l.name)} — ${esc(l.name)} (${l.team}) ${l.side === 'o' ? 'mais' : 'menos'} ${n1(l.line)}</div>
+<div class="l2">${MK365[l.mk] ?? MKF[l.mk] ?? l.mk} Mais de/Menos de (incluindo Prorrogação)</div><div class="l3">${esc(TEAM[l.home] ?? l.home)} x ${esc(TEAM[l.away] ?? l.away)}</div></div>`;
 export const card365HTML = x => `<div class="s365">${(x.legs ?? [x]).map(leg365).join('')}${x.legs ? `<div class="tot"><b>Odd total</b><b>${odd365(x.odd)}</b></div>` : ''}</div>`;
-export const CSS365 = font => `@font-face{font-family:MR;src:url(data:font/woff2;base64,${font('manrope.woff2')}) format('woff2');font-weight:200 800}
-*{box-sizing:border-box}body{margin:0;background:#fff;font-family:MR,Roboto,Arial,sans-serif}
-.s365{width:540px;background:#fff;padding:4px 0}.r{display:flex;gap:14px;padding:14px 18px 14px 16px;border-bottom:1px solid #e9ecef}.r:last-child{border-bottom:0}
-.xx{color:#5f6b66;font-size:24px;line-height:20px;flex:none;width:14px}.c1{flex:1;min-width:0}
-.l1{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.l1 b{color:#155e36;font-size:17px;font-weight:800;line-height:1.3}.l1 .od{color:#2f3a35;font-weight:700;font-size:16px;white-space:nowrap}
-.l2{color:#155e36;font-weight:700;font-size:15px;margin-top:3px;line-height:1.3}.l3{color:#6c7570;font-size:14px;margin-top:3px}
-.tot{display:flex;justify-content:space-between;padding:12px 18px 12px 46px;border-top:2px solid #e2e6e4;color:#155e36;font-size:17px}.tot b:last-child{color:#2f3a35}`;
+export const CSS365 = font => `@font-face{font-family:RB;src:url(data:font/woff2;base64,${font('roboto-400.woff2')}) format('woff2');font-weight:400}
+@font-face{font-family:RB;src:url(data:font/woff2;base64,${font('roboto-700.woff2')}) format('woff2');font-weight:700}
+*{box-sizing:border-box}body{margin:0;background:#fff;font-family:RB,Roboto,Arial,sans-serif}
+.s365{width:540px;background:#fff;padding:0}.r{padding:19px 22px 21px;border-bottom:1px solid #e9ecef}.r:last-child{border-bottom:0}
+.l1{color:#1b6e4d;font-weight:700;font-size:26px;line-height:1.36;letter-spacing:-.1px}
+.l2{color:#3d3d3d;font-weight:700;font-size:21.75px;line-height:1.5;margin-top:3px}.l3{color:#5c5c5c;font-weight:400;font-size:21px;line-height:1.4;margin-top:3px}
+.tot{display:flex;justify-content:space-between;padding:14px 22px;border-top:2px solid #e2e6e4;color:#1b6e4d;font-size:21px}.tot b:last-child{color:#3d3d3d}`;
 export const page365 = (css, inner) => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${inner}</body></html>`;
 export const page = (css, inner) => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body><div class="phone"><div class="brand">BLACK<span>HOUSE</span></div>${inner}<div class="sub">Sequências · NBA Props</div></div></body></html>`;
 

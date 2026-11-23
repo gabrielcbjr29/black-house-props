@@ -253,6 +253,7 @@ async function run() {
   for (const k of order) {
     if (k.cfg.gabarito) { res[k.title ?? k.id] = 'gabarito (só lê)'; continue; } // 21/11: canal principal do usuário: o bot nunca posta lá
     const pauta = P.v === 2 ? P.canais?.[k.id] : (k.id === ks[0].id ? P : null); // pauta antiga (um canal só)
+    if (k.cfg.desde && date < k.cfg.desde) { res[k.title ?? k.id] = `começa na rodada de ${k.cfg.desde}`; continue; } // 22/11: canal novo com data de estreia
     if (h < +(k.cfg.inicio ?? 10)) { res[k.title ?? k.id] = `antes de ${k.cfg.inicio}h`; continue; }
     if (!pauta?.singles?.length && !pauta?.multis?.length) { await emptyWarn(k, date); res[k.title ?? k.id] = 'pauta vazia'; continue; }
     const done = doneAll.filter(d => d.canal_id === k.id);
