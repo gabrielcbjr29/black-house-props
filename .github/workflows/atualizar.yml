@@ -92,6 +92,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: node scripts/radar.mjs public
+      # Aba Jogador (23/11): jogada a jogada da ESPN de cada jogo encerrado (só os novos), arquivos por time em
+      # public/data/jogador/, calibração do "quem está fora" nos jogos reais e quem ganha com os desfalques de hoje.
+      - name: Aba Jogador (jogada a jogada da ESPN)
+        continue-on-error: true
+        timeout-minutes: 12
+        run: node collector/jogador.js
       - name: Salvar histórico e slate no repositório
         run: |
           git config user.name "garrafao-bot"

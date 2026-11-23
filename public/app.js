@@ -82,6 +82,14 @@ async function load() {
   route();
   // temporada passada inteira (arquivo grande e fixo): carrega depois e refaz as contas
   fetch('data/prev.json').then(r => r.ok ? r.json() : null).catch(() => null).then(pv => { if (pv?.p && SLATE) { SLATE.prev = pv; rebuild(); route(); } });
+  // aba Jogador (23/11): quem ganha com os desfalques de hoje (collector/jogador.js), mostrado nos cards de jogo
+  getJSON('data/jogador/fora.json').then(f => { if (f?.times) { FORA = f.times; if (state.view === 'jogos') renderGames(); } });
+}
+let FORA = {};
+const ganhoTxt = x => [['pts', 'pts'], ['reb', 'reb'], ['ast', 'ast']].filter(([k]) => (x[k] || 0) >= (k === 'pts' ? 1 : .5)).map(([k, l]) => `+${fmt(x[k])} ${l}`).join(', ');
+function quemGanha(t) {
+  const f = FORA[t]; if (!f?.ganhos?.length) return '';
+  return `<div class="ganha"><span class="tag good">Quem ganha</span>${badge(t, 1)}<span>sem ${esc(f.fora.map(lastName).join(', '))}: ${f.ganhos.slice(0, 3).map(x => `<a href="jogador.html?p=${x.pid}&t=${t}"><b>${esc(lastName(x.nome))}</b></a> ${ganhoTxt(x)}`).join(' · ')}</span></div>`;
 }
 function rebuild() {
   PROPS = buildProps(SLATE, { calib: CFG.calib }).filter(pr => !OFF_MK.has(pr.mk));
@@ -606,6 +614,7 @@ function renderGames() {
       </div>
       <div class="gnums"><div><small>Handicap</small><b>${fav ? fav + ' −' + fmt(Math.abs(g.spread)) : '—'}</b>${mv(g.openSpread, g.spread)}</div><div><small>Total</small><b>${fmt(g.total)}</b>${mv(g.openTotal, g.total)}</div><div><small>Ritmo</small><b>${paceLb}${pace ? ' <span class="muted" style="font-size:12px">' + fmt(pace) + '</span>' : ''}</b></div></div>
       <div class="gsec"><h4>Desfalques e alertas</h4><div class="inj">${[...inRot.map(p => `<div>${jer(p, 1)}<span>${esc(p.name)}</span><span class="tag ${p.status === 'out' ? 'bad' : 'warn'}">${{ out: 'Fora', doubtful: 'Provável fora', questionable: 'Dúvida' }[p.status] || p.status}${p.note ? ': ' + esc(p.note) : ''}</span>${p.injSrc ? `<span class="muted" style="font-size:11px">${esc(p.injSrc)}</span>` : ''}</div>`), ...extra.map(i => `<div>${badge(i.team, 1)}<span>${esc(i.name)}</span><span class="tag bad">Fora${i.note ? ': ' + esc(i.note) : ''}</span></div>`)].join('') || '<span class="muted">Nenhum desfalque listado</span>'}
+        ${quemGanha(g.away)}${quemGanha(g.home)}
         ${g.b2b.length ? `<div><span class="tag warn">Back-to-back</span><span class="muted">${g.b2b.join(', ')} jogou ontem</span></div>` : ''}
         ${Math.abs(g.spread ?? 0) >= 10 ? `<div><span class="tag warn">Risco de lavada</span><span class="muted">titulares podem sair cedo</span></div>` : ''}</div></div>
       <div class="gsec"><h4>Melhores linhas do jogo</h4><div class="toplist">${top.length ? top.map(({ pr, e, s }) => `<button data-open="${pr.id}" data-side="${s.side}">${gradeChip(s.grade)}<span class="grow"><b>${esc(pr.p.name)}</b>, ${sideLb(s.side).toLowerCase()} ${fmt(e.line)} ${MARKETS[pr.mk].lb.toLowerCase()}</span><span class="num">${pct(s.p)}</span></button>`).join('') : '<span class="muted">Nenhuma linha A ou A+ neste jogo</span>'}</div></div>
