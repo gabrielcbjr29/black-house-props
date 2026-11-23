@@ -59,12 +59,12 @@ test('canal: legenda no padrão (NBA, unidade, sequência, link) e card com a ca
   assert.ok(P.singles.every(s => s.img.startsWith('canal/s-') && s.cap.includes('{LINK}')));
 });
 
-test('canal: card no estilo BR365 (só a seleção, sem odd na simples: padrão aprovado em 22/11) e caminho da imagem 365', async () => {
+test('canal: card no estilo BR365 (só a seleção com a odd, sem o ×: padrão do dono) e caminho da imagem 365', async () => {
   const { card365HTML } = await import('../scripts/canal.mjs');
   const s = { name: 'Devin Booker', team: 'PHX', side: 'o', line: 5.5, odd: 1.74, mk: 'AST', home: 'PHX', away: 'LAL' };
   const h = card365HTML(s);
   assert.match(h, /Devin Booker — Devin Booker \(PHX\) mais 5,5/);
-  assert.doesNotMatch(h, /1\.74|×/);                                       // simples sem odd e sem o ×
+  assert.match(h, /class="od">1\.74</); assert.doesNotMatch(h, /×/);       // simples com a odd à direita (23/11), sem o ×
   assert.match(card365HTML({ ...s, mk: 'PRA' }), /Pontos - Rebotes- Assistências Mais de/); // combo com o nome da casa
   assert.match(h, /Assistências Mais de\/Menos de \(incluindo Prorrogação\)/);
   assert.match(h, /Phoenix Suns x LA Lakers/);
