@@ -93,6 +93,7 @@
 
 <script type="module">
 import { MERCADOS as MK, COMBOS, porJogador, rotacao, ajuste } from './jogador-core.js';
+import { linhaViva, prancheta } from './vivos.js';
 const NS = 'http://www.w3.org/2000/svg';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -109,7 +110,9 @@ const conta = arr => { const m = {}; arr.forEach(k => m[k] = (m[k] || 0) + 1); r
 const ler = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const gravar = (k, v) => { try { localStorage.setItem(k, v); } catch { } };
 
-let IDX = null, T = null, PJ = null, ROT = null;
+let IDX = null, T = null, PJ = null, ROT = null, CASA = {}, PV = null;
+const MKC = { pts: 'PTS', tpm: '3PM', reb: 'REB', ast: 'AST' };
+const casaDe = () => { const mk = S.m === 'combo' ? S.combo : MKC[S.m]; const v = CASA[S.p + '|' + mk]; return v == null ? null : v; };
 const CACHE = {};
 const S = { p: null, m: 'pts', fora: new Set(), combo: 'PRA', linha: null };
 
@@ -164,7 +167,7 @@ function render() {
   if (!n) { $('#conteudo').innerHTML = '<div class="jg-vazio">Sem jogos deste jogador na temporada.</div>'; return; }
   const vals = J.map(vOf), med = vals.reduce((s, v) => s + v, 0) / n;
   const so = vals.slice().sort((a, b) => a - b), mediana = (so[Math.floor((n - 1) / 2)] + so[Math.ceil((n - 1) / 2)]) / 2;
-  if (S.linha == null) S.linha = Math.max(.5, Math.floor(mediana) + .5);
+  if (S.linha == null) S.linha = casaDe() ?? Math.max(.5, Math.floor(mediana) + .5);
   const L = S.linha, acima = vals.filter(v => v > L).length, u10 = vals.slice(-10), ult10 = u10.filter(v => v > L).length;
   const nomeM = mk === 'combo' ? S.combo : MK[mk].nome, noM = mk === 'combo' ? 'no ' + S.combo : NO[mk];
   const sh = T.sh.filter(r => r[1] === P).map(r => [r[5], r[6], r[3], r[4], r[2]]);
@@ -173,12 +176,13 @@ function render() {
   $('#conteudo').innerHTML = `
   <div class="jg-hero"><div><h1><span class="jg-selo">${esc(T.t)}</span>${esc(nome(P))}</h1><p>${esc(nomeM)} · ${n} jogos nesta temporada (ESPN, jogada a jogada)</p></div>
    <div class="jg-kpis"><div class="jg-kpi"><b>${f1(med)}</b><small>média ${esc(nomeM)}</small></div><div class="jg-kpi"><b>${Math.max(...vals)}</b><small>máximo</small></div>
-   <div class="jg-kpi ln"><button data-l="-1" aria-label="Baixar a linha">−</button><div><b>${f1(L)}</b><small>linha</small></div><button data-l="1" aria-label="Subir a linha">+</button></div>
-   <div class="jg-kpi"><b style="color:${acima / n >= .6 ? 'var(--green)' : acima / n <= .4 ? 'var(--bad)' : 'inherit'}">${acima}/${n}</b><small>acima · últ. ${u10.length}: ${ult10}/${u10.length}</small></div></div></div>
+   <div class="jg-kpi ln"><button data-l="-1" aria-label="Baixar a linha">−</button><div><b id="kLin">${f1(L)}</b><small>linha</small></div><button data-l="1" aria-label="Subir a linha">+</button></div>
+   <div class="jg-kpi"><b id="kAc" style="color:${acima / n >= .6 ? 'var(--green)' : acima / n <= .4 ? 'var(--bad)' : 'inherit'}">${acima}/${n}</b><small id="kAcS">acima · últ. ${u10.length}: ${ult10}/${u10.length}</small></div></div></div>
   <div class="jg-grid">
+   <div class="jg-card jg-full"><h2>Prancheta</h2><p class="sub">De onde vêm os números dele. As zonas acendem pelo volume, o último jogo pulsa e o Rever refaz o jogo lance por lance.</p><div id="pv"></div></div>
+   <div class="jg-card jg-full"><h2>Linha viva</h2><p class="sub">${esc(nomeM)} jogo a jogo. Arraste a linha dourada, use as setas ou toque na escada.</p><div id="lv"></div></div>
    <div class="jg-card"><h2 id="t1"></h2><p class="sub" id="s1"></p><div id="c1"></div></div>
    <div class="jg-card"><h2 id="t2"></h2><p class="sub" id="s2"></p><div id="c2"></div></div>
-   <div class="jg-card"><h2>Jogo a jogo</h2><p class="sub">${esc(nomeM)} em cada jogo. Tracejado = linha ${f1(L)}.</p><div id="c3"></div></div>
    <div class="jg-card"><h2 id="t4"></h2><p class="sub" id="s4"></p><div id="c4"></div></div>
    <div class="jg-card jg-full"><h2>Quem está fora</h2><p class="sub" id="s5"></p><div class="jg-chips" id="chips"></div><div id="c5"></div><div class="jg-read" id="read"></div><p class="jg-nota" id="nota"></p></div>
   </div>`;
@@ -269,13 +273,17 @@ function render() {
     leit.push(['', `<b>${pc(maior[1] / (med || 1))} do ${S.combo} vem de ${maior[0].toLowerCase()}.</b> O combinado segue essa parte: quando ela falha, o resto raramente salva.`]);
     leit.push(['g', `<b>Desvio de ±${f1(dp)} por jogo.</b> Linha a menos de ${f1(dp / 2)} da média é praticamente cara ou coroa.`]);
   }
-  // jogo a jogo (últimos 20)
-  { const c3 = $('#c3'), JJ = J.slice(-20), vv = vals.slice(-20), s = el('svg', { viewBox: '0 0 460 190', width: '100%', role: 'img', 'aria-label': 'Jogo a jogo' }); c3.appendChild(s);
-    const mx = Math.max(L + 1, ...vv) * 1.1, bw = 460 / JJ.length, Y = v => 160 - v / mx * 145;
-    JJ.forEach((r, k) => { const v = vv[k]; el('rect', { x: k * bw + 3, y: Y(v), width: bw - 6, height: 160 - Y(v), rx: 3, fill: v > L ? '#2FD07F' : '#3a2421' }, s);
-      el('text', { x: k * bw + bw / 2, y: Y(v) - 4, 'text-anchor': 'middle', fill: '#F1F4F2', 'font-size': 10.5, 'font-weight': 700 }, s).textContent = v;
-      el('text', { x: k * bw + bw / 2, y: 176, 'text-anchor': 'middle', fill: '#8B958F', 'font-size': 9 }, s).textContent = jogo(r.g)[2]; });
-    el('line', { x1: 0, x2: 460, y1: Y(L), y2: Y(L), stroke: '#E8B64C', 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }, s); }
+  // cards vivos (24/11): a Prancheta tem o mapa, então some o mapa simples do card 1 (pts/3PM/reb) ou 2 (ast)
+  if (['pts', 'tpm', 'reb'].includes(mk)) $('#t1').closest('.jg-card').remove();
+  if (mk === 'ast') $('#t2').closest('.jg-card').remove();
+  const JV = J.map(r => ({ g: r.g, d: jogo(r.g)[1], opp: jogo(r.g)[2], v: vOf(r), reb: r.reb, ast: r.ast, pts: r.pts }));
+  PV?.parar();
+  PV = prancheta($('#pv'), { T, P, nome, jogos: JV, linha: L, nomeMercado: nomeM, camada: { pts: 'shots', tpm: 'tres', reb: 'reb', ast: 'ast' }[mk] || (S.combo === 'PA' ? 'ast' : 'reb') });
+  linhaViva($('#lv'), { jogos: JV, linha: L, casa: casaDe(), nome: nomeM, onLinha: l => {
+    S.linha = l; const ac = vals.filter(v => v > l).length, u = vals.slice(-10), ac10 = u.filter(v => v > l).length;
+    $('#kLin').textContent = f1(l); $('#kAc').textContent = `${ac}/${n}`; $('#kAc').style.color = ac / n >= .6 ? 'var(--green)' : ac / n <= .4 ? 'var(--bad)' : 'inherit';
+    $('#kAcS').textContent = `acima · últ. ${u.length}: ${ac10}/${u.length}`; PV.setLinha(l);
+  } });
   // quem está fora
   $('#chips').innerHTML = ROT.filter(i => i !== P).map(i => `<button class="jg-chip" data-f="${i}" aria-pressed="${S.fora.has(i)}">${esc(nome(i))}</button>`).join('');
   $('#s5').textContent = `Toque em quem não joga. ${{ pts: 'O volume de arremessos dele', tpm: 'O volume de bolas de 3 dele', reb: 'A fatia de rebotes dele', ast: 'A fatia de assistências dele', combo: 'Cada parte do combinado' }[mk]} vai para os outros, no tanto que acontece de verdade.`;
@@ -298,7 +306,7 @@ async function escolher(pid, time) {
 }
 
 document.addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b || !b.closest('.jg')) return;
+  const b = e.target.closest('button'); if (!b || !b.closest('.jg') || b.closest('#pv, #lv')) return;
   if (b.dataset.p) return escolher(+b.dataset.p, T.t);
   if (b.dataset.m) { S.m = b.dataset.m; S.linha = null; const u = new URL(location); u.searchParams.set('m', S.m); history.replaceState(null, '', u); }
   else if (b.dataset.c) { S.combo = b.dataset.c; S.linha = null; }
@@ -314,6 +322,7 @@ $('#busca').addEventListener('change', e => {
 });
 
 (async () => {
+  try { const sl = await getJ('data/slate.json'); for (const l of sl.lines || []) if (l.line != null) CASA[l.pid + '|' + l.mk] = l.line; } catch { }
   try { IDX = await getJ('data/jogador/index.json'); }
   catch { $('#conteudo').innerHTML = '<div class="jg-vazio">Os dados da aba Jogador ainda não foram gerados. Eles saem na próxima coleta.</div>'; $('#pill').textContent = 'Sem dados'; return; }
   $('#lista').innerHTML = IDX.jogadores.map(j => `<option value="${esc(j.n)} · ${esc(j.t)}">${f1(j.pts)} pts · ${f1(j.reb)} reb · ${f1(j.ast)} ast</option>`).join('');

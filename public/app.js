@@ -539,6 +539,68 @@ function renderSummary() {
   </div>
   ${CHG_OPEN && ch.length ? `<section class="changes dpanel" aria-label="O que mudou"><div class="ch-head"><h2>O que mudou ${CHG_BASE === 'visit' ? 'desde a sua última visita' : 'desde a abertura do mercado'}</h2><button class="btn sm" data-seen>Marcar como visto</button></div><div class="ch-list">${ch.slice(0, 10).map(changeItem).join('')}</div>${ch.length > 10 ? `<p class="muted" style="margin:6px 0 0;font-size:13px">e mais ${ch.length - 10}.</p>` : ''}</section>` : ''}`;
   if (PL_INTRO) { PL_INTRO = false; setTimeout(() => el.querySelector('.daystrip')?.classList.remove('intro'), 1200); }
+  renderFigura();
+}
+
+/* ---------------- FIGURINHA: a entrada do dia (aprovada 24/11) ----------------
+   Card que inclina com o dedo/mouse, brilho holográfico, anel com a chance do modelo (traço dourado =
+   chance do mercado) e, ao virar, os últimos 10 jogos no mercado. Usa a melhor linha de topPicks(). */
+let FIG_KEY = '';
+function renderFigura() {
+  const box = $('#figura'); if (!box) return;
+  const x = topPicks(1)[0];
+  if (!x) { box.innerHTML = ''; box.hidden = true; FIG_KEY = ''; return; }
+  const { pr, e, s } = x, p = pr.p, line = e.line, over = s.side === 'over';
+  const key = [pr.id, s.side, line, s.odd, Math.round(s.p * 1000)].join('|');
+  if (key === FIG_KEY && box.firstElementChild) return;
+  FIG_KEY = key; box.hidden = false;
+  const mk = MARKETS[pr.mk], vals = pr.vals.slice(0, 10).reverse(), logs = pr.ctx.logs.slice(0, 10).reverse();
+  const hit = v => over ? v > line : v < line, hits = vals.filter(hit).length, avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+  const pBook = s.pMkt ?? (s.odd ? 1 / s.odd : null), max = Math.max(line * 1.25, ...vals, 1);
+  const R = 42, C = 2 * Math.PI * R, ang = (pBook ?? 0) * 2 * Math.PI - Math.PI / 2;
+  const tick = pBook == null ? '' : `<line x1="${(50 + 35 * Math.cos(ang)).toFixed(1)}" y1="${(50 + 35 * Math.sin(ang)).toFixed(1)}" x2="${(50 + 49 * Math.cos(ang)).toFixed(1)}" y2="${(50 + 49 * Math.sin(ang)).toFixed(1)}" stroke="var(--gold)" stroke-width="3" stroke-linecap="round"/>`;
+  box.innerHTML = `<div class="fg-tilt"><div class="fg-card">
+    <div class="fg-flip" role="button" tabindex="0" aria-pressed="false" aria-label="Entrada do dia: ${esc(p.name)}, ${sideLb(s.side).toLowerCase()} ${fmt(line)} ${esc(mk.lb.toLowerCase())}. Toque para ver os últimos 10 jogos">
+      <div class="fg-face fg-front">
+        <span class="fg-big" aria-hidden="true">${esc(p.num ?? '')}</span>
+        <svg class="fg-court" viewBox="0 0 50 22" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><path d="M17 22V3h16v19M31 3a6 6 0 0 1-12 0M3 22V14A23.75 23.75 0 0 1 47 14v8" fill="none" stroke="currentColor" stroke-width=".25"/></svg>
+        <div class="fg-head fg-z1"><span class="fg-selo" style="--tc:${teamCol(p.team)}">${esc(p.team)}</span><span class="fg-meta">Entrada do dia<br>contra ${esc(pr.opp)}, ${brTime(pr.game.timeUTC)}</span></div>
+        <div class="fg-ring fg-z2"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="${R}" fill="none" stroke="var(--surface-2)" stroke-width="9"/><circle class="fg-arc" cx="50" cy="50" r="${R}" fill="none" stroke="var(--green)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${C.toFixed(1)}" data-off="${(C * (1 - s.p)).toFixed(1)}" transform="rotate(-90 50 50)"/>${tick}</svg>
+          <div class="fg-val"><b><span data-cnt="${Math.round(s.p * 100)}">0</span>%</b><small>modelo</small></div></div>
+        <div class="fg-name fg-z1">${esc(p.name)}</div>
+        <div class="fg-mk fg-z1">${esc(mk.lb)}</div>
+        <div class="fg-row fg-z2"><span class="fg-line">${sideLb(s.side)} ${fmt(line)}</span>${s.odd ? `<span class="fg-odd">@${fmt(s.odd, 2)}</span>` : ''}</div>
+        <div class="fg-row fg-z1">${s.ev != null && s.ev > 0 ? `<span class="fg-edge">+${fmt(s.ev * 100, 1)}% de valor</span>` : ''}${pBook != null ? `<span class="fg-small">o mercado dá ${pct(pBook)} (traço dourado)</span>` : ''}</div>
+        <div class="fg-hint">Toque para virar</div>
+      </div>
+      <div class="fg-face fg-back">
+        <h3>Últimos ${vals.length} jogos</h3><span class="fg-small">${esc(mk.lb)}, do mais antigo ao mais recente</span>
+        <div class="fg-bars">${vals.map((v, k) => `<div class="fg-b${hit(v) ? '' : ' lo'}" style="--h:${(v / max * 100).toFixed(1)};--k:${k}"><em>${fmt(v, 0)}</em><i></i></div>`).join('')}<div class="fg-gold" style="bottom:${(line / max * 100).toFixed(1)}%"></div></div>
+        <div class="fg-opps">${logs.map(g => `<span>${esc(g[L.opp])}</span>`).join('')}</div>
+        <div class="fg-row fg-foot"><b>${over ? 'Passou' : 'Ficou abaixo'} em ${hits} de ${vals.length}</b><span class="fg-small">média ${fmt(avg)}</span></div>
+        <button class="btn sm fg-open" data-open="${pr.id}" data-side="${s.side}">Abrir a ficha</button>
+      </div>
+    </div><div class="fg-sheen" aria-hidden="true"></div></div></div>`;
+  const tilt = box.querySelector('.fg-tilt'), card = box.querySelector('.fg-card'), flip = box.querySelector('.fg-flip');
+  const calmo = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  tilt.addEventListener('pointermove', ev => {
+    if (calmo) return; const r = tilt.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height;
+    card.classList.add('live'); card.style.setProperty('--ry', ((px - .5) * 22).toFixed(2) + 'deg'); card.style.setProperty('--rx', ((.5 - py) * 18).toFixed(2) + 'deg');
+    card.style.setProperty('--mx', (px * 100).toFixed(1) + '%'); card.style.setProperty('--my', (py * 100).toFixed(1) + '%');
+  });
+  tilt.addEventListener('pointerleave', () => { card.classList.remove('live'); card.style.setProperty('--rx', '0deg'); card.style.setProperty('--ry', '0deg'); });
+  const virar = () => { const on = flip.classList.toggle('on'); flip.setAttribute('aria-pressed', on); };
+  flip.addEventListener('click', ev => { if (!ev.target.closest('[data-open]')) virar(); });
+  flip.addEventListener('keydown', ev => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === flip) { ev.preventDefault(); virar(); } });
+  const io = new IntersectionObserver(es => {
+    if (!es[0].isIntersecting) return; io.disconnect();
+    const arc = box.querySelector('.fg-arc'), cnt = box.querySelector('[data-cnt]'), alvo = +cnt.dataset.cnt;
+    arc.style.strokeDashoffset = arc.dataset.off;
+    if (calmo) { cnt.textContent = alvo; return; }
+    const t0 = performance.now(), passo = t => { const u = Math.min(1, (t - t0) / 1400); cnt.textContent = Math.round(alvo * (1 - Math.pow(1 - u, 3))); if (u < 1) requestAnimationFrame(passo); };
+    requestAnimationFrame(passo);
+  }, { threshold: .3 });
+  io.observe(tilt);
 }
 
 /* ---------------- BUSCA RÁPIDA (Ctrl/⌘ + K) ---------------- */
@@ -1429,6 +1491,8 @@ function bind() {
 bind();
 route();
 load();
+// fundo 3D da entrada: carrega depois do resto, só com WebGL e sem 'reduzir movimento'
+setTimeout(() => import('./arena3d.js').then(m => m.montaArena($('#arena'))).catch(() => { }), 300);
 // app instalável (só quando hospedado, por exemplo no GitHub Pages)
 if ('serviceWorker' in navigator && location.protocol === 'https:' && !location.hostname.endsWith('claude.ai') && !location.hostname.includes('claudeusercontent')) {
   navigator.serviceWorker.register('sw.js').catch(() => { });
