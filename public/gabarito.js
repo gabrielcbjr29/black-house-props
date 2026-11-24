@@ -51,8 +51,9 @@ export function marketOf(s) { const t = nrm(s); for (const [rx, mk, stat] of MKT
 /* lado e linha: "mais 4,5" / "mais de 4.5" / "acima de" / "over" / "+9.5" / "10+" (marco = mais de 9,5) / "menos de" */
 export function sideLine(s) {
   const t = nrm(s).replace(/(\d),(\d)/g, '$1.$2');
-  let m = /(mais|acima|over|maior)\s*(de|que)?\s*(\d+(?:\.\d+)?)/.exec(t); if (m) return { side: 'o', line: +m[3] };
-  m = /(menos|abaixo|under|menor)\s*(de|que)?\s*(\d+(?:\.\d+)?)/.exec(t); if (m) return { side: 'u', line: +m[3] };
+  // 24/11: na 99play a odd pode vir colada no lado ("menos 1.71" e a linha 2,5 embaixo): número de 2 casas é odd, não linha
+  let m = /(mais|acima|over|maior)\s*(de|que)?\s*(?:\d+\.\d{2}\s+)?(\d+(?:\.5|\.0)?)(?![\d.])/.exec(t); if (m) return { side: 'o', line: +m[3] };
+  m = /(menos|abaixo|under|menor)\s*(de|que)?\s*(?:\d+\.\d{2}\s+)?(\d+(?:\.5|\.0)?)(?![\d.])/.exec(t); if (m) return { side: 'u', line: +m[3] };
   m = /\+\s*(\d+\.5)\b/.exec(t); if (m) return { side: 'o', line: +m[1] };
   m = /\b(\d{1,2})\s*\+(?!\s*\d)/.exec(t); if (m) return { side: 'o', line: +m[1] - .5 };
   m = /\b(\d{1,2})\s*ou\s*mais/.exec(t); if (m) return { side: 'o', line: +m[1] - .5 };
@@ -62,10 +63,12 @@ export function sideLine(s) {
 /* odds no texto: "@2,10", "odd 2.10", "odds total 38.91" (múltipla) */
 export function oddsOf(s) {
   const t = nrm(s).replace(/(\d),(\d)/g, '$1.$2');
-  const tot = /(?:odds?\s*total|cotac(?:ao|oes)\s*tota(?:l|is))\s*:?\s*(\d+\.\d{1,2})/.exec(t);
+  // total da múltipla: "odds total 38.91", "Cotações totais 27,31" ou a legenda do dono "| ODD 29.40"
+  const tot = /(?:odds?\s*total|cotac(?:ao|oes)\s*tota(?:l|is)|\|\s*odd)\s*:?\s*(\d+\.\d{1,2})/.exec(t);
   const at = [...t.matchAll(/(?:@|odds?\s*(?:turbinada)?\s*:?)\s*(\d+\.\d{2})\b/g)].map(m => +m[1]).filter(x => x > 1 && x < 1000);
   // odd solta no fim da linha do bilhete: "Cam Spencer (MEM) 1.66", "Arsenal 456 > 1,70" (2 casas; linha de prop tem 1)
-  const solta = t.split('\n').filter(l => !/(mais|menos|acima|abaixo|over|under)\s*(de|que)?\s*\d+\.\d{2}\s*$/.test(l))
+  // (linha de prop nunca tem 2 casas: "menos 1.71" no fim da linha é a odd da 99play)
+  const solta = t.split('\n')
     .map(l => /(?:^|[\s>)])(\d{1,2}\.\d{2})\s*$/.exec(l)?.[1]).filter(Boolean).map(Number).filter(x => x > 1 && x < 50);
   return { total: tot ? +tot[1] : null, list: [...at, ...solta.filter(x => !at.includes(x))] };
 }
@@ -99,13 +102,16 @@ export function parseEntry(ocr, caption, players) {
   const lines = text.split(/\n+/).map(x => x.trim()).filter(Boolean);
   const who = lines.map(l => findPlayers(l, players)[0]?.p ?? null);
   const legs = [];
+  // layout do bilhete: na BR365 e no Criar Aposta novo da 99play o mercado vem ANTES do jogador; no antigo, depois
+  const acima = i => { let b = ''; for (let j = i - 1; j >= Math.max(0, i - 2) && !who[j]; j--) b = lines[j] + '\n' + b; return b; };
+  const first = who.findIndex(Boolean), antes = first >= 0 && !marketOf(lines[first]) && !!marketOf(acima(first));
   for (let i = 0; i < lines.length; i++) {
     const p = who[i]; if (!p) continue;
     let ctx = lines[i];
     for (let j = i + 1; j < Math.min(lines.length, i + 3) && !who[j]; j++) ctx += '\n' + lines[j];
     // na BR365 o mercado vem ANTES do jogador ("Reb.-Ast Mais de/Menos de" / "Naz Reid (CHA) mais 10,5"): olha até 2 linhas para trás
-    let back = ''; for (let j = i - 1; j >= Math.max(0, i - 2) && !who[j]; j--) back = lines[j] + '\n' + back;
-    const mk = marketOf(lines[i]) ?? marketOf(ctx) ?? (back ? marketOf(back) : null);
+    const back = acima(i);
+    const mk = marketOf(lines[i]) ?? (antes ? marketOf(back) ?? marketOf(ctx) : marketOf(ctx) ?? (back ? marketOf(back) : null));
     const sl = mk && (mk.mk === 'DD' || mk.mk === 'TD') ? { side: 'o', line: .5 } : sideLine(lines[i]) ?? sideLine(ctx);
     if (!mk || !sl) continue;
     const leg = { pid: String(p.id), name: p.name, team: p.team, opp: p.opp, game: p.game, tip: p.tip, mk: mk.mk, stat: mk.stat, side: sl.side, line: sl.line, odd: oddsOf(ctx).list[0] ?? null };

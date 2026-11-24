@@ -55,3 +55,18 @@ test('gabarito: arremessos de 2 convertidos + odd solta', async () => {
   assert.equal(marketOf('Arremessos de 3 pontos tentados').mk, '3PA');
   assert.equal(marketOf('Bolas de 3').mk, '3PM');
 });
+
+// 24/11: bilhetes reais que ficavam sem correção
+test('gabarito: mercado antes do jogador (BR365 e Criar Aposta), Reb.-Ast, faltas e odd colada no lado', () => {
+  const P = [{ id: 1, name: 'Naz Reid', team: 'CHA' }, { id: 2, name: 'Trae Young', team: 'WAS' }, { id: 3, name: 'Jalen Smith', team: 'CHI' }, { id: 4, name: 'VJ Edgecombe', team: 'PHI' }, { id: 5, name: 'Tari Eason', team: 'HOU' }];
+  let r = parseEntry("Simples\n\n‘¥ Charlotte Hornets 1,74\n& Memphis Grizzlies\n\nReb.-Ast Mais de/Menos de (incluindo\nProrrogação)\n\nNaz Reid (CHA) mais 10,5\n23/11 « 21:00\n", '', P);
+  assert.deepEqual(r.legs.map(l => [l.name, l.mk, l.side, l.line]), [['Naz Reid', 'RA', 'o', 10.5]]); assert.equal(r.odd, 1.74);
+  r = parseEntry("x Trae Young — Trae Young (WAS) menos 1.71\n2,5\nFaltas Pessoais Cometidas Mais de/Menos de\n", '', P);
+  assert.deepEqual(r.legs.map(l => [l.mk, l.side, l.line]), [['PF', 'u', 2.5]]); assert.equal(r.odd, 1.71);
+  r = parseEntry("Múltipla @\n\n@ Pontos Mais de/Menos de (incluindo\nProrrogação)\n\nJalen Smith (CHI) mais 14,5\n\nAssistências Mais de/Menos de (incluindo\nProrrogação)\n\nJalen Smith (CHI) mais 1,5\n\nRebotes Mais de/Menos de (incluindo\nProrrogação)\nJalen Smith (CHI) mais 7,5\n", '💰 0.10 unidade | ODD 27.31', P);
+  assert.deepEqual(r.legs.map(l => [l.mk, l.line]), [['PTS', 14.5], ['AST', 1.5], ['REB', 7.5]]); assert.equal(r.odd, 27.31);
+  r = parseEntry("Múltipla @\n\nReb.-Ast (incluindo Prorrogação)\n\ngecombe (PHI) mais 11,5\n23/11 e 21:00\n\nReb.-Ast (incluindo Ai ae in\n\nTari Eason (HOU) mais 9,5\n\nCotações totais 16,43\n", '', P);
+  assert.deepEqual(r.legs.map(l => l.name), ['VJ Edgecombe', 'Tari Eason']); assert.equal(r.odd, 16.43);
+  r = parseEntry("Múltipla @\n\nReb.-Ast (incluindo Prorrogação)\n\nXyz Abcdef (PHI) mais 11,5\n\nReb.-Ast (incluindo\n\nTari Eason (HOU) mais 9,5\n\nCotações totais 16,43\n", '', P);
+  assert.equal(r.legs.length, 0, 'múltipla lida pela metade não corrige'); assert.ok(r.faltando.includes('perna da múltipla'));
+});
