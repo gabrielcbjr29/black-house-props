@@ -21,10 +21,12 @@ export function readCaption(text = '', urls = []) {
 
 // mercados (do mais específico para o mais simples)
 const MKTS = [
-  [/pontos?\s*\+\s*rebotes?\s*\+\s*assist|pts\s*\+\s*reb\s*\+\s*ast|\bpra\b/, 'PRA', 'pts+reb+ast'],
-  [/pontos?\s*\+\s*rebotes?|pts\s*\+\s*reb\b/, 'PR', 'pts+reb'],
-  [/pontos?\s*\+\s*assist|pts\s*\+\s*ast\b/, 'PA', 'pts+ast'],
-  [/rebotes?\s*\+\s*assist|reb\s*\+\s*ast\b/, 'RA', 'reb+ast'],
+  // 24/11: a BR365/Altenar escreve com hífen ("Pontos - Rebotes- Assistências", "Reb.-Ast")
+  [/pontos?\s*[-+]\s*rebotes?\s*[-+]\s*assist|pts\.?\s*[-+]\s*reb\.?\s*[-+]\s*ast|\bpra\b/, 'PRA', 'pts+reb+ast'],
+  [/pontos?\s*[-+]\s*rebotes?|pts\.?\s*[-+]\s*reb\b/, 'PR', 'pts+reb'],
+  [/pontos?\s*[-+]\s*assist|pts\.?\s*[-+]\s*ast\b/, 'PA', 'pts+ast'],
+  [/rebotes?\s*[-+]\s*assist|reb\.?\s*[-+]\s*ast\b/, 'RA', 'reb+ast'],
+  [/faltas?\s*(pessoais|cometidas)/, 'PF', 'pf'],
   [/roubos?\s*\+\s*(tocos?|bloq)/, 'SB', 'stl+blk'],
   [/triplo[\s-]*duplo|triple[\s-]*double/, 'TD', 'td'],
   [/duplo[\s-]*duplo|double[\s-]*double/, 'DD', 'dd'],
@@ -60,7 +62,7 @@ export function sideLine(s) {
 /* odds no texto: "@2,10", "odd 2.10", "odds total 38.91" (múltipla) */
 export function oddsOf(s) {
   const t = nrm(s).replace(/(\d),(\d)/g, '$1.$2');
-  const tot = /odds?\s*total\s*:?\s*(\d+\.\d{1,2})/.exec(t);
+  const tot = /(?:odds?\s*total|cotac(?:ao|oes)\s*tota(?:l|is))\s*:?\s*(\d+\.\d{1,2})/.exec(t);
   const at = [...t.matchAll(/(?:@|odds?\s*(?:turbinada)?\s*:?)\s*(\d+\.\d{2})\b/g)].map(m => +m[1]).filter(x => x > 1 && x < 1000);
   // odd solta no fim da linha do bilhete: "Cam Spencer (MEM) 1.66", "Arsenal 456 > 1,70" (2 casas; linha de prop tem 1)
   const solta = t.split('\n').filter(l => !/(mais|menos|acima|abaixo|over|under)\s*(de|que)?\s*\d+\.\d{2}\s*$/.test(l))
@@ -79,6 +81,8 @@ export function findPlayers(text, players) {
     // OCR come letra do começo ("len McDaniels"): aceita o fim do primeiro nome + sobrenome
     if (i < 0 && parts.length > 1) { const rx = new RegExp(`[a-z]*${parts[0].slice(-2)} ${parts.slice(1).join(' ')} `); const m = rx.exec(t); if (m) i = m.index; }
     if (i < 0 && ln.length >= 5 && last.get(ln) === 1) { const j = t.indexOf(' ' + ln + ' '); if (j >= 0) i = j; }
+    // OCR come o primeiro nome e o começo do sobrenome ("gecombe (PHI)" = VJ Edgecombe): sobra de 5+ letras, faltando até 3, sobrenome único no dia
+    if (i < 0 && ln.length >= 7 && last.get(ln) === 1) { for (let n = 1; n <= 3 && i < 0; n++) { const j = t.indexOf(' ' + ln.slice(n) + ' '); if (j >= 0) i = j; } }
     if (i >= 0) out.push({ p, i });
   }
   // o mesmo trecho não vale para dois jogadores: fica o de nome mais longo
@@ -99,7 +103,9 @@ export function parseEntry(ocr, caption, players) {
     const p = who[i]; if (!p) continue;
     let ctx = lines[i];
     for (let j = i + 1; j < Math.min(lines.length, i + 3) && !who[j]; j++) ctx += '\n' + lines[j];
-    const mk = marketOf(lines[i]) ?? marketOf(ctx);
+    // na BR365 o mercado vem ANTES do jogador ("Reb.-Ast Mais de/Menos de" / "Naz Reid (CHA) mais 10,5"): olha até 2 linhas para trás
+    let back = ''; for (let j = i - 1; j >= Math.max(0, i - 2) && !who[j]; j--) back = lines[j] + '\n' + back;
+    const mk = marketOf(lines[i]) ?? marketOf(ctx) ?? (back ? marketOf(back) : null);
     const sl = mk && (mk.mk === 'DD' || mk.mk === 'TD') ? { side: 'o', line: .5 } : sideLine(lines[i]) ?? sideLine(ctx);
     if (!mk || !sl) continue;
     const leg = { pid: String(p.id), name: p.name, team: p.team, opp: p.opp, game: p.game, tip: p.tip, mk: mk.mk, stat: mk.stat, side: sl.side, line: sl.line, odd: oddsOf(ctx).list[0] ?? null };
@@ -108,6 +114,9 @@ export function parseEntry(ocr, caption, players) {
   const O = oddsOf(text);
   const odd = legs.length > 1 ? O.total ?? null : legs[0]?.odd ?? O.total ?? O.list[0] ?? null;
   if (legs.length === 1 && odd && !legs[0].odd) legs[0].odd = odd;
-  const faltando = [!legs.length && 'jogador/mercado', legs.length && !odd && 'odd'].filter(Boolean);
+  // bilhete de múltipla em que o OCR só achou uma perna: não corrige pela metade (a odd é da múltipla inteira)
+  const multi = /m[uú]ltipla/i.test(ocr ?? '') && legs.length === 1;
+  const faltando = [!legs.length && 'jogador/mercado', multi && 'perna da múltipla', legs.length && !odd && 'odd'].filter(Boolean);
+  if (multi) return { kind: 'multipla', legs: [], odd, faltando };
   return { kind: legs.length > 1 ? 'multipla' : 'simples', legs, odd, faltando };
 }
