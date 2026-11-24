@@ -324,7 +324,7 @@ async function resultados(cid: string, dias: number) {
   const from = new Date(Date.parse(etDate() + 'T12:00:00Z') - (dias - 1) * 864e5).toISOString().slice(0, 10);
   const rows: any[] = await sb(`channel_posts?canal_id=eq.${k.id}&date=gte.${from}&select=id,date,created_at,kind,band,odd,stake,status,profit,legs&order=id.asc`) ?? [];
   const res = await getJ('results.json').catch(() => null);
-  const real = (date: string, l: any) => { const a = res?.stats?.[date]?.[l.pid]; if (!a || !(a[0] > 0)) return null; return String(l.stat).split('+').reduce((s: number, x: string) => s + (IDX[x]?.(a) ?? 0), 0); };
+  const real = (date: string, l: any) => { const a = linhaDe(res, date, l); if (!a || !(a[0] > 0)) return null; return String(l.stat).split('+').reduce((s: number, x: string) => s + (IDX[x]?.(a) ?? 0), 0); };
   return { canal: k.title, de: from, ate: etDate(), gen: new Date().toISOString(), posts: rows.map(p => ({
     id: p.id, date: p.date, hora: hourBR(p.created_at), kind: p.kind, band: p.band, odd: +p.odd, stake: +p.stake || 1, status: p.status, profit: +p.profit || 0,
     clv: (({ vs, ...c }) => c)(postClv({ odd: +p.odd, legs: p.legs })),
@@ -387,6 +387,13 @@ async function setCasa(id: string, c: string) {
   return repaint(row, casaOf(c), row.share_code ?? null, null);
 }
 
+// 24/11: acha a linha do jogador pelo ID e, se o provedor mudou (NBA ↔ ESPN muda o ID), pelo nome
+const nn = (s: any) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\b(jr|sr|ii|iii|iv)\b\.?/g, '').replace(/[^a-z]/g, '');
+function linhaDe(res: any, date: string, l: any) {
+  const S = res?.stats?.[date]; if (!S) return undefined; if (S[l.pid]) return S[l.pid];
+  const k = nn(l.name); if (!k) return undefined;
+  const p = Object.keys(S).find(x => nn(res.names?.[x]) === k); return p ? S[p] : undefined;
+}
 // ---------- conferir: green/red respondendo o próprio post; resumo do dia só para o dono ----------
 async function settle() {
   const open: any[] = await sb('channel_posts?status=eq.postada&select=id,canal_id,date,kind,legs,odd,band,channel_msg_id,stake,espelho_chat,espelho_msg,cap') ?? [];
@@ -400,14 +407,17 @@ async function settle() {
     const legs = p.legs ?? [];
     if (!legs.length) continue; // gabarito sem pernas de NBA (futebol: settleFut acima; não leu: fica pendente)
     // gabarito: o time pode não estar no slate (post de outro dia); vale o jogador com estatística no dia, ou o dia já fechado
-    const pronto = p.band === 'gab' ? res.dates?.includes(p.date) && (legs.every((l: any) => res.stats[p.date]?.[l.pid]) || (res.dates.at(-1) > p.date))
+    const pronto = p.band === 'gab' ? res.dates?.includes(p.date) && (legs.every((l: any) => linhaDe(res, p.date, l)) || (res.dates.at(-1) > p.date))
       : res.dates?.includes(p.date) && !legs.some((l: any) => !done(p.date, l.team));
     if (!pronto) continue;
-    const st = legs.map((l: any) => {
-      const a = res.stats[p.date]?.[l.pid]; if (!a || !(a[0] > 0)) return 'void';
+    let st = legs.map((l: any) => {
+      const a = linhaDe(res, p.date, l); if (!a) return 'falta'; if (!(a[0] > 0)) return 'void';
       const v = String(l.stat).split('+').reduce((s: number, k: string) => s + (IDX[k]?.(a) ?? 0), 0);
       return v === +l.line ? 'void' : (l.side === 'o' ? v > +l.line : v < +l.line) ? 'green' : 'red';
     });
+    // jogador sem linha nos resultados (nem pelo ID nem pelo nome): espera; só depois de 2 dias conta como "não entrou".
+    // Em 24/11 a troca NBA → ESPN mudou os IDs e anulou todas as entradas de 23/11 por engano.
+    if (st.includes('falta')) { if (!(res.dates.at(-1) > ymdIso(p.date, 1))) continue; st = st.map((x: string) => x === 'falta' ? 'void' : x); }
     const live = legs.filter((_: any, i: number) => st[i] !== 'void');
     const status = st.includes('red') ? 'red' : !live.length ? 'void' : 'green';
     // todas as pernas valendo: a odd do post (no Criar Aposta é a odd estimada da casa, não o produto das pernas)

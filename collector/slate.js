@@ -178,8 +178,24 @@ export function buildSlate({ date, season, cur = [], prev = [], today = [], b2b 
 }
 
 /* Resultados dos últimos `days` dias com jogo antes de `date`:
-   { dates: [...], games: {data: [[gid, casa, fora]]}, stats: {data: {pid: [min, pts, reb, ast, stl, blk, tov, pf, fgm, fga, tpm, tpa, ftm, fta]}} } */
-export function buildResults(allGames, names = {}, date, days = 14) {
+   { dates: [...], games: {data: [[gid, casa, fora]]}, stats: {data: {pid: [min, pts, reb, ast, stl, blk, tov, pf, fgm, fga, tpm, tpa, ftm, fta]}} }
+   alias (24/11): { pid: [mesmo jogador no outro provedor] }. Quando a NBA cai a coleta vira ESPN e os IDs mudam; as
+   entradas registradas antes (canais, tips, radar) guardaram o ID antigo. A mesma linha sai também nos IDs antigos. */
+export function idAliases(nameMaps) {
+  // nameMaps: [{ fonte, names: {pid: nome} }]; só liga nome que aparece com um único ID em cada fonte
+  const by = {};
+  for (const { fonte, names } of nameMaps) for (const [pid, n] of Object.entries(names || {})) {
+    const k = normName(n); if (!k) continue; ((by[k] ||= {})[fonte] ||= new Set()).add(String(pid));
+  }
+  const alias = {};
+  for (const fontes of Object.values(by)) {
+    const ids = Object.values(fontes); if (ids.length < 2 || ids.some(s => s.size !== 1)) continue;
+    const all = ids.map(s => [...s][0]);
+    for (const p of all) { const o = all.filter(x => x !== p); if (o.length) alias[p] = o; }
+  }
+  return alias;
+}
+export function buildResults(allGames, names = {}, date, days = 14, alias = {}) {
   const ds = [...new Set(allGames.filter(g => g?.r && g.d < date).map(g => g.d))].sort().slice(-days);
   const keep = new Set(ds), stats = {}, games = {}, nm = {};
   for (const g of allGames) {
@@ -188,6 +204,7 @@ export function buildResults(allGames, names = {}, date, days = 14) {
     const S = stats[g.d] ||= {};
     for (const r of g.r) { S[r[RI.pid]] = [r[RI.min], r[RI.pts], r[RI.reb], r[RI.ast], r[RI.stl], r[RI.blk], r[RI.tov], r[RI.pf], r[RI.fgm], r[RI.fga], r[RI.tpm], r[RI.tpa], r[RI.ftm], r[RI.fta]]; if (names[r[RI.pid]]) nm[r[RI.pid]] = names[r[RI.pid]]; }
   }
+  for (const S of Object.values(stats)) for (const pid of Object.keys(S)) for (const a of alias[pid] || []) if (!S[a]) { S[a] = S[pid]; if (nm[pid]) nm[a] = nm[pid]; }
   return { generatedAt: new Date().toISOString(), upTo: date, dates: ds, games, stats, names: nm };
 }
 

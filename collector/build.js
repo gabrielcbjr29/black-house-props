@@ -17,7 +17,7 @@ import { fetchFinta } from './finta.js';
 import { MODES, DEFAULT_BOOKS, loadState, saveState, mergeLines, novigLines } from './oddsplan.js';
 import { USAGE } from './http.js';
 import { dailySummary, sendTelegram, radarAlerts } from './notify.js';
-import { buildSlate, buildResults, buildPrevSeason } from './slate.js';
+import { buildSlate, buildResults, buildPrevSeason, idAliases } from './slate.js';
 import { runBacktest } from './backtest.js';
 import { fetchBDLGames } from './bdl.js';
 import { fetchESPNDay, fetchESPNSummary } from './espnbox.js';
@@ -294,7 +294,9 @@ async function main() {
   try { const bd = buildBotData({ ...slate, prev: prevSeason }, { w: +(env.BOT_W || .4), finta, kalshi: kalshi.length ? { date, gen: new Date().toISOString(), list: kalshi } : null }); await writeFile(join(dirname(OUT), 'bot.json'), JSON.stringify(bd)); log(`  bot.json: ${bd.rows.length} linhas`); }
   catch (e) { warnings.push('bot.json falhou: ' + e.message); }
   // 7. resultados dos últimos dias: o app usa para liquidar as tips registradas (green/red/devolvida)
-  await writeFile(RESULTS, JSON.stringify(buildResults([...Object.values(cur.games), ...Object.values(prev.games)], { ...prev.names, ...cur.names }, date)));
+  const outros = await Promise.all([curL, prevL].map(l => loadHist(useESPN ? l : 'espn-' + l)));
+  const alias = idAliases([{ fonte: useESPN ? 'espn' : 'nba', names: { ...prev.names, ...cur.names } }, { fonte: useESPN ? 'nba' : 'espn', names: Object.assign({}, ...outros.map(h => h.names)) }]);
+  await writeFile(RESULTS, JSON.stringify(buildResults([...Object.values(cur.games), ...Object.values(prev.games)], { ...prev.names, ...cur.names }, date, 14, alias)));
   // resumo no Telegram, 1x por dia, no horário de NOTIFY_UTC_HOURS (padrão 21 UTC = 18h de Brasília)
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && state.notify?.day !== date && (env.NOTIFY_UTC_HOURS || '21').split(',').map(Number).includes(new Date().getUTCHours())) {
     try { const text = dailySummary(slate, { appUrl: env.APP_URL || '' }); if (text) { await sendTelegram({ token: env.TELEGRAM_BOT_TOKEN, chatId: env.TELEGRAM_CHAT_ID, text }); state.notify = { day: date }; await saveState(STATE, state); log('  resumo enviado no Telegram'); } }

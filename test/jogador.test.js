@@ -67,3 +67,15 @@ test('jogador: ganhos dos desfalques do dia', () => {
   assert.deepEqual(ganhos(t, [99], K), [], 'quem não é da rotação não mexe');
   assert.equal(Object.keys(porJogador(t)).length, 5);
 });
+
+// 24/11: a coleta trocou NBA → ESPN e os IDs mudaram; entradas de 23/11 (IDs da NBA) foram anuladas por engano
+import { idAliases, buildResults } from '../collector/slate.js';
+test('resultados: a mesma linha sai também no ID do outro provedor', () => {
+  const alias = idAliases([{ fonte: 'espn', names: { 1966: 'LeBron James', 5081727: 'Sidy Cissoko', 7: 'Jalen Williams', 8: 'Jalen Williams' } },
+    { fonte: 'nba', names: { 2544: 'LeBron James', 1631321: 'Sidy Cissoko', 9: 'Jalen Williams' } }]);
+  assert.deepEqual(alias['1966'], ['2544']); assert.deepEqual(alias['1631321'], ['5081727']);
+  assert.equal(alias['9'], undefined, 'nome repetido num provedor não liga');
+  const r = Array(40).fill(0); r[0] = 1966;
+  const res = buildResults([{ d: '2026-11-23', gid: 'e1', h: 'LAL', a: 'UTA', r: [r] }], { 1966: 'LeBron James' }, '2026-11-24', 14, alias);
+  assert.ok(res.stats['2026-11-23']['2544']); assert.equal(res.names['2544'], 'LeBron James');
+});
