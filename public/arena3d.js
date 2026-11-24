@@ -20,7 +20,7 @@ export async function montaArena(box) {
   const canvas = document.createElement('canvas');
   canvas.className = 'arena3d'; canvas.setAttribute('aria-hidden', 'true');
   box.appendChild(canvas);
-  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#050605';
+  const bg = getComputedStyle(box).getPropertyValue("--bg").trim() || "#050605";
   const BG = new THREE.Color(bg);
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(BG, 10, 24);

@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Jogador · Black House</title>
 <meta name="theme-color" content="#000000">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<script>try{const t=JSON.parse(localStorage.getItem("garrafao:theme"));if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="styles.css">
 <style>
 /* Aba Jogador (23/11): mapa de arremessos, teia de passes, rebotes, combinados e "quem está fora".
@@ -141,6 +142,7 @@ function stack(box, partes) {
 }
 function teia(box, lista, centro, sub) {
   const s = el('svg', { viewBox: '0 0 460 360', width: '100%', role: 'img', 'aria-label': 'Teia de passes' }); box.appendChild(s);
+  el('rect', { x: 0, y: 0, width: 460, height: 360, rx: 16, fill: '#0A0C0B' }, s);
   const cx = 230, cy = 180, R = 135, max = lista[0]?.[1] || 1;
   lista.forEach((r, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / lista.length; r._p = [cx + R * Math.cos(a), cy + R * Math.sin(a), PAL[i] || '#5d6660', a]; el('line', { x1: cx, y1: cy, x2: r._p[0], y2: r._p[1], stroke: r._p[2], 'stroke-width': 1.5 + r[1] / max * 12, 'stroke-linecap': 'round', opacity: .55 }, s); });
   el('circle', { cx, cy, r: 34, fill: '#0D2A1B', stroke: '#2FD07F', 'stroke-width': 2 }, s);

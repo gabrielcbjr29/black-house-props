@@ -523,11 +523,13 @@ function renderSummary() {
   const sel = new Set(F.games || []);
   const tile = (g, i) => `<button class="day" data-game="${g.id}" aria-pressed="${sel.has(g.id)}" style="--i:${i}" aria-label="${g.away} em ${g.home}, ${brTime(g.timeUTC)}. Ver as props deste jogo"><small>${brTime(g.timeUTC)}</small><b>${g.away}</b><span>${g.home}</span></button>`;
   const stLb = { out: 'Fora', doubtful: 'Provável fora', questionable: 'Dúvida' };
-  el.innerHTML = `<div class="dash">
+  const nA = id => strong.filter(x => x.pr.game.id === id).length;
+  const tileJ = (g, i) => { const k = nA(g.id); return `<button class="pj-tile" data-game="${g.id}" aria-pressed="${sel.has(g.id)}" style="--i:${i}" aria-label="${esc(TEAM_INFO[g.away]?.[0] || g.away)} em ${esc(TEAM_INFO[g.home]?.[0] || g.home)}, ${brTime(g.timeUTC)}. Ver as props deste jogo"><span class="pj-time">${brTime(g.timeUTC)}</span><b>${esc(TEAM_INFO[g.away]?.[0] || g.away)} × ${esc(TEAM_INFO[g.home]?.[0] || g.home)}</b><small class="${k ? 'tem' : ''}">${k ? `${k} ${k === 1 ? 'linha' : 'linhas'} nota A` : 'sem nota A ainda'}</small></button>`; };
+  el.innerHTML = `<div class="placar-jogos${PL_INTRO ? ' intro' : ''}" role="group" aria-label="Jogos de hoje"><button class="pj-tile all" data-gameall aria-pressed="${!sel.size}"><span class="pj-time">${games.length}</span><b>${games.length === 1 ? 'jogo hoje' : 'jogos hoje'}</b><small>ver todas as linhas</small></button>${games.map(tileJ).join('')}</div>
+  <div class="dash">
     <section class="dpanel stats">
       <div class="dp-head"><div class="grow"><h2>Valor da rodada</h2><p class="muted">Chance do modelo contra a chance que a odd cobra. Onde o verde passa do dourado, a odd paga mais do que deveria.</p></div>
         <button class="chg-pill${mine ? ' alert' : ''}" data-chg aria-expanded="${CHG_OPEN}"><b>${ch.length}</b> ${ch.length === 1 ? 'mudança' : 'mudanças'}</button></div>
-      <div class="daystrip${PL_INTRO ? ' intro' : ''}" role="group" aria-label="Jogos de hoje"><button class="day all" data-gameall aria-pressed="${!sel.size}"><small>Hoje</small><b>${games.length}</b><span>jogos</span></button>${games.map(tile).join('')}</div>
       <div class="chartwrap">${rodadaChart()}</div>
       <div class="ch-legend"><span><i class="lg-area"></i>Chance do modelo</span><span><i class="lg-line"></i>Chance que a odd cobra</span><span class="muted">Toque num ponto para abrir a ficha</span></div>
     </section>
@@ -538,7 +540,7 @@ function renderSummary() {
     </div>
   </div>
   ${CHG_OPEN && ch.length ? `<section class="changes dpanel" aria-label="O que mudou"><div class="ch-head"><h2>O que mudou ${CHG_BASE === 'visit' ? 'desde a sua última visita' : 'desde a abertura do mercado'}</h2><button class="btn sm" data-seen>Marcar como visto</button></div><div class="ch-list">${ch.slice(0, 10).map(changeItem).join('')}</div>${ch.length > 10 ? `<p class="muted" style="margin:6px 0 0;font-size:13px">e mais ${ch.length - 10}.</p>` : ''}</section>` : ''}`;
-  if (PL_INTRO) { PL_INTRO = false; setTimeout(() => el.querySelector('.daystrip')?.classList.remove('intro'), 1200); }
+  if (PL_INTRO) { PL_INTRO = false; setTimeout(() => el.querySelector('.placar-jogos')?.classList.remove('intro'), 1400); }
   renderFigura();
 }
 
@@ -1399,7 +1401,7 @@ function bind() {
     else if (t.dataset.mk) { D = { id: t.dataset.mk, side: EVAL[t.dataset.mk].best }; renderDrawer(); }
     else if (t.dataset.dside) { D.side = t.dataset.dside; renderDrawer(); }
     else if (t.hasAttribute('data-gameall')) { F = Object.assign({}, DEF, { view: F.view, preset: '' }); LIMIT = 60; renderSummary(); renderProps(); }
-    else if (t.dataset.game) { const already = (F.games || []).length === 1 && F.games[0] === t.dataset.game && t.classList.contains('day'); F = Object.assign({}, DEF, { view: F.view, games: already ? [] : [t.dataset.game], preset: '' }); LIMIT = 60; if (state.view === 'props') { renderSummary(); renderProps(); if (!already) $('#presets').scrollIntoView({ behavior: 'smooth', block: 'start' }); } else location.hash = 'props'; }
+    else if (t.dataset.game) { const already = (F.games || []).length === 1 && F.games[0] === t.dataset.game && (t.classList.contains('day') || t.classList.contains('pj-tile')); F = Object.assign({}, DEF, { view: F.view, games: already ? [] : [t.dataset.game], preset: '' }); LIMIT = 60; if (state.view === 'props') { renderSummary(); renderProps(); if (!already) $('#presets').scrollIntoView({ behavior: 'smooth', block: 'start' }); } else location.hash = 'props'; }
     else if (t.hasAttribute('data-reset')) { F = Object.assign({}, DEF, { view: F.view }); renderProps(); }
     else if (t.hasAttribute('data-edsave')) saveOverride();
     else if (t.hasAttribute('data-edreset')) { delete OVR[D.id]; store.set('ovr:' + SLATE.meta.date, OVR); EVAL[D.id] = ev(BYID[D.id]); renderDrawer(); refreshLists(); }
@@ -1475,7 +1477,7 @@ function bind() {
   });
   const root = document.documentElement;
   const saved = store.get('theme', null); if (saved) root.dataset.theme = saved;
-  $('#themeBtn').addEventListener('click', () => { const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; root.dataset.theme = dark ? 'light' : 'dark'; store.set('theme', root.dataset.theme); });
+  $('#themeBtn').addEventListener('click', () => { root.dataset.theme = (root.dataset.theme || 'dark') === 'dark' ? 'light' : 'dark'; store.set('theme', root.dataset.theme); $('#themeBtn').setAttribute('aria-pressed', root.dataset.theme === 'light'); document.querySelector('meta[name=theme-color]')?.setAttribute('content', root.dataset.theme === 'light' ? '#EFF2EF' : '#050605'); });
   let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (state.view === 'props') renderProps(); }, 150); });
   addEventListener('hashchange', route);
   $('#placarRefresh')?.addEventListener('click', () => renderPlacar(true));
