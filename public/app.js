@@ -536,7 +536,7 @@ function renderSummary() {
   const stLb = { out: 'Fora', doubtful: 'Provável fora', questionable: 'Dúvida' };
   const nA = id => strong.filter(x => x.pr.game.id === id).length;
   const tileJ = (g, i) => { const k = nA(g.id); return `<button class="pj-tile" data-game="${g.id}" aria-pressed="${sel.has(g.id)}" style="--i:${i}" aria-label="${esc(TEAM_INFO[g.away]?.[0] || g.away)} em ${esc(TEAM_INFO[g.home]?.[0] || g.home)}, ${brTime(g.timeUTC)}. Ver as props deste jogo"><span class="pj-time">${brTime(g.timeUTC)}</span><b>${esc(TEAM_INFO[g.away]?.[0] || g.away)} × ${esc(TEAM_INFO[g.home]?.[0] || g.home)}</b><small class="${k ? 'tem' : ''}">${k ? `${k} ${k === 1 ? 'linha' : 'linhas'} nota A` : 'sem nota A ainda'}</small></button>`; };
-  el.innerHTML = `<div class="placar-jogos${PL_INTRO ? ' intro' : ''}" role="group" aria-label="Jogos de hoje"><button class="pj-tile all" data-gameall aria-pressed="${!sel.size}"><span class="pj-time">${games.length}</span><b>${games.length === 1 ? 'jogo hoje' : 'jogos hoje'}</b><small>ver todas as linhas</small></button>${games.map(tileJ).join('')}</div>
+  el.innerHTML = `${games.length ? `<div class="placar-jogos${PL_INTRO ? ' intro' : ''}" role="group" aria-label="Jogos de hoje"><button class="pj-tile all" data-gameall aria-pressed="${!sel.size}"><span class="pj-time">${games.length}</span><b>${games.length === 1 ? 'jogo hoje' : 'jogos hoje'}</b><small>ver todas as linhas</small></button>${games.map(tileJ).join('')}</div>` : ''}
   <div class="dash">
     <section class="dpanel stats">
       <div class="dp-head"><div class="grow"><h2>Valor da rodada</h2><p class="muted">Chance do modelo contra a chance que a odd cobra. Onde o verde passa do dourado, a odd paga mais do que deveria.</p></div>
