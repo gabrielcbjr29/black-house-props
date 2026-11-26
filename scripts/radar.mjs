@@ -161,10 +161,8 @@ export function settle(carteira, results, { keepDays = 3 } = {}) {
     const S = results?.stats?.[x.date];
     if (!S) { if (tarde(x)) { x.status = 'devolvida'; x.why = 'sem resultado'; x.lucro = 0; x.lucro1 = 0; n++; } continue; }
     const a = S[x.pid];
-    // só é "não jogou" quando o jogo do time dele já está nos resultados (o último jogo da noite chega depois)
-    const G = results?.games?.[x.date];
-    const saiu = !Array.isArray(G) || !x.team || G.some(g => g[1] === x.team || g[2] === x.team);
-    if (!a && !saiu) { if (tarde(x)) { x.status = 'devolvida'; x.why = 'sem resultado'; x.lucro = 0; x.lucro1 = 0; n++; } continue; }
+    // fora do boxscore = espera até 2 dias (em 23/11 o boxscore veio só com IDs da ESPN e tudo virou "não jogou")
+    if (!a && !(upTo && (upTo - Date.parse(x.date)) / 864e5 > 2)) continue;
     if (!a || !(a[0] > 0)) { Object.assign(x, { status: 'devolvida', why: 'não jogou', lucro: 0, lucro1: 0 }); n++; continue; }
     const y = statOf(a, x.mk); if (y == null) continue;
     const win = x.side === 'o' ? y > x.line : y < x.line;

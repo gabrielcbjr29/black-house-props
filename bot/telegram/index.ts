@@ -279,6 +279,7 @@ async function settle(rows: any[]) {
   for (const r of open) {
     if (!res.dates?.includes(r.date)) continue; // dia ainda sem box score
     const a = res.stats[r.date]?.[r.pid];
+    if (!a && espera(res, r.date)) continue;
     const keys = String(r.stat).split('+');
     let patch: Record<string, unknown>;
     if (!a || !(a[0] > 0)) patch = { settled_at: new Date().toISOString(), hit: null, result: null }; // não jogou: anulado
@@ -578,6 +579,7 @@ async function settleBets(rows: any[]) {
   for (const r of open) {
     if (!res.dates?.includes(r.date) || !gameDone(res, r.date, r.team)) continue;
     const a = res.stats[r.date]?.[r.pid];
+    if (!a && espera(res, r.date)) continue;
     let patch: Record<string, unknown>;
     if (!a || !(a[0] > 0)) patch = { status: 'void', profit: 0, result: null };
     else {
@@ -1031,10 +1033,14 @@ async function recordTops(d: Data) {
   await sb('top_picks?on_conflict=date,list,pid,mk', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(rows) });
   return rows.length;
 }
+/* 26/11: jogador que não aparece no boxscore espera até 2 dias (em 23/11 o boxscore veio só com IDs da ESPN
+   e tudo virou "não jogou"). Quem aparece com 0 minuto é anulado na hora. */
+const espera = (res: any, d: string) => !res?.upTo || (Date.parse(res.upTo) - Date.parse(d)) / 864e5 <= 2;
 async function settleTops(rows: any[], res: any) {
   for (const r of rows.filter(x => x.status === 'aberta')) {
     if (!res?.dates?.includes(r.date) || !gameDone(res, r.date, r.team)) continue;
     const a = res.stats[r.date]?.[r.pid];
+    if (!a && espera(res, r.date)) continue;
     let patch: Record<string, unknown>;
     if (!a || !(a[0] > 0)) patch = { status: 'void', result: null };
     else { const v = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); patch = { result: v, status: v === +r.line ? 'void' : (r.side === 'o' ? v > +r.line : v < +r.line) ? 'green' : 'red' }; }
@@ -1081,6 +1087,7 @@ async function settleStrats(rows: any[], res: any) {
   for (const r of rows.filter(x => x.status === 'aberta')) {
     if (!res?.dates?.includes(r.date)) continue;
     const a = res.stats[r.date]?.[r.pid];
+    if (!a && espera(res, r.date)) continue;
     const L = +(r.open_line ?? r.line), O = +(r.open_odd ?? r.odd) || ODD_EST; // entrada: linha e odd do alerta
     let status = 'void', result: number | null = null;
     if (a && a[0] > 0) { result = String(r.stat).split('+').reduce((s, k) => s + (RES_IDX[k]?.(a) ?? 0), 0); status = result === L ? 'void' : (r.side === 'o' ? result > L : result < L) ? 'green' : 'red'; }

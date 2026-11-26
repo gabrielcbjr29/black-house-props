@@ -34,8 +34,9 @@ test('Placar: liquida com o boxscore, anula quem não jogou e não duplica', () 
   S[ids[1]] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];           // não entrou
   const res = { upTo: '2026-11-17', stats: { '2026-11-16': S } };
   const out = settle(st, res);
-  assert.equal(Object.keys(st).length, 0, 'tudo saiu das abertas');
-  assert.ok(out.voids > 0, 'quem não jogou (ou ficou sem boxscore) é anulado');
+  assert.ok(Object.values(st).length > 0 && Object.values(st).every(r => r.pid === ids[0]), 'quem não aparece no boxscore espera (IDs ainda sem ligação)');
+  assert.ok(out.voids > 0, 'quem entrou com 0 minuto é anulado');
+  assert.ok(settle(st, { upTo: '2026-11-19', stats: { '2026-11-16': S } }).voids > 0 && Object.keys(st).length === 0, 'depois de 2 dias, fora do boxscore é anulado');
   const rows = out.days['2026-11-16'];
   assert.ok(rows.length > 0 && rows.every(a => a.length === COLS.length));
   const mt = rows[0][COLS.indexOf('mt')]; assert.equal(mt, 60, 'minutos antes do jogo da leitura de fechamento');

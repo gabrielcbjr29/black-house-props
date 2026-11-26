@@ -352,6 +352,8 @@ async function settle() {
   for (const r of open) {
     if (!res.dates?.includes(r.date) || !done(r.date, r.team)) continue;
     const a = res.stats[r.date]?.[r.pid];
+    // 26/11: fora do boxscore = espera até 2 dias (IDs da ESPN sem ligação viraram "não jogou" em 23/11)
+    if (!a && (!res.upTo || (Date.parse(res.upTo) - Date.parse(r.date)) / 864e5 <= 2)) continue;
     const L = +(r.open_line ?? r.line), O = +(r.open_odd ?? r.odd) || ODD_EST; // entrada: linha e odd do alerta
     let status = 'void', result: number | null = null;
     if (a && a[0] > 0) { result = String(r.stat).split('+').reduce((s, k) => s + (IDX[k]?.(a) ?? 0), 0); status = result === L ? 'void' : (r.side === 'o' ? result > L : result < L) ? 'green' : 'red'; }

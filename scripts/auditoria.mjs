@@ -77,6 +77,8 @@ export function settle(state, results, { keepDays = 3 } = {}) {
     const S = results?.stats?.[r.d];
     if (!S) { if (upTo && (upTo - Date.parse(r.d)) / 864e5 > keepDays) { delete state[key]; voids++; } continue; }
     const a = S[r.pid];
+    // 26/11: fora do boxscore = espera até 2 dias (em 23/11 só vieram IDs da ESPN)
+    if (!a && !(upTo && (upTo - Date.parse(r.d)) / 864e5 > 2)) continue;
     delete state[key];
     if (!a || !(a[0] > 0)) { voids++; continue; }                 // não jogou: anulada
     const y = statOf(a, r.mk); if (y == null) { voids++; continue; }
