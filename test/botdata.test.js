@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildBotData } from '../collector/botdata.js';
 
-test('bot.json: linhas ordenadas, sem jogador fora, com campos que o bot usa', () => {
+// 26/11: dia sem jogo (Ação de Graças) deixa o slate vazio; estes testes de dados ficam de fora até ter jogo.
+// Antes, eles quebravam o pipeline (os testes rodam antes da coleta) e ele não coletava mais nem no dia seguinte.
+const SL = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
+const semJogo = !(SL.games?.length && SL.players?.some(p => p.status === 'ok' && p.logs?.length > 10)) && 'dia sem jogo no slate';
+
+test('bot.json: linhas ordenadas, sem jogador fora, com campos que o bot usa', { skip: semJogo }, () => {
   const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
   const b = buildBotData(slate, { w: .4 });
   assert.ok(b.rows.length > 0);
@@ -17,7 +22,7 @@ test('bot.json: linhas ordenadas, sem jogador fora, com campos que o bot usa', (
   assert.ok(b.rows.every(x => x.d == null || x.e != null), 'EV sempre que houver odd');
 });
 
-test('v11: Nota BH 0–100 coerente com a letra, motivos e faixa de odd', async () => {
+test('v11: Nota BH 0–100 coerente com a letra, motivos e faixa de odd', { skip: semJogo }, async () => {
   const { buildProps, evaluate, bhScore, reasons, inOddRange, ODD_RANGE } = await import('../public/engine.js');
   const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
   const b = buildBotData(slate, { w: .4 });
@@ -40,7 +45,7 @@ test('v11: Nota BH 0–100 coerente com a letra, motivos e faixa de odd', async 
   assert.ok(inOddRange(ODD_RANGE[0]) && inOddRange(ODD_RANGE[1]) && !inOddRange(1.3) && !inOddRange(4) && !inOddRange(null));
 });
 
-test('cards: linhas marcadas têm últimos 10 jogos e o HTML do card sai completo', async () => {
+test('cards: linhas marcadas têm últimos 10 jogos e o HTML do card sai completo', { skip: semJogo }, async () => {
   const { cardHTML } = await import('../scripts/cards.mjs');
   const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
   const b = buildBotData(slate, { w: .4 });
@@ -52,7 +57,7 @@ test('cards: linhas marcadas têm últimos 10 jogos e o HTML do card sai complet
   assert.ok(h.includes(cards[0].n.replace(/&/g, '&amp;').replace(/'/g, "'")) && !/undefined|NaN/.test(h));
 });
 
-test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dispersão da binomial negativa)', async () => {
+test('Modelo BH: com slate.model, a projeção do mercado vem do modelo (e a dispersão da binomial negativa)', { skip: semJogo }, async () => {
   const { buildProps } = await import('../public/engine.js');
   const slate = JSON.parse(readFileSync(new URL('../public/data/slate.json', import.meta.url)));
   const p = slate.players.find(x => x.status === 'ok' && x.logs.length > 10);
