@@ -5,8 +5,10 @@ import { STRATEGIES, MK_EST, pickStrategies, strategyCtx } from '../collector/st
 const base = { id: 'p1', n: 'A', t: 'DET', o: 'WAS', g: 'g1', mn: 30, st: 'ok', nt: 60, sc: 60, l10: [8, 10], k: 0, b: '99play', c9: 1, d: 1.85 };
 test('modelo por mercado: uma estratégia por mercado monitorado', () => {
   assert.deepEqual(MK_EST, ['2PA', '2PM', '3PA', '3PM', 'FGM', 'FTA', 'FTM', 'RA']);
-  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 32); // + Método Minutos e 19 do Modelo v2 (18/11)
-  assert.deepEqual(STRATEGIES.filter(s => s.off).map(s => s.id).sort(), ['oport-forte', 'reserva-under', 'top10-forte']); // arquivadas em 17/11
+  assert.equal(new Set(STRATEGIES.map(s => s.id)).size, 33); // + Método Minutos e 19 do Modelo v2 (18/11) + Núcleo under (26/11)
+  // arquivadas em 17/11 e na revisão de 26/11 (as que deram prejuízo no papel e na auditoria)
+  assert.deepEqual(STRATEGIES.filter(s => s.off).map(s => s.id).sort(), ['m-3pa', 'm-3pm', 'm-fgm', 'minutos', 'oport-forte', 'reserva-under', 'top10-forte',
+    'v2-2pm', 'v2-3pa', 'v2-3pm', 'v2-ast', 'v2-fgm', 'v2-pa', 'v2-pra', 'v2-pts', 'v2-reb', 'v2-tov']);
   const rows = [
     { ...base, m: 'RA', s: 'o', l: 8.5, p: .6, sc: 61 },                              // reb+ast
     { ...base, id: 'p2', m: 'FTA', s: 'u', l: 4.5, p: .66, sc: 70 },                  // lances tentados (nota maior)
@@ -38,7 +40,7 @@ test('modelo por mercado: uma estratégia por mercado monitorado', () => {
 });
 
 test('top 10 forte (arquivada em 17/11): a regra continua de pé, mas não gera entradas', () => {
-  const mk = (id, sc, extra = {}) => ({ ...base, id, m: 'RA', s: 'u', l: 7.5, p: .6, d: 2.0, gr: 'A', mb: 1, sc, ...extra });
+  const mk = (id, sc, extra = {}) => ({ ...base, id, m: 'RA', s: 'o', l: 7.5, p: .6, d: 2.0, gr: 'A', mb: 1, sc, ...extra });
   const rows = [mk('t1', 90), mk('t2', 80, { d: 1.75 }), mk('t3', 70, { gr: 'B' }), mk('t4', 60, { c9: 0, d: null }),
     ...Array.from({ length: 8 }, (_, i) => mk('f' + i, 50 - i, { d: 1.5 })), mk('t5', 10)]; // t5 fica fora do top 10
   const r = pickStrategies({ date: '2026-11-13', gen: 'x', rows }, []);
@@ -63,8 +65,9 @@ test('Método Minutos: uma por jogador (PRA primeiro), só com o sinal de minuto
   const r = (id, m, s, mi, d = 1.85, x = {}) => ({ ...base, id, m, s, l: 20.5, p: .5, mi, d, ...x });
   const bot = { date: '2026-11-19', rows: [r('a', 'PTS', 'o', 5), r('z', 'PTS', 'o', null)], trend: [],
     mins: [r('a', 'PRA', 'o', 5), r('b', 'PTS', 'o', 6.5), r('c', 'PRA', 'u', -5), r('d', 'PRA', 'o', 4, 1.4), r('e', 'PRA', 'o', 4, 1.9, { c9: 0 }), r('f', '3PM', 'o', 7)] };
-  const P = pickStrategies(bot).picks.filter(x => x.strategy_id === 'minutos');
-  assert.deepEqual(P.map(x => `${x.pid}-${x.mk}-${x.side}`).sort(), ['a-PRA-o', 'b-PTS-o', 'c-PRA-u']);
+  assert.deepEqual(pickStrategies(bot).picks.filter(x => x.strategy_id === 'minutos'), [], 'arquivado em 26/11');
+  const S = STRATEGIES.find(s => s.id === 'minutos');
+  assert.deepEqual([...bot.rows, ...bot.mins].filter(x => S.test(x)).map(x => `${x.id}-${x.m}`), ['a-PTS', 'a-PRA', 'b-PTS', 'c-PRA'], 'a regra segue a mesma para poder voltar');
 });
 
 test('Modelo v2: todos os mercados, EV 3%+ sem piso de chance, odd 1,50–3,50, rotação, só papel', () => {
@@ -72,6 +75,24 @@ test('Modelo v2: todos os mercados, EV 3%+ sem piso de chance, odd 1,50–3,50, 
   assert.equal(v2.length, 19); assert.ok(v2.every(s => s.quiet && s.max === 5));
   const r = (id, p, d, x = {}) => ({ ...base, id, m: 'PTS', s: 'o', l: 20.5, p, d, ...x });
   const rows = [r('a', .5, 2.2), r('b', .58, 1.85), r('c', .5, 1.9), r('d', .6, 1.6), r('e', .4, 4), r('f', .6, 1.9, { mn: 20 }), r('g', .6, 1.9, { st: 'questionable' })];
-  const P = pickStrategies({ date: 'x', rows }).picks.filter(x => x.strategy_id === 'v2-pts');
-  assert.deepEqual(P.map(x => x.pid), ['a', 'b']); // a: EV 10%, b: EV 7,3%; c (−5%), d (−4%), e (odd 4), f (20 min) e g (dúvida) fora
+  const S = STRATEGIES.find(s => s.id === 'v2-pts'); assert.ok(S.off, 'v2 · Pontos arquivado em 26/11');
+  assert.deepEqual(rows.filter(x => S.test(x)).map(x => x.id), ['a', 'b']); // a: EV 10%, b: EV 7,3%; c (−5%), d (−4%), e (odd 4), f (20 min) e g (dúvida) fora
+  const P = pickStrategies({ date: 'x', rows: rows.map(x => ({ ...x, m: 'PF' })) }).picks.filter(x => x.strategy_id === 'v2-pf');
+  assert.deepEqual(P.map(x => x.pid), ['a', 'b'], 'v2 · Faltas segue ligado');
+});
+
+test('Núcleo under (26/11): menos de em LL tentados, faltas, roubos+tocos e tocos, linha 1,5–2,5, chance 55–70%, EV > 0', () => {
+  const r = (id, m, x = {}) => ({ ...base, id, m, s: 'u', l: 2.5, p: .62, d: 1.7, ...x });
+  const rows = [r('a', 'PF', { p: .66 }), r('b', 'FTA', { l: 1.5 }), r('c', 'SB', { p: .60, l: 1.5 }),
+    r('d', 'PF', { l: 3.5 }),                      // linha acima de 2,5
+    r('e', 'FTA', { s: 'o' }),                     // over
+    r('f', 'PF', { p: .75 }),                      // chance acima de 70%
+    r('g', 'BLK', { d: 1.5 }),                     // EV negativo (0,62 × 1,5)
+    r('h', 'PTS'),                                 // mercado fora
+    r('i', 'PF', { mn: 18 }),                      // fora da rotação
+    r('j', 'PF', { wo: { q: 'X', h: [2, 4], a: 1, x: 1 } }), // colega fora hoje
+    r('k', 'PF', { c9: 0 }),                       // sem linha da 99play
+    r('a', 'FTA', { p: .64 })];                    // mesmo jogador: uma só
+  const P = pickStrategies({ date: 'x', rows }).picks.filter(x => x.strategy_id === 'nucleo-under');
+  assert.deepEqual(P.map(x => x.pid + x.mk), ['aPF', 'bFTA', 'cSB'], 'ordem pela chance');
 });

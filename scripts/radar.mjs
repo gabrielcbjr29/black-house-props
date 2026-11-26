@@ -35,6 +35,10 @@ export const CFG = {
   nvMin: 0, kMin: -.02,        // segunda opinião: EV pela Novig ≥ 0, pela Kalshi ≥ −2%
   // trilha Kalshi (21/11): preço justo = Kalshi, só perto do jogo (o preço dela longe do jogo fica velho/sem liquidez)
   k: { min: .04, max: .30, window: 150 },
+  // 26/11 (revisão dos números): a trilha do Modelo BH fez 34% de acerto e −9,4u em 41 apostas (quase tudo over);
+  // a da Kalshi, 72% e +13,1u em 40. A Finta (só over) fez 36% e −3,7u. A carteira passa a comprar só pela Kalshi e
+  // só na 99play. A trilha BH e a Finta seguem na varredura (mira e motivos), sem compra.
+  trilhas: { bh: false, k: true }, casasCompra: ['99play'],
 };
 export const TRILHAS = { bh: 'Modelo BH (peso 0,2)', k: 'Kalshi perto do jogo' };
 const r3 = x => x == null || !Number.isFinite(x) ? null : Math.round(x * 1e3) / 1e3;
@@ -136,8 +140,9 @@ export function kalshiCands(S, cfg = CFG) {
 }
 /* as compras das duas trilhas nesta varredura (cada trilha com as próprias travas) */
 export function chooseAll(S, carteira, cfg = CFG) {
-  const bh = choose(S, carteira.filter(x => (x.tr ?? 'bh') === 'bh'), cfg).map(b => ({ ...b, tr: 'bh' }));
-  const k = choose({ ...S, cands: kalshiCands(S, cfg) }, carteira.filter(x => x.tr === 'k'), cfg).map(b => ({ ...b, id: 'k|' + b.id, tr: 'k' }));
+  const casa = c => !cfg.casasCompra || cfg.casasCompra.includes(c.casa);
+  const bh = cfg.trilhas?.bh === false ? [] : choose({ ...S, cands: S.cands.filter(casa) }, carteira.filter(x => (x.tr ?? 'bh') === 'bh'), cfg).map(b => ({ ...b, tr: 'bh' }));
+  const k = cfg.trilhas?.k === false ? [] : choose({ ...S, cands: kalshiCands(S, cfg).filter(casa) }, carteira.filter(x => x.tr === 'k'), cfg).map(b => ({ ...b, id: 'k|' + b.id, tr: 'k' }));
   return [...bh, ...k];
 }
 /* fechamento: a última leitura antes do jogo, na mesma casa, lado e linha */

@@ -55,6 +55,15 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
   - Migração no Supabase só com aprovação do usuário.
   - Apagar dados e mensagens só com cuidado; mensagem de teste é apagada logo depois.
 - **Métodos dos canais:** ficam como estão até a revisão de 24/11.
+- **Revisão de 26/11 (aplicada com aprovação do dono, "pode aplicar tudo que melhorar"):** docs `claude/revisao-26-11-metodos-bot.md` e `claude/revisao-26-11-numeros.md` no Projeto.
+  - Peso do modelo no bot segue 0,4 (testado 0,1/0,2: só reduz entradas e piora o ROI). App: padrão de 55% para 40%, igual ao bot.
+  - Estratégias arquivadas (`off`): Método Minutos, m-3pa, m-3pm, m-fgm e o v2 de pts, reb, ast, 3pm, pra, pa, fgm, 2pm, 3pa, tov.
+  - Nova `nucleo-under`: menos de em FTA/PF/SB/BLK, linha 1,5–2,5, chance 55–70%, EV > 0, rotação, sem colega fora; ordem pela chance, até 8 por dia, alerta sem corte de EV. No app: atalho "Núcleo under".
+  - Risco novo depois do alerta → entrada `cancelada` ("não entre"): sai da conta do placar, mas o resultado fica gravado.
+  - Listas do bot/app: tentativas sem FGM; sem under de RA e de 2PM.
+  - Radar: compra só pela trilha Kalshi e só na 99play (trilha BH e Finta seguem na varredura, sem compra).
+  - GREENDOG: `lado: 'u'`, mercados FTA e RA (o over e o FTM perderam).
+  - Liquidação: jogador fora do boxscore espera até 2 dias (em 23/11 os IDs da ESPN anularam o dia).
   - Na revisão: backtest de novo, over × under, Alavanca (chance da Kalshi × acerto, CLV), Criar Aposta (chance prevista × acerto, odd real × estimada).
 
 ## Notas privadas

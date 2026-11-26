@@ -318,16 +318,19 @@ async function testesCmd(chatId: number, rest: string[]): Promise<Out> {
 }
 // ---------- Top 10 do Modelo BH (tentativas/convertidos e reb+ast) ----------
 const MT: Record<string, { mk: string[]; title: string; cmd: string; ic: string }> = {
-  tent: { mk: ['3PA', 'FTA', '2PA', '2PM', 'FGM'], title: 'TENTATIVAS E CONVERTIDOS', cmd: '/toptentativas', ic: '🏹' },
+  // 26/11: arremessos convertidos saiu da lista (−4,6u em 41 entradas; auditoria −6% nos dois lados)
+  tent: { mk: ['3PA', 'FTA', '2PA', '2PM'], title: 'TENTATIVAS E CONVERTIDOS', cmd: '/toptentativas', ic: '🏹' },
   ra: { mk: ['RA'], title: 'REBOTES + ASSISTÊNCIAS', cmd: '/topra', ic: '🙌' },
 };
+// 26/11: lados que perderam nas listas (reb+ast under 119 entradas −6,5%; de 2 convertidos under 45 entradas −12%)
+const TOP_SKIP = (r: any) => r.s === 'u' && (r.m === 'RA' || r.m === '2PM');
 // ranking: Nota BH (chance do modelo, L10/L20/temporada, confronto, defesa x posição), desempate pelo L10; um por jogador
 function modelTop(d: Data, mk: string[], n = 10, om = 0) {
   // só jogador de rotação (24+ min) e linhas que as casas costumam abrir (mesmo critério dos cards)
   const MIN_LINE: Record<string, number> = { FGA: 7.5, '3PA': 2.5, FTA: 2.5, '2PA': 4.5, '2PM': 2.5, FGM: 3.5, RA: 4.5 };
   // nos jogos em que a 99play já abriu linhas de jogador, só entra linha da 99play (é onde o usuário aposta)
   const cov = new Set(d.rows.filter(r => r.c9).map(r => r.g));
-  const rows = d.rows.filter(r => r.mb && okOdd(oddOf(r), om) && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0) && (r.c9 || !cov.has(r.g))).sort((a, b) => b.sc - a.sc);
+  const rows = d.rows.filter(r => r.mb && okOdd(oddOf(r), om) && mk.includes(r.m) && r.st !== 'questionable' && r.p <= .85 && (r.mn ?? 0) >= 24 && r.l >= (MIN_LINE[r.m] ?? 0) && (r.c9 || !cov.has(r.g)) && !TOP_SKIP(r)).sort((a, b) => b.sc - a.sc);
   const seen = new Set<string>(), out: Row[] = [];
   for (const r of rows) { if (seen.has(r.id)) continue; seen.add(r.id); out.push(r); if (out.length >= n) break; }
   return out;
@@ -618,7 +621,7 @@ async function bancaCmd(chatId: number, rest: string[]): Promise<Out> {
   try { rows = await sb(`bets?select=*&status=neq.aguardando_odd${all ? '' : `&chat_id=eq.${chatId}`}&order=created_at.desc&limit=2000`) ?? []; } catch { return { text: 'Não consegui ler a banca agora.', kb: { inline_keyboard: [HOME] } }; }
   await settleBets(rows);
   if (!rows.length) return { text: `<b>💼 BANCA DO MODELO BH</b>\nNenhuma entrada registrada ainda.\n\nNos tops (/toptentativas, /topra) e nas listas, toque em <b>📝</b> e informe a odd que você pegou. Cada entrada vale 1u e eu confiro sozinho depois do jogo.`, kb: { inline_keyboard: [[BTN('🏹 Top 10 Tentativas', '/toptentativas'), BTN('🙌 Top 10 Reb+Ast', '/topra')], HOME] } };
-  const ic = (r: any) => r.status === 'green' ? '✅' : r.status === 'red' ? '❌' : r.status === 'void' ? '➖' : '⏳';
+  const ic = (r: any) => r.status === 'green' ? '✅' : r.status === 'red' ? '❌' : r.status === 'void' ? '➖' : r.status === 'cancelada' ? '🚫' : '⏳';
   const last = rows.slice(0, 10).map(r => `${ic(r)} <code>#${r.id}</code> ${esc(r.name)} · ${r.side === 'o' ? 'mais' : 'menos'} ${n1(+r.line)} ${MK[r.mk] ?? r.mk} @${n2(+r.odd)}${r.casa === 'finta' ? ' 🟣' : ''}${r.result != null ? ` <i>(fez ${n1(+r.result)})</i>` : ''}${r.profit != null && r.status !== 'aberta' ? ` ${u2(+r.profit)}` : ''}`).join('\n');
   const text = `<b>💼 ${all ? 'BANCA DE TODOS' : 'SUA BANCA'} · MODELO BH</b>\n` + bancaResumo(rows) + (await topsResumo()) + `\n\n<b>Últimas</b>\n${last}\n<i>Apagar uma entrada errada: <code>/apagar 12</code>. Amostra pequena engana: o ROI começa a dizer algo com 100+ entradas.</i>`;
   return { text: text.length > 4000 ? text.slice(0, 3990) + '…' : text, kb: { inline_keyboard: [[BTN(all ? '👤 Só a minha' : '👥 De todos', all ? '/banca' : '/banca todos'), BTN('🔄 Atualizar', all ? '/banca todos' : '/banca')], [BTN('🏹 Top Tentativas', '/toptentativas'), BTN('🙌 Top Reb+Ast', '/topra'), BTN('🏠 Menu', '/menu')]] } };
@@ -641,7 +644,7 @@ async function estrategiasCmd(rest: string[]): Promise<Out> {
   // antes da primeira gravação do dia, mostra a lista de hoje direto da coleta
   if (!picks.length) { const st = await estToday(etDate()); picks = (st?.picks ?? []).map((p: any) => ({ ...p, status: 'aberta', odd_src: p.odd ? p.odd_src : 'estimada' })); }
   const ev = (x: any) => evS(x);
-  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || 1.87)}${x.odd_src === 'estimada' ? '*' : ''}${x.open_line != null && +x.open_line !== +x.line ? ` <i>(agora ${n1(+x.line)})</i>` : ''} · ${pc(+x.p)}${need(+(x.open_odd ?? x.odd))} · EV ${ev(x.edge == null ? null : +x.edge)}`;
+  const pickLn = (x: any, i: number) => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : x.status === 'cancelada' ? '🚫' : '⏳'} <b>${i}.</b> ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+(x.open_line ?? x.line))} ${MKS[x.mk] ?? x.mk} @${n2(+(x.open_odd ?? x.odd) || 1.87)}${x.odd_src === 'estimada' ? '*' : ''}${x.open_line != null && +x.open_line !== +x.line ? ` <i>(agora ${n1(+x.line)})</i>` : ''} · ${pc(+x.p)}${need(+(x.open_odd ?? x.odd))} · EV ${ev(x.edge == null ? null : +x.edge)}`;
   const kb = { inline_keyboard: [...chunk(stats.map(s => BTN(s.name, `/estrategias ${s.id}`)), 2), [BTN('🧪 Placar', '/estrategias'), BTN('⚖️ Veredito (CLV)', '/veredito'), BTN('✅ Gabarito', '/gabarito')], [BTN('🏠 Menu', '/menu')]] };
   const S = id ? stats.find(s => s.id === id) : null;
   if (S) {
@@ -1065,7 +1068,7 @@ async function morningText(chatId: number, y: string, picks: any[], res: any) {
   await settleBets(mine);
   if (mine.length) {
     const done = mine.filter(r => r.status === 'green' || r.status === 'red'), st = done.reduce((a, r) => a + +r.stake, 0), pr = mine.reduce((a, r) => a + (+r.profit || 0), 0);
-    const ic = (r: any) => r.status === 'green' ? '✅' : r.status === 'red' ? '❌' : r.status === 'void' ? '➖' : '⏳';
+    const ic = (r: any) => r.status === 'green' ? '✅' : r.status === 'red' ? '❌' : r.status === 'void' ? '➖' : r.status === 'cancelada' ? '🚫' : '⏳';
     const lines = mine.slice(0, 12).map(r => `${ic(r)} ${esc(r.name)} · ${r.side === 'o' ? 'mais' : 'menos'} ${n1(+r.line)} ${MKS[r.mk] ?? r.mk} @${n2(+r.odd)}${r.result != null ? ` <i>(fez ${n1(+r.result)})</i>` : ''}${r.status !== 'aberta' ? ' ' + u2(+r.profit || 0) : ''}`).join('\n');
     const all: any[] = await sb(`bets?chat_id=eq.${chatId}&status=in.(green,red)&select=stake,profit`).catch(() => []) ?? [];
     const ST = all.reduce((a, r) => a + +r.stake, 0), PR = all.reduce((a, r) => a + +r.profit, 0);
@@ -1073,7 +1076,7 @@ async function morningText(chatId: number, y: string, picks: any[], res: any) {
   }
   if (picks.length) {
     const L = (k: string) => { const a = picks.filter(x => x.list === k).sort((x, z) => x.rank - z.rank); if (!a.length) return ''; const h = hitOf(a);
-      const det = a.map(x => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳'} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || ODD_EST)}${x.odd_src === 'estimada' ? '*' : ''}${x.result != null ? ` <i>(${n1(+x.result)})</i>` : ''}`).join('\n');
+      const det = a.map(x => `${x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : x.status === 'cancelada' ? '🚫' : '⏳'} ${esc(x.name)} ${x.side === 'o' ? '⬆️' : '⬇️'} ${n1(+x.line)} ${MKS[x.mk] ?? x.mk} @${n2(+x.odd || ODD_EST)}${x.odd_src === 'estimada' ? '*' : ''}${x.result != null ? ` <i>(${n1(+x.result)})</i>` : ''}`).join('\n');
       return `${MT[k].ic} ${k === 'tent' ? 'Tentativas' : 'Reb+Ast'}: <b>${h.g}/${h.n}</b>${h.v ? ` (${h.v} anulada${h.v > 1 ? 's' : ''})` : ''} · <b>${u2(h.pr)}</b> · ROI ${pctS(h.roi)}\n<blockquote expandable>${det}</blockquote>`; };
     parts.push(`<b>📈 Top 10 do Modelo BH</b>\n${[L('tent'), L('ra')].filter(Boolean).join('\n')}` + await topsResumo());
   }
@@ -1101,7 +1104,7 @@ async function estGabarito(y: string, res: any) {
   if (!rows.length) return null;
   await settleStrats(rows, res);
   const stats: any[] = await sb('strategy_stats?select=*').catch(() => []) ?? [];
-  const ic = (x: any) => x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : '⏳';
+  const ic = (x: any) => x.status === 'green' ? '✅' : x.status === 'red' ? '❌' : x.status === 'void' ? '➖' : x.status === 'cancelada' ? '🚫' : '⏳';
   const build = (det: boolean) => {
     const blocks: string[] = [];
     for (const S of stats) {

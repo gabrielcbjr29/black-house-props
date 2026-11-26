@@ -36,8 +36,11 @@ async function download(name, data, type) {
 function saveLink(name, data, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 
 /* ---------------- configurações do tipster ---------------- */
-const CFG_DEF = { bank: 1000, unit: 10, kf: .25, maxU: 3, dayMaxU: 10, dayGoalU: 0, dayStopU: 0, w: .55, calib: true, brand: 'Black House', handle: '', warn: 'dependencia', books: 'Betano, Bet365, Superbet, KTO, Betfair, Novibet, Sportingbet, EstrelaBet', defBook: 'Betano', showStats: true };
+const CFG_DEF = { bank: 1000, unit: 10, kf: .25, maxU: 3, dayMaxU: 10, dayGoalU: 0, dayStopU: 0, w: .4, calib: true, brand: 'Black House', handle: '', warn: 'dependencia', books: 'Betano, Bet365, Superbet, KTO, Betfair, Novibet, Sportingbet, EstrelaBet', defBook: 'Betano', showStats: true };
 let CFG = Object.assign({}, CFG_DEF, store.get('cfg', {}));
+// 26/11: o padrão do peso do modelo passou de 55% para 40% (o mesmo do bot; a auditoria de 25 mil linhas mostrou o
+// modelo mais otimista que o mercado). Quem estava no padrão antigo vai para o novo; escolha manual diferente fica.
+if (CFG.w === .55 && !store.get('wMig26', false)) { CFG.w = .4; store.set('cfg', CFG); store.set('wMig26', true); }
 const booksList = () => CFG.books.split(',').map(s => s.trim()).filter(Boolean);
 /* stake sugerida: Kelly fracionado sobre a banca, em unidades, arredondado a 0,25u e com teto */
 function stakeU(s) {
@@ -204,6 +207,11 @@ function filtered() {
     if (GRADE_ORDER[s.grade] < GRADE_ORDER[F.minGrade]) return false;
     const h = s.hits[F.sample] || [0, 0]; if (F.minHit > 0 && (!h[1] || h[0] / h[1] * 100 < F.minHit - 1e-9)) return false;
     if (s.p * 100 < F.minProb) return false;
+    if (F.maxProb && s.p * 100 > F.maxProb) return false;
+    if (F.lineMin != null && e.line < F.lineMin) return false;
+    if (F.lineMax != null && e.line > F.lineMax) return false;
+    if (F.minMin && (pr.ctx?.exp ?? 0) < F.minMin) return false;
+    if (F.minEV >= 0 && F.minEV > -20 && !(s.ev > 0)) return false;
     if (F.oddOnly && !s.odd) return false;
     if (F.mktOnly && !pr.mkt) return false;
     if (s.ev != null && s.ev * 100 < F.minEV) return false;
@@ -392,6 +400,9 @@ const PRESETS = [
   { id: 'hot', lb: 'Sequência quente', d: '5/5 nos últimos 5', f: { sample: 'L5', minHit: 100, minGrade: 'B', sort: 'streak' } },
   { id: 'matchup', lb: 'Matchup favorável', d: 'defesa a favor', f: { dvp: true, minGrade: 'B', sort: 'score' } },
   { id: 'unders', lb: 'Unders', d: 'só “menos de”', f: { side: 'under', minGrade: 'B', sort: 'score' } },
+  // 26/11: o sinal que deu lucro na revisão (papel, listas e auditoria): under em LL tentados, faltas, roubos+tocos e
+  // tocos, linha 1,5 a 2,5, chance 55–70% e EV positivo, jogador de rotação, ordem pela chance
+  { id: 'nucleo', lb: 'Núcleo under', d: 'LL tentados, faltas, roubos+tocos, tocos', f: { markets: ['FTA', 'PF', 'SB', 'BLK'], side: 'under', minProb: 55, maxProb: 70, minEV: 0, oddOnly: true, lineMin: 1.5, lineMax: 2.5, minMin: 24, noDoubt: true, sort: 'prob' } },
   { id: 'mine', lb: 'Minhas linhas', d: 'da sua casa', f: { src: 'mine', side: 'best', sort: 'ev' } }
 ];
 function initFilters() {
@@ -979,7 +990,7 @@ function renderBanca() {
       <label>Limite diário (u)<input data-cfg="dayMaxU" inputmode="decimal" value="${fmt(CFG.dayMaxU, 2)}"></label>
       <label>Meta do dia (u, 0 = sem meta)<input data-cfg="dayGoalU" inputmode="decimal" value="${fmt(CFG.dayGoalU, 2)}"></label>
       <label>Stop do dia (u, 0 = sem stop)<input data-cfg="dayStopU" inputmode="decimal" value="${fmt(CFG.dayStopU, 2)}"></label>
-      <label>Peso do modelo vs mercado<select data-cfg="w">${[[1, '100% modelo'], [.7, '70% modelo'], [.55, '55% modelo (padrão)'], [.4, '40% modelo'], [.25, '25% modelo']].map(([v, l]) => `<option value="${v}" ${CFG.w === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Peso do modelo vs mercado<select data-cfg="w">${[[1, '100% modelo'], [.7, '70% modelo'], [.55, '55% modelo'], [.4, '40% modelo (padrão)'], [.25, '25% modelo']].map(([v, l]) => `<option value="${v}" ${CFG.w === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label>Calibração automática<select data-cfg="calib"><option value="true" ${CFG.calib ? 'selected' : ''}>Ligada (usa o backtest)</option><option value="false" ${!CFG.calib ? 'selected' : ''}>Desligada</option></select></label>
       <label>Casa padrão<input data-cfg="defBook" list="bookList" value="${esc(CFG.defBook)}"></label>
       <label class="span2">Casas que você usa (separadas por vírgula)<input data-cfg="books" value="${esc(CFG.books)}"></label>

@@ -1,6 +1,6 @@
 // Service worker: o app abre mesmo sem internet. Busca sempre a versão nova na rede e,
 // se não houver conexão, usa a última guardada (interface e dados do dia).
-const CACHE = 'blackhouse-v15';
+const CACHE = 'blackhouse-v16';
 const SHELL = ['./', 'index.html', 'radar.html', 'jogador.html', 'jogador-core.js', 'vivos.js', 'arena3d.js', 'styles.css', 'app.js', 'engine.js', 'tips.js', 'share.js', 'importer.js', 'icon.svg', 'manifest.webmanifest', 'fonts/archivo.woff2', 'fonts/bigshoulders.woff2', 'fonts/manrope.woff2', 'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

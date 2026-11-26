@@ -164,7 +164,7 @@ async function record(silent = false) {
   const noAlert = new Set(String(await cfg('NO_ALERT') ?? '').split(',').map(t => t.trim()).filter(Boolean));
   for (const s of st.strategies) if (s.quiet) noAlert.add(s.id); // estratégias só de papel (Modelo v2, 18/11)
   // Tendência e Método Minutos alertam sem o corte de EV do modelo (a própria regra é a seleção); ver abaixo
-  const NOEV = ['tendencia', 'minutos'];
+  const NOEV = ['tendencia', 'minutos', 'nucleo-under']; // núcleo under (26/11): a regra já é a seleção (EV baixo dele acertou mais)
   for (const x of fresh) if (!NOEV.includes(x.strategy_id) && !noAlert.has(x.strategy_id) && (x.edge ?? -1) >= evMin && !alertedPid.has(x.pid) && (!best.has(x.pid) || x.edge > best.get(x.pid).edge)) best.set(x.pid, x);
   for (const x of fresh) x.alerted = best.get(x.pid) === x;
   // Tendência (pedido do usuário em 14/11): alerta toda entrada dela, sem corte de EV do modelo (a regra já é a seleção),
@@ -321,16 +321,18 @@ async function risco(bot: any) {
     const fresh = seen ? keys.filter(k => !seen.has(k) && !(k === 'p:caiu' && seen.has('p:virou'))) : [];
     const patch: Record<string, unknown> = { p_now: pn == null ? null : Math.round(pn * 1000) / 1000 };
     if (seen == null || fresh.length) patch.risk = [...new Set([...(seen ?? []), ...keys])].join('|');
-    if (fresh.length) { patch.risk_at = new Date(now).toISOString(); items.push({ x, why: fresh.map(k => conds[k]) }); }
+    // 26/11: risco novo depois do alerta cancela a entrada (no papel, 326 entradas com risco: 48% de acerto, ROI −15%).
+    // Sai da conta do placar (status 'cancelada'), mas a liquidação registra o resultado dela para medir a regra.
+    if (fresh.length) { patch.risk_at = new Date(now).toISOString(); patch.status = 'cancelada'; items.push({ x, why: fresh.map(k => conds[k]) }); }
     await sb(`strategy_picks?id=eq.${x.id}`, { method: 'PATCH', body: JSON.stringify(patch) }).catch(() => null);
   }
   let alertas = 0;
   if (items.length) {
     const token = await cfg('TELEGRAM_BOT_TOKEN'); const subs: any[] = await sb('bot_subs?select=chat_id,odd_min&est=eq.true') ?? [];
     const names = Object.fromEntries(((await sb('strategies?select=id,name')) ?? []).map((s: any) => [s.id, s.name]));
-    const mkText = (items: { x: any; why: string[] }[]) => { let text = `⚠️ <b>ALERTA DE RISCO · ENTRADA${items.length > 1 ? 'S' : ''} JÁ ENVIADA${items.length > 1 ? 'S' : ''}</b>\n<i>O cenário mudou depois do alerta.</i>\n\n` + items.map(({ x, why }) =>
+    const mkText = (items: { x: any; why: string[] }[]) => { let text = `🚫 <b>ENTRADA${items.length > 1 ? 'S' : ''} CANCELADA${items.length > 1 ? 'S' : ''} · NÃO ENTRE</b>\n<i>O cenário mudou depois do alerta.</i>\n\n` + items.map(({ x, why }) =>
       `🏀 <b>${esc(x.team)} x ${esc(x.opp)}</b>${x.tip_utc ? ' · ' + hourBR(x.tip_utc) : ''}\n<blockquote><b>${esc(x.name)}</b> · ${MKN[x.mk] ?? x.mk}\n${x.side === 'o' ? '⬆️ Mais' : '⬇️ Menos'} de <b>${n1(+(x.open_line ?? x.line))}</b> · @${n2(+(x.open_odd ?? x.odd))}\n${why.map(w => '• ' + w).join('\n')}</blockquote>`).join('\n\n')
-      + `\n\n<i>Se ainda não entrou, reavalie antes. Se já entrou, veja se vale proteger. O placar segue contando a entrada como foi enviada.</i>`;
+      + `\n\n<i>Se ainda não entrou, não entre. Se já entrou, veja se vale sair ou proteger. A entrada sai da conta do placar (fica como cancelada), mas o resultado dela continua registrado.</i>`;
     if (text.length > 4090) text = text.slice(0, 4000).replace(/<[^>]*$/, '') + '…';
     return text; };
     for (const s of token ? subs : []) {
@@ -346,7 +348,7 @@ async function risco(bot: any) {
 }
 async function settle() {
   const res = await getJ('results.json'); if (!res?.stats) return { ok: false, erro: 'results.json indisponível' };
-  const open: any[] = await sb('strategy_picks?status=eq.aberta&select=id,date,pid,team,stat,side,line,odd,open_line,open_odd') ?? [];
+  const open: any[] = await sb('strategy_picks?status=in.(aberta,cancelada)&settled_at=is.null&select=id,date,pid,team,stat,side,line,odd,open_line,open_odd,status') ?? [];
   let n = 0;
   const done = (date: string, team?: string) => { const g = res.games?.[date]; return !!g && (!team || g.some((x: any[]) => x[1] === team || x[2] === team)); };
   for (const r of open) {
@@ -357,6 +359,7 @@ async function settle() {
     const L = +(r.open_line ?? r.line), O = +(r.open_odd ?? r.odd) || ODD_EST; // entrada: linha e odd do alerta
     let status = 'void', result: number | null = null;
     if (a && a[0] > 0) { result = String(r.stat).split('+').reduce((s, k) => s + (IDX[k]?.(a) ?? 0), 0); status = result === L ? 'void' : (r.side === 'o' ? result > L : result < L) ? 'green' : 'red'; }
+    if (r.status === 'cancelada') status = 'cancelada'; // cancelada (risco depois do alerta): guarda o resultado, sem lucro
     const profit = status === 'green' ? Math.round((O - 1) * 100) / 100 : status === 'red' ? -1 : 0;
     await sb(`strategy_picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify({ status, result, profit, settled_at: new Date().toISOString() }) }).catch(() => null);
     n++;

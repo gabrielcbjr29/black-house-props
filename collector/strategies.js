@@ -25,8 +25,11 @@ const rot = r => (r.mn ?? 0) >= 24 && r.st !== 'questionable';
 // só entra com linha e odd da 99play (a casa onde o usuário aposta; o resultado vale nessa odd)
 const c99 = r => !!(r.c9 && r.d) && !OFF_MK.has(r.m) && MK_EST.includes(r.m);
 
+// 26/11 (revisão dos números, 13–25/11): tentativas de 3, de 3 convertidos e arremessos convertidos deram prejuízo
+// (−11u, −11u e −8u) e a auditoria das 25 mil linhas confirma (over e under negativos). Ficam arquivadas (off).
+const M_OFF = new Set(['3PA', '3PM', 'FGM']);
 export const STRATEGIES = MKT.map(([mk, name, lb]) => ({
-  id: 'm-' + mk.toLowerCase(), name, markets: [mk], max: 5,
+  id: 'm-' + mk.toLowerCase(), name, markets: [mk], max: 5, ...(M_OFF.has(mk) ? { off: true } : {}),
   descr: `As 5 melhores entradas do Modelo BH em ${lb}, com linha e odd da 99play: jogador de rotação (24+ min), chance do modelo entre 55% e 85%, sem trava de desfalque, ordem pela Nota BH.`,
   test: r => c99(r) && r.m === mk && rot(r) && r.p >= .55 && r.p <= .85 && !woLock(r),
 }));
@@ -48,7 +51,7 @@ STRATEGIES.push({
 // top 10 forte (pedido do usuário em 13/11): entrada que está no Top 10 tentativas ou no Top 10 reb+ast do bot, com
 // linha e odd da 99play, EV de 8% ou mais e nota A/A+. Pega as boas que surgem depois que o teto de 5 do mercado já
 // encheu. O ranking é o mesmo das listas do bot (topEligible, ordem pela Nota BH, um mercado por jogador).
-export const TOP_GROUPS = [['3PA', 'FTA', '2PA', '2PM', 'FGM'], ['RA']];
+export const TOP_GROUPS = [['3PA', 'FTA', '2PA', '2PM'], ['RA']];
 export function strategyCtx(rows) {
   const cov = c99Games(rows), top = new Set();
   for (const g of TOP_GROUPS) {
@@ -78,7 +81,8 @@ STRATEGIES.push({
 // últimos 10 (titular fora) → over; 4+ abaixo → under. Uma por jogador (PRA, senão PTS, PR, PA, REB, RA, AST), odd da
 // 99play entre 1,50 e 3,50, sem teto por dia. Não usa a chance do modelo (o sinal é a notícia de minutos).
 STRATEGIES.push({
-  id: 'minutos', name: 'Método Minutos', markets: MIN_MK, max: 40, one: true,
+  // 26/11: arquivado. 183 entradas, 42% de acerto, −45,9u (o over fez −41,6u): a casa já ajusta a linha pelo desfalque.
+  id: 'minutos', name: 'Método Minutos', markets: MIN_MK, max: 40, one: true, off: true,
   descr: 'Minutos previstos hoje 4+ acima da média dos últimos 10 jogos (titular do time fora) → mais de; 4+ abaixo (ele mesmo em dúvida ou voltando) → menos de. Uma por jogador em pts+reb+ast (ou pontos, pts+reb, pts+ast, rebotes, reb+ast, assistências), linha e odd da 99play entre 1,50 e 3,50, sem limite por dia.',
   test: r => !!(r.mi && r.c9 && r.d >= 1.5 && r.d <= 3.5 && MIN_MK.includes(r.m)),
   sort: (a, b) => (MIN_MK.indexOf(a.m) - MIN_MK.indexOf(b.m)) || (Math.abs(b.mi) - Math.abs(a.mi)),
@@ -93,11 +97,30 @@ STRATEGIES.push({
 const V2 = [['PTS', 'Pontos'], ['REB', 'Rebotes'], ['AST', 'Assistências'], ['3PM', 'Bolas de 3'], ['PRA', 'Pts+Reb+Ast'], ['PR', 'Pts+Reb'],
   ['PA', 'Pts+Ast'], ['RA', 'Reb+Ast'], ['FGM', 'Arr. convertidos'], ['2PM', 'De 2 convertidos'], ['2PA', 'Tentativas de 2'], ['3PA', 'Tentativas de 3'],
   ['FTM', 'LL convertidos'], ['FTA', 'LL tentados'], ['STL', 'Roubos'], ['BLK', 'Tocos'], ['SB', 'Roubos+Tocos'], ['TOV', 'Erros'], ['PF', 'Faltas']];
+// 26/11: os mercados do v2 que deram prejuízo no papel e na auditoria ficam arquivados (off); seguem os que deram
+// lucro ou empate (reb+ast, tentativas de 2, LL convertidos, LL tentados, roubos, tocos, roubos+tocos, faltas, pts+reb).
+const V2_OFF = new Set(['PTS', 'REB', 'AST', '3PM', 'PRA', 'PA', 'FGM', '2PM', '3PA', 'TOV']);
 for (const [mk, nm] of V2) STRATEGIES.push({
-  id: 'v2-' + mk.toLowerCase(), name: 'v2 · ' + nm, markets: [mk], max: 5, quiet: true,
+  id: 'v2-' + mk.toLowerCase(), name: 'v2 · ' + nm, markets: [mk], max: 5, quiet: true, ...(V2_OFF.has(mk) ? { off: true } : {}),
   descr: `Modelo v2 em ${nm.toLowerCase()}: as 5 entradas de maior valor do dia (EV de 3% ou mais na odd da 99play, sem piso de chance), odd entre 1,50 e 3,50, jogador de rotação (24+ min, sem dúvida). Só papel, sem alerta.`,
   test: r => !!(r.c9 && r.d >= 1.5 && r.d <= 3.5) && r.m === mk && !OFF_MK.has(r.m) && rot(r) && edgeOf(r) >= .03,
   sort: (a, b) => (edgeOf(b) ?? -1) - (edgeOf(a) ?? -1),
+});
+
+// Núcleo under (26/11, revisão dos números): o único sinal que apareceu nos três cortes (papel, listas do app e a
+// auditoria de 25 mil linhas) foi o under nos mercados de contagem baixa. A maioria dos jogos fica abaixo da média e
+// poucos explodem; a casa põe a linha perto da média e o under passa mais. Auditoria 13–25/11 com esta regra: 90
+// entradas, 75,6% de acerto, ROI +18,6% (sem teto: 258, +8,8%, positivo nas duas metades do período).
+// Regra: menos de em LL tentados, faltas, roubos+tocos e tocos, linha 1,5 a 2,5, odd da 99play, chance do modelo
+// entre 55% e 70%, EV > 0, jogador de rotação (24+ min, sem dúvida), sem colega importante fora hoje (entrada com
+// desfalque no papel: −15% de ROI). Uma por jogador, ordem pela chance, até 8 por dia. Alerta sem o corte de EV.
+export const NUCLEO_MK = ['FTA', 'PF', 'SB', 'BLK'];
+STRATEGIES.push({
+  id: 'nucleo-under', name: 'Núcleo under', markets: NUCLEO_MK, max: 8, one: true,
+  descr: 'Menos de em LL tentados, faltas, roubos+tocos e tocos, linha de 1,5 a 2,5, com linha e odd da 99play: chance do modelo entre 55% e 70%, EV acima de zero, jogador de rotação (24+ min, sem dúvida), sem colega importante fora hoje. Uma por jogador, ordem pela chance, até 8 por dia.',
+  test: r => !!(r.c9 && r.d) && r.s === 'u' && NUCLEO_MK.includes(r.m) && r.l >= 1.5 && r.l <= 2.5 && r.p >= .55 && r.p <= .70
+    && (edgeOf(r) ?? -1) > 0 && rot(r) && !r.wo?.x && !woLock(r),
+  sort: (a, b) => (b.p - a.p) || ((edgeOf(b) ?? -1) - (edgeOf(a) ?? -1)),
 });
 
 // 17/11: o usuário parou de acompanhar Under de reserva, Oportunidade forte e Top 10 forte (off: true). A regra fica

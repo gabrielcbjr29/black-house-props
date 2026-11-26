@@ -54,7 +54,11 @@ test('radar: trilha Kalshi só perto do jogo, com chance e EV da Kalshi', async 
   assert.deepEqual(K.filter(c => c.ok).map(c => c.pid), ['1']);
   assert.equal(K.find(c => c.pid === '1').p, .56);
   const B = chooseAll(S, []);
-  assert.deepEqual(B.map(b => b.tr + b.pid), ['bh2', 'bh3', 'k1']);
+  assert.deepEqual(B.map(b => b.tr + b.pid), ['k1'], '26/11: só a trilha Kalshi compra');
+  const { CFG } = await import('../scripts/radar.mjs');
+  const B2 = chooseAll(S, [], { ...CFG, trilhas: { bh: true, k: true } });
+  assert.deepEqual(B2.map(b => b.tr + b.pid), ['bh2', 'bh3', 'k1']);
+  assert.equal(chooseAll({ ...S, cands: S.cands.map(c => ({ ...c, casa: 'Finta' })) }, [], { ...CFG, trilhas: { bh: true, k: true } }).length, 0, 'Finta não compra');
   assert.ok(B.find(b => b.tr === 'k').id.startsWith('k|'));
 });
 
