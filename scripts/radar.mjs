@@ -153,11 +153,18 @@ export function updateClose(carteira, S, now = Date.now()) {
 /* liquida pelo boxscore: green/red/devolvida; lucro com a stake de Kelly e com 1u fixa */
 export function settle(carteira, results, { keepDays = 3 } = {}) {
   let n = 0; const upTo = results?.upTo ? Date.parse(results.upTo) : 0;
+  const tarde = x => upTo && (upTo - Date.parse(x.date)) / 864e5 > keepDays;
   for (const x of carteira) {
+    // 26/11: devolvida como "não jogou" antes do jogo dele sair no boxscore -> reabre e liquida de novo
+    if (x.status === 'devolvida' && x.why === 'não jogou' && results?.stats?.[x.date]?.[x.pid]?.[0] > 0) x.status = 'aberta';
     if (x.status !== 'aberta') continue;
     const S = results?.stats?.[x.date];
-    if (!S) { if (upTo && (upTo - Date.parse(x.date)) / 864e5 > keepDays) { x.status = 'devolvida'; x.why = 'sem resultado'; x.lucro = 0; x.lucro1 = 0; n++; } continue; }
+    if (!S) { if (tarde(x)) { x.status = 'devolvida'; x.why = 'sem resultado'; x.lucro = 0; x.lucro1 = 0; n++; } continue; }
     const a = S[x.pid];
+    // só é "não jogou" quando o jogo do time dele já está nos resultados (o último jogo da noite chega depois)
+    const G = results?.games?.[x.date];
+    const saiu = !Array.isArray(G) || !x.team || G.some(g => g[1] === x.team || g[2] === x.team);
+    if (!a && !saiu) { if (tarde(x)) { x.status = 'devolvida'; x.why = 'sem resultado'; x.lucro = 0; x.lucro1 = 0; n++; } continue; }
     if (!a || !(a[0] > 0)) { Object.assign(x, { status: 'devolvida', why: 'não jogou', lucro: 0, lucro1: 0 }); n++; continue; }
     const y = statOf(a, x.mk); if (y == null) continue;
     const win = x.side === 'o' ? y > x.line : y < x.line;

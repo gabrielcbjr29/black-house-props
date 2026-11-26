@@ -33,6 +33,13 @@ test('radar: fechamento, liquidação e CLV', () => {
   const S = stats(C); assert.equal(S.green, 1); assert.equal(S.roi, 1); assert.equal(S.bate, 1);
   const D = choose({ date: '2026-11-21', at: 'x', cands: [cand()] }, []);
   settle(D, { stats: { '2026-11-21': { 1: [0, 0] } } }); assert.equal(D[0].status, 'devolvida');
+  // jogo dele ainda não saiu no boxscore: espera; quando sai, liquida (e reabre devolvida errada)
+  const E = choose({ date: '2026-11-21', at: 'x', cands: [cand({ team: 'TOR' })] }, []);
+  settle(E, { stats: { '2026-11-21': { 9: [30, 10] } }, games: { '2026-11-21': [['e1', 'BOS', 'NYK']] } });
+  assert.equal(E[0].status, 'aberta');
+  E[0].status = 'devolvida'; E[0].why = 'não jogou';
+  settle(E, { stats: { '2026-11-21': { 1: [30, 24] } }, games: { '2026-11-21': [['e2', 'TOR', 'MIA']] } });
+  assert.equal(E[0].status, 'green');
 });
 
 test('radar: trilha Kalshi só perto do jogo, com chance e EV da Kalshi', async () => {
