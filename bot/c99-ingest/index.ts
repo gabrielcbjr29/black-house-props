@@ -46,7 +46,8 @@ Deno.serve(async (req: Request) => {
         if (!tok || url.searchParams.get('token') !== tok) return json({ ok: false, erro: 'token' }, 403);
         const d = etDate(), y = etDate(-1);
         const ks: any[] = await sb('canais?ativo=eq.true&select=id,title') ?? [];
-        const rows: any[] = await sb(`channel_posts?date=in.(${d},${y})&share_code=is.null&status=eq.postada&legs=not.is.null&select=id,canal_id,date,kind,band,odd,stake,casa,legs,created_at&order=id.desc&limit=40`) ?? [];
+        // fora o gabarito (band 'gab'): são os posts do próprio dono no canal dele, onde o bot nunca edita nada
+        const rows: any[] = await sb(`channel_posts?date=in.(${d},${y})&share_code=is.null&status=eq.postada&legs=not.is.null&or=(band.is.null,band.neq.gab)&select=id,canal_id,date,kind,band,odd,stake,casa,legs,created_at&order=id.desc&limit=40`) ?? [];
         return json(rows.filter(p => (p.legs ?? []).length && (p.legs ?? []).every((l: any) => l.ev && l.mk && l.side && l.line != null)).map(p => ({
           id: p.id, canal: ks.find(k => k.id === p.canal_id)?.title ?? String(p.canal_id), date: p.date, kind: p.kind, odd: +p.odd, stake: +p.stake || 1, casa: p.casa,
           legs: p.legs.map((l: any) => ({ name: l.name, team: l.team, opp: l.opp, home: l.home, away: l.away, ev: l.ev, mk: l.mk, side: l.side, line: +l.line, odd: +l.odd, tip: l.tip })),
@@ -67,6 +68,10 @@ Deno.serve(async (req: Request) => {
     if (url.searchParams.get('bilhete')) {
       const id = url.searchParams.get('bilhete') ?? '', code = url.searchParams.get('code') ?? '';
       if (!/^\d+$/.test(id) || !/^[A-Za-z0-9]{6,20}$/.test(code)) return json({ ok: false, erro: 'post ou código inválido' }, 400);
+      const [post] = await sb(`channel_posts?id=eq.${id}&select=id,band,share_code,status`) ?? [];
+      if (!post) return json({ ok: false, erro: 'post não encontrado' }, 404);
+      if (post.band === 'gab') return json({ ok: false, erro: 'post do gabarito: o bot não mexe no canal do dono' }, 400);
+      if (post.share_code) return json({ ok: false, erro: 'o post já tem bilhete pronto' }, 409);
       const secret = await cfgVal('WEBHOOK_SECRET'); if (!secret) return json({ ok: false, erro: 'sem segredo' }, 500);
       const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/canal?relink=${encodeURIComponent(secret)}&id=${id}&code=${encodeURIComponent(code)}`);
       return json(await r.json().catch(() => ({ ok: false, erro: 'canal ' + r.status })), r.ok ? 200 : 502);
