@@ -55,6 +55,7 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
   - Migração no Supabase só com aprovação do usuário.
   - Apagar dados e mensagens só com cuidado; mensagem de teste é apagada logo depois.
 - **Métodos dos canais:** ficam como estão até a revisão de 24/11.
+  - Na revisão: backtest de novo, over × under, Alavanca (chance da Kalshi × acerto, CLV), Criar Aposta (chance prevista × acerto, odd real × estimada).
 - **Revisão de 26/11 (aplicada com aprovação do dono, "pode aplicar tudo que melhorar"):** docs `claude/revisao-26-11-metodos-bot.md` e `claude/revisao-26-11-numeros.md` no Projeto.
   - Peso do modelo no bot segue 0,4 (testado 0,1/0,2: só reduz entradas e piora o ROI). App: padrão de 55% para 40%, igual ao bot.
   - Estratégias arquivadas (`off`): Método Minutos, m-3pa, m-3pm, m-fgm e o v2 de pts, reb, ast, 3pm, pra, pa, fgm, 2pm, 3pa, tov.
@@ -64,7 +65,6 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
   - Radar: compra só pela trilha Kalshi e só na 99play (trilha BH e Finta seguem na varredura, sem compra).
   - GREENDOG: `lado: 'u'`, mercados FTA e RA (o over e o FTM perderam).
   - Liquidação: jogador fora do boxscore espera até 2 dias (em 23/11 os IDs da ESPN anularam o dia).
-  - Na revisão: backtest de novo, over × under, Alavanca (chance da Kalshi × acerto, CLV), Criar Aposta (chance prevista × acerto, odd real × estimada).
 
 ## Notas privadas
 - As análises e decisões ficam no Projeto "Black House | PROPS NBA" do claude.ai.
