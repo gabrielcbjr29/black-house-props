@@ -11,6 +11,8 @@ async function sb(path: string, init: RequestInit = {}) {
 }
 // 20/11: a leitura pedida no bot (/ler) dispara o pipeline na hora, com o token do GitHub guardado em
 // bot_config.GH_DISPATCH (só permissão de Actions neste repositório). No máximo 1 disparo a cada 8 min.
+// data da rodada da NBA (horário de Nova York), como etDate() na função canal; off em dias
+const etDate = (off = 0) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(Date.now() + off * 864e5));
 async function cfgVal(k: string) { return (await sb(`bot_config?key=eq.${k}&select=value`).catch(() => null))?.[0]?.value ?? null; }
 export async function ghDispatch(minGapMin = 8): Promise<string> {
   const tok = await cfgVal('GH_DISPATCH'); if (!tok) return 'sem token';
@@ -29,13 +31,26 @@ Deno.serve(async (req: Request) => {
       // instalação e atualização automática do leitor (19/11): .../c99-ingest/leitor99.user.js?token=<C99_TOKEN>
       // devolve o script do repositório com o token e o próprio endereço (para o Tampermonkey buscar as versões novas)
       // o mesmo para o script da Finta (.../c99-ingest/finta.user.js?token=...)
-      const script = /\/(leitor99|finta)\.user\.js$/.exec(url.pathname)?.[1];
+      const script = /\/(leitor99|finta|bilhete365)\.user\.js$/.exec(url.pathname)?.[1];
       if (script) {
         const tok = (await sb('bot_config?key=eq.C99_TOKEN&select=value'))?.[0]?.value;
         if (!tok || url.searchParams.get('token') !== tok) return new Response('token inválido', { status: 403 });
         const src = await fetch(`https://raw.githubusercontent.com/gabrielcbjr29/black-house-props/main/tools/navegador/${script}.user.js?t=` + Date.now()).then(r => r.text());
         const self = `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest/${script}.user.js?token=${encodeURIComponent(tok)}`;
         return new Response(src.replaceAll('__C99_TOKEN__', tok).replaceAll('__C99_SELF__', self), { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
+      }
+      // bilhete automático (24/11, tools/navegador/bilhete365.user.js): posts dos canais de hoje e de ontem ainda sem
+      // bilhete pronto, com o que o script precisa para montar o cupom na casa (o usuário confirma a aposta)
+      if (url.searchParams.get('bilhetes')) {
+        const tok = await cfgVal('C99_TOKEN');
+        if (!tok || url.searchParams.get('token') !== tok) return json({ ok: false, erro: 'token' }, 403);
+        const d = etDate(), y = etDate(-1);
+        const ks: any[] = await sb('canais?ativo=eq.true&select=id,title') ?? [];
+        const rows: any[] = await sb(`channel_posts?date=in.(${d},${y})&share_code=is.null&status=eq.postada&legs=not.is.null&select=id,canal_id,date,kind,band,odd,stake,casa,legs,created_at&order=id.desc&limit=40`) ?? [];
+        return json(rows.filter(p => (p.legs ?? []).length && (p.legs ?? []).every((l: any) => l.ev && l.mk && l.side && l.line != null)).map(p => ({
+          id: p.id, canal: ks.find(k => k.id === p.canal_id)?.title ?? String(p.canal_id), date: p.date, kind: p.kind, odd: +p.odd, stake: +p.stake || 1, casa: p.casa,
+          legs: p.legs.map((l: any) => ({ name: l.name, team: l.team, opp: l.opp, home: l.home, away: l.away, ev: l.ev, mk: l.mk, side: l.side, line: +l.line, odd: +l.odd, tip: l.tip })),
+        })));
       }
       // "Ler 99play agora" (bot /combo): o leitor confere a cada minuto se há pedido mais novo que a última leitura
       if (url.searchParams.get('pedido')) return json({ pedido: (await sb('bot_config?key=eq.C99_PEDIDO&select=value'))?.[0]?.value ?? null });
@@ -47,6 +62,15 @@ Deno.serve(async (req: Request) => {
     }
     const tok = (await sb('bot_config?key=eq.C99_TOKEN&select=value'))?.[0]?.value;
     if (!tok || url.searchParams.get('token') !== tok) return json({ ok: false, erro: 'token' }, 403);
+    // bilhete automático: o script devolve o share code do bilhete que o usuário apostou; a função canal troca o
+    // link do post pelo bilhete pronto (com o ref do dono), como quando o dono manda o link no privado do bot
+    if (url.searchParams.get('bilhete')) {
+      const id = url.searchParams.get('bilhete') ?? '', code = url.searchParams.get('code') ?? '';
+      if (!/^\d+$/.test(id) || !/^[A-Za-z0-9]{6,20}$/.test(code)) return json({ ok: false, erro: 'post ou código inválido' }, 400);
+      const secret = await cfgVal('WEBHOOK_SECRET'); if (!secret) return json({ ok: false, erro: 'sem segredo' }, 500);
+      const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/canal?relink=${encodeURIComponent(secret)}&id=${id}&code=${encodeURIComponent(code)}`);
+      return json(await r.json().catch(() => ({ ok: false, erro: 'canal ' + r.status })), r.ok ? 200 : 502);
+    }
     const raw = await req.text();
     // captura do Criar Aposta (99play) / Criador de Aposta (Finta), lida passivamente pelos scripts do navegador
     if (url.searchParams.get('captura')) {

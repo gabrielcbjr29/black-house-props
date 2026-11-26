@@ -46,7 +46,7 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
 - **99play:**
   - Não criar relay/servidor para contornar o bloqueio de robô da 99play/Altenar.
   - Não tirar print da 99play pela nuvem.
-  - Não automatizar apostas nem gerar bilhete na conta do usuário.
+  - Bilhete automático (mudado em 24/11, pedido do dono): a ferramenta pode montar o cupom e gerar o share code/link do bilhete, rodando no navegador do usuário. Nunca clicar em "Apostar" nem confirmar aposta: confirmar fica sempre com o usuário. Começa pela BR365.
 - **Imagens:**
   - Sem foto de jogador ou de pessoa real.
   - Sem logo de time da NBA (usar os selos com sigla).
@@ -65,6 +65,20 @@ Sistema de props da NBA para tipster brasileiro. Responder sempre em **portuguê
   - Radar: compra só pela trilha Kalshi e só na 99play (trilha BH e Finta seguem na varredura, sem compra).
   - GREENDOG: `lado: 'u'`, mercados FTA e RA (o over e o FTM perderam).
   - Liquidação: jogador fora do boxscore espera até 2 dias (em 23/11 os IDs da ESPN anularam o dia).
+
+## Cofre do Obsidian e ciclo de aprendizado
+- O cofre "Black House" fica **fora do repositório**, em `Documentos\Black House`. O acesso é liberado em `.claude/settings.local.json`, que não é commitado.
+  - Pastas: `Diário/` (uma nota por dia, `AAAA-MM-DD.md`), `Jogadores/`, `Times/`, `Métodos/`, `Revisões/`, `Caixa de entrada/`.
+- **Antes de analisar jogador, jogo ou método:** ler `Regras aprendidas.md` e a ficha do jogador/time no cofre, se houver.
+- **Ciclo** (tarefas agendadas no app do Claude):
+  - toda manhã: conferir o diário de ontem com `public/data/results.json` e o veredito, preencher a coluna Resultado e levar as observações para os métodos e fichas;
+  - toda segunda: escrever `Revisões/Revisão DD-MM.md` com padrões e propostas.
+- **O Claude propõe, o usuário decide:**
+  - Nada muda de status em `Regras aprendidas.md`, nem em regra ou código de método, sem o "sim" do usuário.
+  - Amostra mínima de ~30 entradas para confirmar uma regra.
+  - O CLV pesa mais que green/red.
+- Veredito pelo fechamento, público e agregado: `https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/estrategias?veredito=1`.
+- Nada do cofre vai para o repositório, porque ele é público. Também não se escreve chave, senha ou token no cofre.
 
 ## Notas privadas
 - As análises e decisões ficam no Projeto "Black House | PROPS NBA" do claude.ai.
