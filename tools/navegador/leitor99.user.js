@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Black House · leitor 99play
 // @namespace    blackhouse
-// @version      1.4
-// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Desde a 1.4 também lê, de 30 em 30 min, as linhas de futebol (chutes, chutes ao gol e defesas; time e jogo) e manda para o Black House Futebol. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
+// @version      1.5
+// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Desde a 1.4 também lê, de 30 em 30 min, as linhas de futebol (chutes, chutes ao gol, defesas, 1º tempo e faltas; time e jogo) e manda para o Black House Futebol. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
 // @match        https://99play.io/*
 // @match        https://99play.im/*
 // @match        https://*.99play.im/*
@@ -126,9 +126,9 @@
   const FUT = 'https://mccxlgtiulpknubdiyrz.supabase.co/functions/v1/linhas?token=';
   const FKEY = 'bh_leitor99_fut_ultimo', FLOCK = 'bh_leitor99_fut_lock';
   const CHAMPS = { 2936: 'Premier League', 2941: 'La Liga', 2942: 'Serie A', 2950: 'Bundesliga', 2943: 'Ligue 1', 11318: 'Brasileirão', 16808: 'Champions League', 16809: 'Europa League', 31608: 'Conference League' };
-  const FPLAYER = { 15735: 'SH', 15734: 'SOT', 17938: 'SV' };
-  const FTEAM = { 15728: ['TSH', 0], 15729: ['TSH', 1], 15726: ['TSOT', 0], 15727: ['TSOT', 1] };
-  const FMATCH = { 15738: 'JSH', 15737: 'JSOT' };
+  const FPLAYER = { 15735: 'SH', 15734: 'SOT', 17938: 'SV', 5025: 'SH1', 5026: 'SOT1', 31453: 'FC' };
+  const FTEAM = { 15728: ['TSH', 0], 15729: ['TSH', 1], 15726: ['TSOT', 0], 15727: ['TSOT', 1], 15732: ['TFC', 0], 15733: ['TFC', 1] };
+  const FMATCH = { 15738: 'JSH', 15737: 'JSOT', 15740: 'JFC' };
   const lineOf = o => +(String(o.name).match(/(\d+(?:[.,]\d+)?)/)?.[1] ?? '').replace(',', '.');
   let futTxt = '';
   async function lerFut() {
