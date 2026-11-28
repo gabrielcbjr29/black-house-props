@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Black House · leitor 99play
 // @namespace    blackhouse
-// @version      1.3
-// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
+// @version      1.4
+// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Desde a 1.4 também lê, de 30 em 30 min, as linhas de futebol (chutes, chutes ao gol e defesas; time e jogo) e manda para o Black House Futebol. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
 // @match        https://99play.io/*
 // @match        https://99play.im/*
 // @match        https://*.99play.im/*
@@ -79,7 +79,7 @@
   const show = (txt, ok = true) => {
     if (!document.body) return;
     if (!badge) { badge = document.createElement('div'); badge.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;font:12px/1.3 system-ui,sans-serif;background:#111;color:#9f9;padding:4px 8px;border-radius:6px;opacity:.85;pointer-events:none'; }
-    badge.textContent = 'BH ' + txt; badge.style.color = ok ? '#9f9' : '#f99'; if (!badge.isConnected) document.body.appendChild(badge);
+    badge.textContent = 'BH ' + txt + futTxt; badge.style.color = ok ? '#9f9' : '#f99'; if (!badge.isConnected) document.body.appendChild(badge);
   };
   async function ler(motivo = '') {
     const lock = +localStorage.getItem(LOCK) || 0;
@@ -119,6 +119,69 @@
       localStorage.setItem(KEY, String(Date.now() - 50 * 60e3)); // nova tentativa em ~10 min
     } finally { localStorage.removeItem(LOCK); }
   }
+
+  // ---------- futebol (1.4, 28/11): as mesmas chamadas, para o projeto Black House Futebol ----------
+  // Ligas do projeto de futebol (champIds da Altenar) e mercados: jogador (só MAIS), time e jogo (MAIS e MENOS).
+  // Vai para a função "linhas" do futebol com o mesmo token deste script (o futebol confere o token com a função da NBA).
+  const FUT = 'https://mccxlgtiulpknubdiyrz.supabase.co/functions/v1/linhas?token=';
+  const FKEY = 'bh_leitor99_fut_ultimo', FLOCK = 'bh_leitor99_fut_lock';
+  const CHAMPS = { 2936: 'Premier League', 2941: 'La Liga', 2942: 'Serie A', 2950: 'Bundesliga', 2943: 'Ligue 1', 11318: 'Brasileirão', 16808: 'Champions League', 16809: 'Europa League', 31608: 'Conference League' };
+  const FPLAYER = { 15735: 'SH', 15734: 'SOT', 17938: 'SV' };
+  const FTEAM = { 15728: ['TSH', 0], 15729: ['TSH', 1], 15726: ['TSOT', 0], 15727: ['TSOT', 1] };
+  const FMATCH = { 15738: 'JSH', 15737: 'JSOT' };
+  const lineOf = o => +(String(o.name).match(/(\d+(?:[.,]\d+)?)/)?.[1] ?? '').replace(',', '.');
+  let futTxt = '';
+  async function lerFut() {
+    if (Date.now() - (+localStorage.getItem(FLOCK) || 0) < 5 * 60e3 || Date.now() - (+localStorage.getItem(LOCK) || 0) < 5 * 60e3) return; // uma leitura de cada vez
+    localStorage.setItem(FLOCK, String(Date.now()));
+    try {
+      const ev = await get('GetEvents?' + qs({ eventCount: '0', sportId: '66', champIds: Object.keys(CHAMPS).join(',') }));
+      const now = Date.now(), comp = Object.fromEntries((ev.competitors || []).map(c => [c.id, c.name]));
+      const events = (ev.events || []).filter(e => CHAMPS[e.champId] && Date.parse(e.startDate) > now && Date.parse(e.startDate) < now + 36 * 3600e3);
+      const lines = [];
+      for (const e of events) {
+        try {
+          const d = await get('GetEventDetails?' + qs({ eventId: String(e.id) }));
+          const names = (d.competitors || []).map(c => c.name), [home, away] = names.length === 2 ? names : (e.competitorIds || []).map(i => comp[i]);
+          const base = { home, away, utc: e.startDate, league: CHAMPS[e.champId] };
+          const odds = Object.fromEntries((d.odds || []).map(o => [o.id, o]));
+          const pick = (m, t) => (m.desktopOddIds || []).flat().map(i => odds[i]).filter(o => o && o.typeId === t && !o.oddStatus && o.price > 1);
+          const team = Object.fromEntries((d.competitors || []).map(c => [c.id, c.name]));
+          for (const m of d.childMarkets || []) {
+            const mk = FPLAYER[m.typeId]; if (!mk || !m.childName) continue;
+            for (const o of pick(m, 12)) lines.push({ ...base, type: 'player', player: m.childName, team: team[m.competitorId], mk, line: lineOf(o), odd: o.price });
+          }
+          const seen = new Set();
+          for (const m of d.markets || []) {
+            if (seen.has(m.id)) continue; seen.add(m.id);
+            if (FTEAM[m.typeId]) {
+              const [mk, side] = FTEAM[m.typeId], tn = names.find(n => String(m.name).includes(n)) ?? (side ? away : home);
+              for (const o of pick(m, 12)) lines.push({ ...base, type: 'team', team: tn, mk, line: lineOf(o), odd: o.price });
+              for (const o of pick(m, 13)) lines.push({ ...base, type: 'team', team: tn, mk, line: lineOf(o), odd: o.price, side: 'u' });
+            } else if (FMATCH[m.typeId]) {
+              for (const o of pick(m, 12)) lines.push({ ...base, type: 'match', mk: FMATCH[m.typeId], line: lineOf(o), odd: o.price });
+              for (const o of pick(m, 13)) lines.push({ ...base, type: 'match', mk: FMATCH[m.typeId], line: lineOf(o), odd: o.price, side: 'u' });
+            }
+          }
+        } catch { /* um jogo com erro não para os outros */ }
+        await new Promise(r => setTimeout(r, 400));
+      }
+      const key = x => [x.home, x.away, x.type, x.player ?? x.team ?? '', x.mk, x.line, x.side ?? 'o'].join('|'), u = new Map();
+      for (const x of lines) if (x.line >= 0) u.set(key(x), x);
+      if (u.size) {
+        const r = await of(FUT + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ house: '99play', lines: [...u.values()] }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error('envio ' + r.status);
+        futTxt = ` · ⚽ ${hhmm(now)} ${j.linhas} linhas`;
+      } else futTxt = ` · ⚽ ${hhmm(now)} sem linhas`;
+      localStorage.setItem(FKEY, String(now));
+    } catch (err) {
+      futTxt = ` · ⚽ erro ${err.message}`;
+      localStorage.setItem(FKEY, String(Date.now() - 20 * 60e3)); // tenta de novo em ~10 min
+    } finally { localStorage.removeItem(FLOCK); if (badge?.isConnected) badge.textContent = badge.textContent.replace(/ · ⚽.*$/, '') + futTxt; }
+  }
+  const dueFut = () => Date.now() - (+localStorage.getItem(FKEY) || 0) > 30 * 60e3;
+
   // ritmo: a cada 15 min se algum jogo começa nas próximas 3h; senão de hora em hora (a partir dos :35)
   const last = () => +localStorage.getItem(KEY) || 0;
   const perto = () => { try { const n = Date.now(); return JSON.parse(localStorage.getItem(PROX) || '[]').some(t => t > n && t - n < 3 * 3600e3); } catch { return false; } };
@@ -129,7 +192,7 @@
   }
   const start = () => {
     setTimeout(() => { if (Date.now() - last() > 50 * 60e3) ler(); else show(`última leitura ${hhmm(last())} ✓`); }, 8000);
-    setInterval(() => { if (due()) ler(perto() ? 'perto do jogo' : ''); else pedido(); }, 60e3);
+    setInterval(() => { if (due()) ler(perto() ? 'perto do jogo' : ''); else if (dueFut()) lerFut(); else pedido(); }, 60e3);
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
