@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Black House · leitor 99play
 // @namespace    blackhouse
-// @version      1.5
-// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Desde a 1.4 também lê, de 30 em 30 min, as linhas de futebol (chutes, chutes ao gol, defesas, 1º tempo e faltas; time e jogo) e manda para o Black House Futebol. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
+// @version      1.6
+// @description  Enquanto uma aba da 99play estiver aberta, lê as linhas de jogador da NBA (com a escada de marcos e o duplo/triplo-duplo) e manda para o Black House: de hora em hora, a cada 15 min nas 3h antes dos jogos e na hora em que você pedir no bot. Desde a 1.6, numa aba da finta.win, também lê as linhas de futebol da Finta (mesmo leitor do finta.user.js 1.1). Desde a 1.4 também lê, de 30 em 30 min, as linhas de futebol (chutes, chutes ao gol, defesas, 1º tempo e faltas; time e jogo) e manda para o Black House Futebol. Também lê, sem clicar em nada, a odd total do Criar Aposta que a 99play mostra quando você monta o bilhete.
 // @match        https://99play.io/*
 // @match        https://99play.im/*
 // @match        https://*.99play.im/*
+// @match        https://99play.xin/*
 // @match        https://*.biahosted.com/*
+// @match        https://finta.win/*
+// @match        https://*.finta.win/*
 // @updateURL    __C99_SELF__
 // @downloadURL  __C99_SELF__
 // @grant        none
@@ -23,7 +26,72 @@
   const TYPES = new Set([768, 772, 770, 774, 773, 771, 25050, 2312, 2313, 2314, 2315, 2317, 2318, 2322, 30070, 30071, 30072, 30073, 30078]);
   const qs = x => new URLSearchParams({ culture: 'pt-BR', timezoneOffset: '180', integration: '24games1', deviceType: '1', numFormat: 'en-GB', countryCode: 'BR', ...x });
   const hhmm = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const isTop = /(^|\.)99play\.(io|im)$/.test(location.hostname) && window.top === window;
+
+  // ---------- 1.6: na aba da Finta, só o leitor de futebol da Finta (o resto do script é da 99play) ----------
+  if (/(^|\.)finta\.win$/.test(location.hostname)) {
+    if (window.top !== window) return;
+    const of = window.fetch;
+    // ---------- futebol (1.1, 28/11): linhas para o Black House Futebol ----------
+    // Lê o mesmo JSON público que a própria página da Finta usa (lobby e jogo), um jogo por segundo, de 30 em 30 min.
+    // Manda para a função "linhas" do futebol com o token deste script (o futebol confere o token com a função da NBA).
+    const FUT = 'https://mccxlgtiulpknubdiyrz.supabase.co/functions/v1/linhas?token=';
+    const FKEY = 'bh_fut_finta_ultimo', FLOCK = 'bh_fut_finta_lock';
+    const LIGAS = { 'England. Premier League': 'Premier League', 'Spain. Primera': 'La Liga', 'Italy. Serie A': 'Serie A', 'Germany. Bundesliga': 'Bundesliga', 'France. Ligue 1': 'Ligue 1', 'Brazil. Serie A': 'Brasileirão' };
+    const UEFA = /^(UEFA|Europe)\.\s*(Champions League|Europa League|Conference League)$/i;
+    const ligaDe = l => LIGAS[l] ?? (UEFA.test(l) ? l.replace(/^.*?\.\s*/, '').replace(/^Conference League$/i, 'Conference League') : null);
+    const PL = { 'Stats: Shots - Player': 'SH', 'Stats: Shots on goal - Player': 'SOT', 'Stats: Fouls - Player': 'FC', 'Stats: Tackles - Player': 'TK', 'Stats: Saves - Player': 'SV' };
+    const TM = { 'Stats: Shots (all) - Home': ['TSH', 0], 'Stats: Shots (all) - Away': ['TSH', 1], 'Stats: Shots on goal - Home': ['TSOT', 0], 'Stats: Shots on goal - Away': ['TSOT', 1], 'Stats: Fouls - Home': ['TFC', 0], 'Stats: Fouls - Away': ['TFC', 1] };
+    const JG = { 'Stats: Shots (all)': 'JSH', 'Stats: Shots on goal': 'JSOT', 'Stats: Fouls': 'JFC' };
+    let badge = null;
+    const show = (txt, ok = true) => {
+      if (!document.body) return;
+      if (!badge) { badge = document.createElement('div'); badge.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483647;font:12px/1.3 system-ui,sans-serif;background:#111;color:#9f9;padding:4px 8px;border-radius:6px;opacity:.85;pointer-events:none'; }
+      badge.textContent = 'BH ⚽ finta · ' + txt; badge.style.color = ok ? '#9f9' : '#f99'; if (!badge.isConnected) document.body.appendChild(badge);
+    };
+    const getJ = async p => { const r = await of(p); if (!r.ok) throw new Error(p.split('/').slice(-2).join('/') + ' ' + r.status); return r.json(); };
+    async function lerFut() {
+      if (Date.now() - (+localStorage.getItem(FLOCK) || 0) < 10 * 60e3) return; // outra aba já está lendo
+      localStorage.setItem(FLOCK, String(Date.now()));
+      show('lendo as linhas de futebol…');
+      try {
+        const lob = await getJ('/rs/finta/public/lobby'), now = Date.now();
+        const games = (Array.isArray(lob.games) ? lob.games : Object.values(lob.games || {}))
+          .filter(x => x.sport === 'Football' && ligaDe(x.league) && Date.parse(x.starts_at) > now && Date.parse(x.starts_at) < now + 36 * 3600e3);
+        const lines = []; let erros = 0;
+        for (const g of games) {
+          try {
+            const m = await getJ('/rs/finta/public/match/' + g.id);
+            const base = { home: m.home, away: m.away, utc: m.starts_at, league: ligaDe(g.league) };
+            for (const k of m.markets || []) {
+              const sel = (k.selections || []).filter(x => !x.locked && x.odd > 1 && x.line != null);
+              if (PL[k.market]) for (const x of sel) { const mm = /^(.*) over$/.exec(x.selection); if (mm) lines.push({ ...base, type: 'player', player: mm[1], mk: PL[k.market], line: +x.line, odd: x.odd }); }
+              else if (TM[k.market]) { const [mk, side] = TM[k.market]; for (const x of sel) if (/^(over|under)$/.test(x.selection)) lines.push({ ...base, type: 'team', team: side ? m.away : m.home, mk, line: +x.line, odd: x.odd, ...(x.selection === 'under' ? { side: 'u' } : {}) }); }
+              else if (JG[k.market]) for (const x of sel) if (/^(over|under)$/.test(x.selection)) lines.push({ ...base, type: 'match', mk: JG[k.market], line: +x.line, odd: x.odd, ...(x.selection === 'under' ? { side: 'u' } : {}) });
+            }
+          } catch { erros++; }
+          await new Promise(r => setTimeout(r, 1000)); // sem pressa: um jogo por segundo
+        }
+        if (!lines.length) { localStorage.setItem(FKEY, String(now)); show(`${hhmm(now)} · ${games.length} jogos, nenhuma linha aberta`); return; }
+        const r = await of(FUT + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ house: 'finta', lines }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error('envio ' + r.status);
+        localStorage.setItem(FKEY, String(now));
+        show(`${hhmm(now)} · ${games.length} jogos, ${j.linhas} linhas ✓` + (erros ? ` (${erros} com erro)` : ''));
+      } catch (err) {
+        show(`${hhmm(Date.now())} · erro: ${err.message} (tento de novo em 10 min)`, false);
+        localStorage.setItem(FKEY, String(Date.now() - 20 * 60e3));
+      } finally { localStorage.removeItem(FLOCK); }
+    }
+    const fLast = () => +localStorage.getItem(FKEY) || 0;
+    const fStart = () => {
+      setTimeout(() => { if (Date.now() - fLast() > 25 * 60e3) lerFut(); else show(`última leitura ${hhmm(fLast())} ✓`); }, 15000);
+      setInterval(() => { if (Date.now() - fLast() > 30 * 60e3) lerFut(); }, 60e3);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fStart); else fStart();
+
+    return;
+  }
+  const isTop = /(^|\.)99play\.(io|im|xin)$/.test(location.hostname) && window.top === window;
 
   // ---------- captura passiva do Criar Aposta (1.3): lê a resposta que a própria página recebe ----------
   // Só respostas com cara de preço de bilhete/criar aposta. Tira qualquer campo pessoal antes de mandar.
