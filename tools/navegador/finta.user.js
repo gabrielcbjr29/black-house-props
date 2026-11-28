@@ -1,19 +1,30 @@
 // ==UserScript==
 // @name         Black House · Finta (Criador de Aposta)
 // @namespace    blackhouse
-// @version      1.1
+// @version      1.2
 // @description  Na Finta, lê sem clicar em nada a odd total que o Criador de Aposta mostra quando você monta o bilhete e manda para o Black House (para comparar com a 99play e calibrar o /combo). Desde a 1.1 também lê, de 30 em 30 min, as linhas de futebol (chutes, no gol, faltas, desarmes e defesas do jogador; time e jogo) para o Black House Futebol.
 // @match        https://finta.win/*
 // @match        https://*.finta.win/*
 // @updateURL    __C99_SELF__
 // @downloadURL  __C99_SELF__
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @connect      brtexfomhlvltdsuezsi.supabase.co
+// @connect      mccxlgtiulpknubdiyrz.supabase.co
 // @run-at       document-start
 // ==/UserScript==
+// 1.2 (28/11): a página da Finta proíbe (CSP connect-src) que a própria página mande dados para outros sites, então os envios
+// para o Black House saem pelo GM_xmlhttpRequest do Tampermonkey (o canal próprio dos scripts, com @connect só para os nossos
+// dois endereços). A leitura da Finta continua pelo fetch da própria página, no mesmo site.
 // As linhas da Finta já são lidas pela coleta (JSON público). Este script serve só para o preço do combo, que a Finta
 // calcula na hora em que você junta as seleções. Ele nunca clica, monta bilhete ou aposta: só lê o que a página recebe.
 (() => {
   const TOKEN = '__C99_TOKEN__';
+  const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+  const post = (url, body) => new Promise((resolve, reject) => GM_xmlhttpRequest({
+    method: 'POST', url, headers: { 'content-type': 'application/json' }, data: body, timeout: 90000,
+    onload: r => resolve({ ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => { try { return JSON.parse(r.responseText); } catch { return {}; } } }),
+    onerror: () => reject(new Error('envio falhou')), ontimeout: () => reject(new Error('envio demorou')) }));
   const API = 'https://brtexfomhlvltdsuezsi.supabase.co/functions/v1/c99-ingest';
   // rotas com cara de preço do bilhete / criador de aposta (o resto da página é ignorado)
   const RX = /\/bb\b|bet\s*builder|betbuilder|builder|criador|quote|cotac|price|pricing|slip|cupom|bilhete|combo|calcul/i;
@@ -33,18 +44,18 @@
       if (sig === lastCap && Date.now() - lastCapAt < 15000) return; lastCap = sig; lastCapAt = Date.now();
       let req = null; try { req = typeof reqBody === 'string' ? JSON.parse(reqBody) : null; } catch { req = typeof reqBody === 'string' ? reqBody.slice(0, 2000) : null; }
       const body = JSON.stringify({ casa: 'finta', fonte: url.split('?')[0].slice(0, 200), bruto: clean({ req, res }) }).slice(0, 300000);
-      of(API + '?captura=1&token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).catch(() => {});
+      post(API + '?captura=1&token=' + TOKEN, body).catch(() => {});
     } catch { /* não é JSON: ignora */ }
   };
-  const of = window.fetch;
-  window.fetch = async function (input, init) {
+  const of = W.fetch.bind(W);
+  W.fetch = async function (input, init) {
     const r = await of.apply(this, arguments);
     try { const url = typeof input === 'string' ? input : input?.url || ''; if (RX.test(url) && !SKIP.test(url)) r.clone().text().then(t => capture(url, init?.body, t)).catch(() => {}); } catch {}
     return r;
   };
-  const xo = XMLHttpRequest.prototype.open, xs = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (m, url) { this.__bhUrl = String(url || ''); return xo.apply(this, arguments); };
-  XMLHttpRequest.prototype.send = function (b) {
+  const XP = W.XMLHttpRequest.prototype, xo = XP.open, xs = XP.send;
+  XP.open = function (m, url) { this.__bhUrl = String(url || ''); return xo.apply(this, arguments); };
+  XP.send = function (b) {
     if (RX.test(this.__bhUrl || '') && !SKIP.test(this.__bhUrl || '')) this.addEventListener('load', () => { try { capture(this.__bhUrl, b, typeof this.response === 'string' ? this.response : JSON.stringify(this.response)); } catch {} });
     return xs.apply(this, arguments);
   };
@@ -58,7 +69,7 @@
       const odd = parseFloat(m[1].replace(',', '.')); if (!(odd > 1)) return;
       const bloco = txt.slice(Math.max(0, txt.search(/criador de aposta/i)), m.index + m[0].length).slice(0, 1500);
       const sig = bloco.replace(/\s+/g, ' '); if (sig === lastTela) return; lastTela = sig;
-      of(API + '?captura=1&token=' + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ casa: 'finta', fonte: 'tela', odd, bruto: { tela: sig } }) }).catch(() => {});
+      post(API + '?captura=1&token=' + TOKEN, JSON.stringify({ casa: 'finta', fonte: 'tela', odd, bruto: { tela: sig } })).catch(() => {});
     } catch { /* tela sem o painel */ }
   };
   const start = () => { new MutationObserver(() => { clearTimeout(window.__bhT); window.__bhT = setTimeout(tela, 800); }).observe(document.body, { childList: true, subtree: true, characterData: true }); };
@@ -67,7 +78,7 @@
   // ---------- futebol (1.1, 28/11): linhas para o Black House Futebol ----------
   // Lê o mesmo JSON público que a própria página da Finta usa (lobby e jogo), um jogo por segundo, de 30 em 30 min.
   // Manda para a função "linhas" do futebol com o token deste script (o futebol confere o token com a função da NBA).
-  if (window.top !== window) return;
+  if (W.top !== W) return;
   const FUT = 'https://mccxlgtiulpknubdiyrz.supabase.co/functions/v1/linhas?token=';
   const FKEY = 'bh_fut_finta_ultimo', FLOCK = 'bh_fut_finta_lock';
   const LIGAS = { 'England. Premier League': 'Premier League', 'Spain. Primera': 'La Liga', 'Italy. Serie A': 'Serie A', 'Germany. Bundesliga': 'Bundesliga', 'France. Ligue 1': 'Ligue 1', 'Brazil. Serie A': 'Brasileirão' };
@@ -107,7 +118,7 @@
         await new Promise(r => setTimeout(r, 1000)); // sem pressa: um jogo por segundo
       }
       if (!lines.length) { localStorage.setItem(FKEY, String(now)); show(`${hhmm(now)} · ${games.length} jogos, nenhuma linha aberta`); return; }
-      const r = await of(FUT + TOKEN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ house: 'finta', lines }) });
+      const r = await post(FUT + TOKEN, JSON.stringify({ house: 'finta', lines }));
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error('envio ' + r.status);
       localStorage.setItem(FKEY, String(now));
