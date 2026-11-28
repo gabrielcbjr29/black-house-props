@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Black House · bilhete BR365
 // @namespace    blackhouse
-// @version      1.0
+// @version      1.1
 // @description  Monta na BR365 o cupom das entradas do canal que ainda estão sem bilhete pronto. VOCÊ confere e clica em "Fazer Aposta"; depois o script pega o código de compartilhar e manda para o bot trocar o link do post.
 // @match        https://br365.io/*
 // @match        https://*.br365.io/*
@@ -117,8 +117,15 @@
   // ---------- montar o cupom ----------
   async function abreJogo(ev) {
     if (!new RegExp('event/' + ev + '\\b').test(location.hash)) location.hash = '#/sport/67/event/' + ev;
-    const aba = await espera(() => todos('button').find(b => txt(b) === 'Especiais de Jogadores'), 20000);
-    if (!aba) throw new Error('o jogo não abriu (evento ' + ev + '). Ele ainda está na casa?');
+    // a BR365 às vezes mostra "Não foi possível carregar agora · Tentar de novo": clica sozinho até 3 vezes
+    let tentativas = 0;
+    const aba = await espera(() => {
+      const ok = todos('button').find(b => txt(b) === 'Especiais de Jogadores'); if (ok) return ok;
+      const denovo = todos('button,a').find(b => /^tentar de novo$/i.test(txt(b)));
+      if (denovo && tentativas < 3 && Date.now() - (abreJogo.ultimo || 0) > 3000) { tentativas++; abreJogo.ultimo = Date.now(); diz(`A BR365 não carregou o jogo. Tentando de novo (${tentativas}/3)…`); denovo.click(); }
+      return null;
+    }, 30000);
+    if (!aba) throw new Error('o jogo não abriu (evento ' + ev + ')' + (tentativas ? `, mesmo tentando ${tentativas}x` : '') + '. Ele ainda está na casa?');
     clique(aba); await dorme(1200);
   }
   // A BR365 tem dois desenhos da página do jogo (o do site, com <section>/<h2>, e o do sportsbook embutido, com
